@@ -42,7 +42,7 @@ static int   s_logWrite = 0, s_logRead = 0;
 static Mutex s_logMutex;
 
 static void SrvLog(const std::string& text, bool isError = false) {
-    FILE* f = fopen("/switch/tomodachi-ugc/debug.log", "a");
+    FILE* f = fopen("/switch/TomoToolNX/debug.log", "a");
     if (f) { fprintf(f, "[HTTP %llu] %s%s\n", (unsigned long long)armGetSystemTick(), isError?"ERROR: ":"", text.c_str()); fclose(f); }
     mutexLock(&s_logMutex);
     s_logRing[s_logWrite % LOG_RING_SIZE] = {text, isError};
@@ -153,7 +153,7 @@ async function loadList(){
   entries.forEach(e=>{
     const div=document.createElement('div');
     div.className='entry'+(selected&&selected.stem===e.stem?' active':'');
-    div.innerHTML='<span class="entry-name">'+e.stem+'</span>'+(e.hasThumb?'<span class="tag">thumb</span>':'');
+    div.innerHTML='<span class="entry-name">'+e.stem+'</span>';
     div.onclick=()=>selectEntry(e);l.appendChild(div);
   });
   document.getElementById('hdr-count').textContent=entries.length+' textures';
@@ -171,7 +171,7 @@ async function selectEntry(e){
   const img=document.getElementById('preview-img');
   img.onload=()=>{
     img.style.display='block';
-    document.getElementById('info-bar').textContent=e.stem+'   '+img.naturalWidth+' x '+img.naturalHeight+(e.hasThumb?'   thumb':'')+(e.hasCanvas?'   canvas':'');
+    document.getElementById('info-bar').textContent=e.stem+'   '+img.naturalWidth+' x '+img.naturalHeight;
     setStatus('','info');
   };
   img.onerror=()=>{img.style.display='none';document.getElementById('placeholder').style.display='';document.getElementById('placeholder').textContent='decode failed';setStatus('decode error','err');};
@@ -181,8 +181,7 @@ function doExport(){if(!selected)return;const a=document.createElement('a');a.hr
 function doImport(){if(!selected)return;document.getElementById('file-input').click();}
 function fileChosen(){
   const fi=document.getElementById('file-input');if(!fi.files.length)return;pendingFile=fi.files[0];fi.value='';
-  if(selected.hasThumb)showDialog('regenerate thumbnail?','regenerate the thumbnail from the imported image?',true);
-  else uploadFile(false);
+  uploadFile();
 }
 function showDialog(title,msg,btns){
   document.getElementById('dlg-title').textContent=title;
@@ -200,12 +199,12 @@ function showSpinner(msg){
 }
 function modalClose(){document.getElementById('overlay').classList.remove('open');pendingFile=null;}
 function modalYes(){uploadFile(true);}
-async function uploadFile(regenThumb){
+async function uploadFile(){
   showSpinner('importing...');
-  const fd=new FormData();fd.append('file',pendingFile);fd.append('stem',selected.stem);fd.append('regenThumb',regenThumb?'1':'0');
+  const fd=new FormData();fd.append('file',pendingFile);fd.append('stem',selected.stem);
   const d=await(await fetch('/api/import',{method:'POST',body:fd})).json();
   modalClose();
-  if(d.ok){setStatus('imported'+(regenThumb?' + thumb':''),'ok');await loadList();const fresh=entries.find(e=>e.stem===selected.stem);if(fresh)selectEntry(fresh);}
+  if(d.ok){setStatus('imported','ok');await loadList();const fresh=entries.find(e=>e.stem===selected.stem);if(fresh)selectEntry(fresh);}
   else setStatus('failed: '+d.error,'err');
   pendingFile=null;
 }
@@ -260,7 +259,7 @@ static std::vector<FormField> ParseMultipart(const std::string& body,const std::
 }
 
 static std::vector<uint8_t> EncodePng(const RgbaImage& img){
-    std::string tmp="/switch/tomodachi-ugc/.tmp_preview.png";
+    std::string tmp="/switch/TomoToolNX/.tmp_preview.png";
     SDL_Surface* s=SDL_CreateRGBSurfaceFrom((void*)img.pixels.data(),img.width,img.height,32,img.width*4,0x000000FF,0x0000FF00,0x00FF0000,0xFF000000);
     if(!s)return{};IMG_SavePNG(s,tmp.c_str());SDL_FreeSurface(s);
     std::vector<uint8_t> out;FILE* f=fopen(tmp.c_str(),"rb");if(f){fseek(f,0,SEEK_END);size_t sz=(size_t)ftell(f);fseek(f,0,SEEK_SET);out.resize(sz);fread(out.data(),1,sz,f);fclose(f);remove(tmp.c_str());}
@@ -296,17 +295,16 @@ static void HandleExport(int fd,const std::string& query){
 // HandleImport: does NOT call IMG_Load. Queues job for main thread.
 static void HandleImport(int fd,const Request& req){
     auto fields=ParseMultipart(req.body,req.contentType);
-    std::string stem,regenThumbStr;std::vector<uint8_t> fileData;std::string fileExt=".png";
-    for(auto& f:fields){if(f.name=="stem")stem=f.data;else if(f.name=="regenThumb")regenThumbStr=f.data;else if(f.name=="file"){fileData.assign(f.data.begin(),f.data.end());if(!f.filename.empty()){size_t dot=f.filename.rfind('.');if(dot!=std::string::npos)fileExt=f.filename.substr(dot);}}}
+    std::string stem;std::vector<uint8_t> fileData;std::string fileExt=".png";
+    for(auto& f:fields){if(f.name=="stem")stem=f.data;else if(f.name=="file"){fileData.assign(f.data.begin(),f.data.end());if(!f.filename.empty()){size_t dot=f.filename.rfind('.');if(dot!=std::string::npos)fileExt=f.filename.substr(dot);}}}
     if(stem.empty()||fileData.empty()){SrvLog("Import: missing stem or file",true);Send500(fd,"Missing stem or file");return;}
-    bool regenThumb=(regenThumbStr=="1");
     SrvLog("Import: received '"+stem+"' ("+std::to_string(fileData.size())+" bytes, ext="+fileExt+")");
 
     auto entries=UgcScanner::Scan(s_ugcPath);const UgcTextureEntry* found=nullptr;for(auto& e:entries)if(e.stem==stem){found=&e;break;}
     if(!found){SrvLog("Import: entry not found: "+stem,true);Send500(fd,"Entry not found");return;}
 
-    MkdirP("/switch/tomodachi-ugc");
-    std::string tmpPath="/switch/tomodachi-ugc/.import_tmp"+fileExt;
+    MkdirP("/switch/TomoToolNX");
+    std::string tmpPath="/switch/TomoToolNX/.import_tmp"+fileExt;
     SrvLog("Import: writing temp file "+tmpPath);
     {FILE* f=fopen(tmpPath.c_str(),"wb");if(!f){SrvLog("Import: cannot write temp file",true);Send500(fd,"Cannot write temp file");return;}fwrite(fileData.data(),1,fileData.size(),f);fclose(f);}
     SrvLog("Import: temp file written OK ("+std::to_string(fileData.size())+" bytes)");
@@ -315,7 +313,7 @@ static void HandleImport(int fd,const Request& req){
 
     TextureProcessor::ImportOptions opts;
     opts.pngPath=tmpPath;opts.destStem=found->directory()+"/"+found->stem;
-    opts.writeCanvas=found->hasCanvas();opts.writeThumb=regenThumb;opts.noSrgb=false;opts.originalUgctexPath=found->ugctexPath;
+    opts.writeCanvas=found->hasCanvas();opts.writeThumb=found->hasThumb();opts.noSrgb=false;opts.originalUgctexPath=found->ugctexPath;
 
     SrvLog("Import: queuing PNG decode on main thread (IMG_Load not thread-safe)");
     {mutexLock(&s_importMutex);s_importJob={opts,tmpPath};s_importState=ImportState::Queued;s_importResult="";mutexUnlock(&s_importMutex);}
@@ -332,7 +330,7 @@ static void HandleImport(int fd,const Request& req){
     std::string err;{mutexLock(&s_importMutex);err=s_importResult;s_importState=ImportState::Idle;mutexUnlock(&s_importMutex);}
     if(!err.empty()){SrvLog("Import: FAILED - "+err,true);Send500(fd,err);return;}
 
-    SrvLog("Import: SUCCESS "+stem+(regenThumb?" (+thumb)":""));
+    SrvLog("Import: SUCCESS "+stem+(found->hasThumb()?" (+thumb)":""));
     mutexLock(&s_mutex);s_pendingCommit=true;mutexUnlock(&s_mutex);
     Send200(fd,"application/json","{\"ok\":true}");
 }
@@ -372,7 +370,7 @@ void Start(int port,const std::string& ugcPath){
     if(s_running)return;s_port=port;s_ugcPath=ugcPath;s_running=true;s_pendingCommit=false;
     mutexInit(&s_mutex);mutexInit(&s_logMutex);mutexInit(&s_importMutex);
     s_logWrite=0;s_logRead=0;s_importState=ImportState::Idle;
-    MkdirP("/switch/tomodachi-ugc");
+    MkdirP("/switch/TomoToolNX");
     threadCreate(&s_thread,ServerThreadFunc,nullptr,nullptr,128*1024,0x2C,-2);threadStart(&s_thread);
 }
 void Stop(){if(!s_running)return;s_running=false;threadWaitForExit(&s_thread);threadClose(&s_thread);}

@@ -44,7 +44,7 @@ Textures are zstd-compressed NX block-linear images:
 | `.canvas.zs` | RGBA8, 256x256 | 262144 B |
 
 Backups are written to `<ugc-folder>/Backup/<nnn>/` before each import.
-Exported PNGs and debug logs go to `/switch/tomodachi-ugc/` on the SD card.
+Exported PNGs and debug logs go to `/switch/TomoToolNX/` on the SD card.
 
 ## Project structure
 

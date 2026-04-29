@@ -28,7 +28,8 @@ std::vector<UgcTextureEntry> Scan(const std::string& folderPath) {
     if (!dir) return entries;
 
     const std::string ugctexSuffix = ".ugctex.zs";
-    const std::string thumbSuffix  = "_thumb_ugctex.zs";
+    const std::string thumbSuffix  = "_thumb_ugctex.zs"; // UgcX_Thumb_ugctex.zs
+    const std::string thumbSuffix2 = "_thumb.ugctex.zs"; // UgcX_Thumb.ugctex.zs
 
     std::map<std::string, std::string> byName;
     std::vector<std::string> mainFiles;
@@ -47,7 +48,7 @@ std::vector<UgcTextureEntry> Scan(const std::string& folderPath) {
         }
 
         byName[lower] = fullPath;
-        if (EndsWith(lower, ugctexSuffix) && !EndsWith(lower, thumbSuffix))
+        if (EndsWith(lower, ugctexSuffix) && !EndsWith(lower, thumbSuffix) && !EndsWith(lower, thumbSuffix2))
             mainFiles.push_back(fullPath);
     }
     closedir(dir);
@@ -64,10 +65,12 @@ std::vector<UgcTextureEntry> Scan(const std::string& folderPath) {
         e.stem       = stem;
         e.ugctexPath = mainPath;
 
-        std::string thumbName  = ToLower(stem + "_Thumb_ugctex.zs");
+        std::string thumbName1 = ToLower(stem + "_Thumb_ugctex.zs");  // _Thumb_ugctex.zs
+        std::string thumbName2 = ToLower(stem + "_Thumb.ugctex.zs");  // _Thumb.ugctex.zs
         std::string canvasName = ToLower(stem + ".canvas.zs");
 
-        if (byName.count(thumbName))  e.thumbPath  = byName[thumbName];
+        if      (byName.count(thumbName1)) e.thumbPath = byName[thumbName1];
+        else if (byName.count(thumbName2)) e.thumbPath = byName[thumbName2];
         if (byName.count(canvasName)) e.canvasPath = byName[canvasName];
 
         entries.push_back(std::move(e));
