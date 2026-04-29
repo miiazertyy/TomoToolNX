@@ -4,9 +4,8 @@ Nintendo Switch homebrew for editing Tomodachi Life UGC textures. Runs a local w
 
 Based on [LivinTheDreamToolkit](https://gamebanana.com/tools/22435) by the UGC editor contributors.
 
-<img width="1280" height="720" alt="image" src="https://github.com/user-attachments/assets/9ae12ecd-7a25-41ba-99ab-727221de6734" />
-<img width="903" height="972" alt="image" src="https://github.com/user-attachments/assets/8f26aafb-2687-4a04-9516-449f5a5d8cd0" />
-
+<img src="https://i.imgur.com/QQ9qFNz.png" width="640">
+<img src="https://i.imgur.com/u4KvIKd.png" width="640">
 
 ---
 
