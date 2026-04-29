@@ -1,0 +1,30 @@
+# Build output
+build/
+*.elf
+*.nro
+*.nacp
+*.nso
+*.map
+*.lst
+
+# devkitPro generated
+*.d
+*.o
+*.a
+
+# Runtime files written to SD card (not part of source)
+debug.log
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
