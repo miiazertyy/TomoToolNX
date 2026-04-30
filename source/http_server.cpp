@@ -108,15 +108,15 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .status{font-size:11px;padding:4px 10px;border-radius:2px;flex:1;min-width:0;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .status.ok{color:var(--ok)}.status.err{color:var(--err)}.status.info{color:var(--muted)}
 /* Mii panel */
-.mii-layout{display:flex;flex:1;min-height:0;overflow:hidden}
-.mii-list-col{width:320px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid var(--border)}
-.mii-detail{flex:1;display:flex;flex-direction:column;padding:20px;gap:16px;overflow-y:auto}
-.mii-detail h2{font-size:18px;font-weight:400;color:var(--accent);letter-spacing:.06em}
-.mii-detail p{font-size:12px;color:var(--muted);line-height:1.6}
-.mii-actions{display:flex;gap:8px;flex-wrap:wrap}
-.mii-import-area{border:1px dashed var(--border);border-radius:4px;padding:20px;text-align:center;font-size:12px;color:var(--muted);cursor:pointer;transition:border-color .15s}
+
+
+
+
+
+
+
 .mii-import-area:hover{border-color:var(--accent);color:var(--accent)}
-.mii-badge{font-size:10px;background:#2a1a00;color:#a07830;padding:1px 5px;border-radius:2px}
+
 /* Modal */
 .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;align-items:center;justify-content:center}
 .overlay.open{display:flex}
@@ -159,18 +159,15 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 
 <!-- Mii Panel -->
 <div class="panel" id="panel-mii">
-  <div class="mii-layout">
-    <div class="mii-list-col">
-      <div class="list-label">miis <span id="mii-count"></span></div>
-      <div class="list-wrap" id="mii-list"></div>
-      <div class="toolbar">
-        <button class="btn" onclick="loadMiis()">refresh</button>
-        <div class="status info" id="mii-status"></div>
-      </div>
-    </div>
-    <div class="mii-detail" id="mii-detail">
-      <p style="color:var(--muted);margin-top:40px;text-align:center">select a mii to see options</p>
-    </div>
+  <div class="list-wrap">
+    <div class="list-label">miis <span id="mii-count"></span></div>
+    <div id="mii-list"></div>
+  </div>
+  <div class="toolbar">
+    <button class="btn btn-primary" id="btn-mii-import" disabled onclick="doMiiImport(selectedMii&&selectedMii.slot)">import .ltd</button>
+    <button class="btn" id="btn-mii-export" disabled onclick="doMiiExport(selectedMii&&selectedMii.slot)">export .ltd</button>
+    <button class="btn" onclick="loadMiis()">refresh</button>
+    <div class="status info" id="mii-status"></div>
   </div>
 </div>
 
@@ -263,29 +260,13 @@ async function loadMiis(){
 function selectMii(m){
   selectedMii=m;
   document.querySelectorAll('#mii-list .entry').forEach((el,i)=>el.classList.toggle('active',miiEntries[i].slot===m.slot));
-  const det=document.getElementById('mii-detail');
-  det.innerHTML=`
-    <h2>${m.name}</h2>
-    <p>slot ${m.slot}${m.hasFacepaint?' &nbsp;·&nbsp; has facepaint':''}</p>
-    <div class="mii-actions">
-      <button class="btn btn-primary" onclick="doMiiExport(${m.slot})">export .ltd</button>
-      <button class="btn" onclick="doMiiImport(${m.slot})">import .ltd</button>
-    </div>
-    <div class="mii-import-area" onclick="doMiiImport(${m.slot})">
-      drop a .ltd file here or click to import
-    </div>
-  `;
-  // Wire up drag and drop on the import area
-  const area=det.querySelector('.mii-import-area');
-  area.addEventListener('dragover',e=>{e.preventDefault();area.style.borderColor='var(--accent)';});
-  area.addEventListener('dragleave',()=>{area.style.borderColor='';});
-  area.addEventListener('drop',e=>{
-    e.preventDefault();area.style.borderColor='';
-    const f=e.dataTransfer.files[0];
-    if(f&&f.name.endsWith('.ltd')){pendingMiiSlot=m.slot;uploadMiiFile(f);}
-  });
+  document.getElementById('btn-mii-import').disabled=false;
+  document.getElementById('btn-mii-export').disabled=false;
+  setMiiStatus(m.name+(m.hasFacepaint?' · facepaint':''),'info');
 }
 function doMiiExport(slot){
+  if(!slot&&selectedMii)slot=selectedMii.slot;
+  if(!slot)return;
   const a=document.createElement('a');
   a.href='/api/mii/export?slot='+slot;
   a.download='Mii_slot'+slot+'.ltd';
@@ -293,6 +274,8 @@ function doMiiExport(slot){
   setMiiStatus('exported slot '+slot,'ok');
 }
 function doMiiImport(slot){
+  if(!slot&&selectedMii)slot=selectedMii.slot;
+  if(!slot)return;
   pendingMiiSlot=slot;
   document.getElementById('mii-file-input').click();
 }
@@ -325,6 +308,9 @@ function modalClose(){document.getElementById('overlay').classList.remove('open'
 function modalYes(){}
 
 loadList();
+
+// ── QR Code ───────────────────────────────────────────────────────────────────
+
 </script>
 </body>
 </html>
@@ -393,7 +379,7 @@ static void HandlePreview(int fd,const std::string& query){
     SrvLog("WebUI: preview "+stem);
     auto entries=UgcScanner::Scan(s_ugcPath);const UgcTextureEntry* found=nullptr;for(auto& e:entries)if(e.stem==stem){found=&e;break;}
     if(!found){Send404(fd);return;}
-    RgbaImage img;std::string err=TextureProcessor::DecodeFile(found->ugctexPath,img,false);if(!err.empty()){Send500(fd,err);return;}
+    RgbaImage img;std::string err=TextureProcessor::DecodeFile(found->ugctexPath,img,true);if(!err.empty()){Send500(fd,err);return;}
     auto png=EncodePng(img);if(png.empty()){Send500(fd,"PNG encode failed");return;}
     Send200Bin(fd,"image/png",png);
 }
@@ -402,7 +388,7 @@ static void HandleExport(int fd,const std::string& query){
     SrvLog("WebUI: export "+stem);
     auto entries=UgcScanner::Scan(s_ugcPath);const UgcTextureEntry* found=nullptr;for(auto& e:entries)if(e.stem==stem){found=&e;break;}
     if(!found){Send404(fd);return;}
-    RgbaImage img;std::string err=TextureProcessor::DecodeFile(found->ugctexPath,img,false);if(!err.empty()){Send500(fd,err);return;}
+    RgbaImage img;std::string err=TextureProcessor::DecodeFile(found->ugctexPath,img,true);if(!err.empty()){Send500(fd,err);return;}
     auto png=EncodePng(img);if(png.empty()){Send500(fd,"PNG encode failed");return;}
     Send200Bin(fd,"image/png",png,"attachment; filename=\""+stem+".png\"");
 }

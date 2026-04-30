@@ -1,6 +1,6 @@
 # TomoToolNX
 
-Nintendo Switch homebrew for editing Tomodachi Life UGC textures and sharing Miis. Choose between a web UI (browser on PC/phone) or direct on-console editing with a controller.
+A Nintendo Switch homebrew tool for editing Tomodachi Life UGC textures and Miis directly from the console — no PC required. Built because no proper native solution existed for importing custom textures and sharing Miis without manual steps on a computer. Both WebUI and On-Switch modes are supported.
 
 Based on [LivinTheDreamToolkit](https://gamebanana.com/tools/22435) by the UGC editor contributors.
 Mii sharing based on [ShareMii](https://github.com/Star-F0rce/ShareMii) by Star-F0rce.
@@ -15,7 +15,7 @@ Mii sharing based on [ShareMii](https://github.com/Star-F0rce/ShareMii) by Star-
 devkitPro with `devkitA64`, libnx, and the following portlibs:
 
 ```
-dkp-pacman -S switch-sdl2 switch-sdl2_image switch-sdl2_ttf switch-freetype switch-harfbuzz switch-zstd
+dkp-pacman -S switch-sdl2 switch-sdl2_image switch-sdl2_ttf switch-freetype switch-harfbuzz switch-zstd switch-curl switch-mbedtls
 ```
 
 ## Build
@@ -96,3 +96,27 @@ Textures are zstd-compressed NX block-linear images:
 | `.canvas.zs` | RGBA8, 256x256 | 262144 B |
 
 Mii data is stored in `.ltd` files (v3 format, compatible with ShareMii).
+
+---
+
+## Project structure
+
+```
+TomoToolNX/
+├── Makefile
+├── include/
+│   ├── http_server.h
+│   ├── texture_processor.h
+│   ├── ugc_scanner.h
+│   ├── backup.h
+│   ├── mii_manager.h
+│   └── save_mount.h
+└── source/
+    ├── main.cpp
+    ├── http_server.cpp
+    ├── texture_processor.cpp
+    ├── ugc_scanner.cpp
+    ├── backup.cpp
+    ├── mii_manager.cpp
+    └── save_mount.cpp
+```

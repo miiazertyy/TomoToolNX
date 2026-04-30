@@ -13,6 +13,8 @@
 #include "ugc_scanner.h"
 #include "backup.h"
 #include "mii_manager.h"
+#include "qrcode.hpp"
+#include "updater.h"
 
 #include <string>
 #include <vector>
@@ -134,9 +136,9 @@ static int DrawTextBox(const std::string& text, int cx, int y, SDL_Color textCol
 
 // ─── Screens ──────────────────────────────────────────────────────────────────
 
-enum class Screen { UserPick, BackupPrompt, BackingUp, ModePick, Mounting, WebUI, OnSwitch, Error };
+enum class Screen { UpdatePrompt, UpdateCheck, UpdateAvailable, Downloading, UserPick, BackupPrompt, BackingUp, ModePick, Mounting, WebUI, OnSwitch, Error };
 
-static Screen      gScreen  = Screen::UserPick;
+static Screen      gScreen  = Screen::UpdatePrompt;
 static std::string gError;
 static std::string gIP;
 static std::vector<SaveMount::UserInfo> gUsers;
@@ -191,7 +193,7 @@ static void FreePreview() {
 static void LoadPreview(const UgcTextureEntry& e) {
     FreePreview();
     RgbaImage img;
-    std::string err = TextureProcessor::DecodeFile(e.ugctexPath, img, false);
+    std::string err = TextureProcessor::DecodeFile(e.ugctexPath, img, true);
     if (!err.empty()) { gOnSwitchMsg=err; gOnSwitchMsgCol=COL_RED; return; }
     SDL_Surface* surf = SDL_CreateRGBSurfaceFrom(
         img.pixels.data(), img.width, img.height, 32, img.width*4,
@@ -309,6 +311,61 @@ static void DrawFooter(const std::string& hints) {
 }
 
 // ─── Screen draws ─────────────────────────────────────────────────────────────
+
+static void DrawUpdatePrompt() {
+    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
+    SDL_RenderClear(gRen);
+    DrawHeader("");
+    DrawTextC("check for updates?", SCREEN_W/2, SCREEN_H/2-30, COL_TEXT, Font::Md);
+    DrawTextC("current version: v" APP_VERSION, SCREEN_W/2, SCREEN_H/2+4, COL_DIM);
+    DrawFooter("A  yes    B  skip    +  quit");
+    SDL_RenderPresent(gRen);
+}
+
+static void DrawUpdateCheck() {
+    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
+    SDL_RenderClear(gRen);
+    DrawHeader("");
+    DrawTextC("checking for updates...", SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
+    SDL_RenderPresent(gRen);
+}
+
+static void DrawUpdateAvailable() {
+    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
+    SDL_RenderClear(gRen);
+    DrawHeader("");
+    DrawTextC("update available!", SCREEN_W/2, SCREEN_H/2-40, COL_GREEN, Font::Lg);
+    DrawTextC("v" APP_VERSION + std::string("  →  v") + Updater::GetLatestVersion(),
+              SCREEN_W/2, SCREEN_H/2+2, COL_TEXT, Font::Md);
+    DrawFooter("A  download and install    B  skip    +  quit");
+    SDL_RenderPresent(gRen);
+}
+
+static void DrawDownloading() {
+    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
+    SDL_RenderClear(gRen);
+    DrawHeader("");
+    auto state = Updater::GetState();
+    if (state == Updater::State::Done) {
+        DrawTextC("update installed!", SCREEN_W/2, SCREEN_H/2-20, COL_GREEN, Font::Md);
+        DrawTextC("restart the app to apply", SCREEN_W/2, SCREEN_H/2+14, COL_DIM);
+        DrawFooter("B  continue without restarting    +  quit");
+    } else if (state == Updater::State::Error) {
+        DrawTextC("download failed", SCREEN_W/2, SCREEN_H/2-20, COL_RED, Font::Md);
+        DrawTextC(Updater::GetError(), SCREEN_W/2, SCREEN_H/2+14, COL_DIM);
+        DrawFooter("B  continue    +  quit");
+    } else {
+        DrawTextC("downloading update...", SCREEN_W/2, SCREEN_H/2-30, COL_DIM, Font::Md);
+        float prog = Updater::GetProgress();
+        int bw=700, bh=10, bx=SCREEN_W/2-bw/2, by=SCREEN_H/2;
+        FillRect(bx,by,bw,bh,COL_PANEL); DrawRect(bx,by,bw,bh,COL_BORDER);
+        FillRect(bx,by,(int)(bw*prog),bh,COL_ACCENT);
+        char pct[16]; snprintf(pct,sizeof(pct),"%d%%",(int)(prog*100));
+        DrawTextC(pct, SCREEN_W/2, by+bh+18, COL_DIM);
+        DrawTextC("do not turn off the console", SCREEN_W/2, by+bh+42, COL_DIM);
+    }
+    SDL_RenderPresent(gRen);
+}
 
 static void DrawUserPick() {
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
@@ -445,19 +502,46 @@ static void DrawWebUI() {
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
     SDL_RenderClear(gRen);
     DrawHeader("webui");
-    {
-    std::string url="http://"+gIP+":"+std::to_string(HTTP_PORT);
-    TTF_Font* fMd4=GetFont(Font::Md),*fSm4=GetFont(Font::Sm);
-    int uw=0,uh=0,sh=0,tmp3=0;
-    if(fMd4) TTF_SizeUTF8(fMd4,url.c_str(),&uw,&uh);
-    if(fSm4) TTF_SizeUTF8(fSm4,"open in browser",&tmp3,&sh);
-    int bw=uw+40, bh=sh+8+uh+16, bx=SCREEN_W/2-bw/2;
-    FillRect(bx,40,bw,bh,COL_PANEL); DrawRect(bx,40,bw,bh,COL_BORDER);
-    DrawTextC("open in browser", SCREEN_W/2, 40+8+sh/2, COL_DIM);
-    DrawTextC(url, SCREEN_W/2, 40+8+sh+8+uh/2, COL_GOLD, Font::Md);
-    int logY2=40+bh+10;
-    for (auto& line : gLog) { DrawText(line.text, 16, logY2, line.col); logY2+=20; }
+
+    bool wifiActive = !gIP.empty() && gIP != "?.?.?.?";
+    std::string url = "http://"+gIP+":"+std::to_string(HTTP_PORT);
+
+    // WiFi status
+    int sy=36;
+    DrawText("WiFi : ", 16, sy, COL_DIM);
+    TTF_Font* fsm=GetFont(Font::Sm); int lw=0,lh=0;
+    if(fsm) TTF_SizeUTF8(fsm,"WiFi : ",&lw,&lh);
+    DrawText(wifiActive?"Active":"Inactive", 16+lw, sy,
+             wifiActive?COL_GREEN:COL_RED);
+
+    // URL
+    DrawTextC(url, SCREEN_W/2, sy+lh+12, COL_GOLD, Font::Md);
+
+    // QR code rendered with SDL (so user can scan with phone)
+    if (wifiActive) {
+        QR::Mat mat;
+        if (QR::build(url, mat)) {
+            int ms=5, border=2;
+            int qrSize=mat.N*ms+border*2*ms;
+            int qx=SCREEN_W-qrSize-20, qy=30;
+            // White background
+            FillRect(qx,qy,qrSize,qrSize,{255,255,255,255});
+            // Dark modules
+            SDL_SetRenderDrawColor(gRen,0,0,0,255);
+            for (int y=0;y<mat.N;y++) for (int x=0;x<mat.N;x++) {
+                if (mat.get(x,y)) {
+                    SDL_Rect r{qx+(x+border)*ms, qy+(y+border)*ms, ms, ms};
+                    SDL_RenderFillRect(gRen,&r);
+                }
+            }
+            DrawTextC("scan to open", qx+qrSize/2, qy+qrSize+12, COL_DIM);
+        }
     }
+
+    // Log
+    int logY=36+lh+lh+28;
+    for (auto& line : gLog) { DrawText(line.text, 16, logY, line.col); logY+=20; }
+
     DrawFooter("B  back    +  quit");
     SDL_RenderPresent(gRen);
 }
@@ -642,6 +726,45 @@ int main(int,char**) {
         if (kDown&HidNpadButton_Plus) break;
 
         switch (gScreen) {
+
+        case Screen::UpdatePrompt:
+            if (kDown&HidNpadButton_A) {
+                Updater::StartCheck();
+                gScreen=Screen::UpdateCheck;
+            }
+            if (kDown&HidNpadButton_B) { gScreen=Screen::UserPick; }
+            DrawUpdatePrompt();
+            break;
+
+        case Screen::UpdateCheck:
+            {
+                auto state = Updater::GetState();
+                if (state==Updater::State::UpdateAvailable) gScreen=Screen::UpdateAvailable;
+                else if (state==Updater::State::NoUpdate||state==Updater::State::Error)
+                    gScreen=Screen::UserPick;
+            }
+            DrawUpdateCheck();
+            break;
+
+        case Screen::UpdateAvailable:
+            if (kDown&HidNpadButton_A) {
+                Updater::StartDownload();
+                gScreen=Screen::Downloading;
+            }
+            if (kDown&HidNpadButton_B) { gScreen=Screen::UserPick; }
+            DrawUpdateAvailable();
+            break;
+
+        case Screen::Downloading:
+            {
+                auto state = Updater::GetState();
+                if ((state==Updater::State::Done||state==Updater::State::Error)
+                    && (kDown&HidNpadButton_B)) {
+                    gScreen=Screen::UserPick;
+                }
+            }
+            DrawDownloading();
+            break;
 
         case Screen::UserPick:
             if (kDown&HidNpadButton_Up)   { if(gUserSel>0) gUserSel--; }
@@ -881,6 +1004,7 @@ int main(int,char**) {
     FreePreview();
     HttpServer::Stop();
     SaveMount::Unmount();
+    Updater::Cleanup();
     FontQuit();
     nifmExit();
     socketExit();
