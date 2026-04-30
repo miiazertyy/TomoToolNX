@@ -1,8 +1,9 @@
 # TomoToolNX
 
-Nintendo Switch homebrew for editing Tomodachi Life UGC textures. Runs a local web server on the console — open the browser on any device on the same network to import and export textures.
+Nintendo Switch homebrew for editing Tomodachi Life UGC textures and sharing Miis. Choose between a web UI (browser on PC/phone) or direct on-console editing with a controller.
 
 Based on [LivinTheDreamToolkit](https://gamebanana.com/tools/22435) by the UGC editor contributors.
+Mii sharing based on [ShareMii](https://github.com/Star-F0rce/ShareMii) by Star-F0rce.
 
 <img src="https://i.imgur.com/QQ9qFNz.png" width="640">
 <img src="https://i.imgur.com/u4KvIKd.png" width="640">
@@ -29,11 +30,59 @@ Output: `TomoToolNX.nro`
 
 Copy `TomoToolNX.nro` to `/switch/TomoToolNX/` on your SD card and launch from the homebrew menu.
 
+---
+
 ## Usage
 
-Launch the app. It will display the Switch's IP address on screen. Open `http://<ip>:8080` in a browser on any device connected to the same network.
+Launch the app and select your user account. You will be asked what to do with any existing save backup before continuing. Then choose a mode.
 
-From the web UI you can browse textures, preview them, export as PNG, and import a replacement PNG. Originals are backed up automatically before any import.
+### WebUI mode
+
+Starts a local HTTP server on the console. Open `http://<ip>:8080` in a browser on any device on the same network.
+
+The web UI has two tabs:
+
+**Textures** — browse all UGC textures, preview them, export as PNG, and import a replacement PNG. Images are automatically padded to square and semi-transparent edge pixels are snapped to fully opaque before encoding to avoid artifacts.
+
+**Miis** — list all Miis in the save, export any Mii as a `.ltd` file, and import a `.ltd` file into any slot. Drag and drop `.ltd` files onto the import area or use the file picker.
+
+Press **B** on the console to stop the server and return to the mode picker.
+
+### On-Switch mode
+
+Browse and edit directly on the console using the controller. No network required.
+
+Two tabs switchable with **L / R**:
+
+**Textures tab**
+- Up/Down — navigate the texture list
+- A — import a PNG from `/switch/TomoToolNX/` on the SD card
+- Y — export the selected texture as PNG to `/switch/TomoToolNX/`
+- B — back to mode picker
+
+**Miis tab**
+- Up/Down — navigate the Mii list
+- A — import a `.ltd` file from `/switch/TomoToolNX/`
+- Y — export the selected Mii as a `.ltd` file to `/switch/TomoToolNX/`
+- B — back to mode picker
+
+---
+
+## Backups
+
+On first launch (or when choosing to make a new one), the entire save is copied to `/switch/TomoToolNX/Backup/save/` in the background while the app remains usable.
+
+Before every texture import, the original files are backed up to `/switch/TomoToolNX/Backup/imports/<nnn>/`.
+
+---
+
+## Image tips
+
+- Use PNG with a transparent background. Semi-transparent edge pixels (from background removal tools) will be automatically thresholded to fully transparent or fully opaque.
+- The image does not need to be square — it will be stretched to fit the target texture size.
+- For best results, remove the background cleanly with no soft edges.
+
+---
 
 ## File formats
 
@@ -46,8 +95,9 @@ Textures are zstd-compressed NX block-linear images:
 | `_Thumb_ugctex.zs` | BC3, 256x256 | 65536 B |
 | `.canvas.zs` | RGBA8, 256x256 | 262144 B |
 
-Backups are written to `<ugc-folder>/Backup/<nnn>/` before each import.
-Exported PNGs and debug logs go to `/switch/TomoToolNX/` on the SD card.
+Mii data is stored in `.ltd` files (v3 format, compatible with ShareMii).
+
+---
 
 ## Project structure
 
@@ -59,6 +109,7 @@ TomoToolNX/
 │   ├── texture_processor.h
 │   ├── ugc_scanner.h
 │   ├── backup.h
+│   ├── mii_manager.h
 │   └── save_mount.h
 └── source/
     ├── main.cpp
@@ -66,5 +117,6 @@ TomoToolNX/
     ├── texture_processor.cpp
     ├── ugc_scanner.cpp
     ├── backup.cpp
+    ├── mii_manager.cpp
     └── save_mount.cpp
 ```

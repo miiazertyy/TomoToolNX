@@ -6,6 +6,7 @@
 #include "ugc_scanner.h"
 #include "texture_processor.h"
 #include "backup.h"
+#include "mii_manager.h"
 
 #include <switch.h>
 #include <sys/socket.h>
@@ -28,6 +29,7 @@
 #include <SDL2/SDL_image.h>
 
 static void MkdirP(const char* path) { mkdir(path, 0777); }
+static bool FileExists(const std::string& p){struct stat st;return stat(p.c_str(),&st)==0;}
 
 static Thread      s_thread;
 static bool        s_running       = false;
@@ -75,22 +77,28 @@ static const char* HTML_UI = R"HTML(<!DOCTYPE html>
 body{font-family:'Mikhak Regular',system-ui,sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;font-size:14px}
 header{background:var(--surface);padding:10px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);flex-shrink:0}
 header h1{font-size:15px;font-weight:400;letter-spacing:.08em;color:var(--accent)}
-header h1 span{color:var(--muted);font-size:11px;margin-left:6px;letter-spacing:0}
+header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 #hdr-count{font-size:11px;color:var(--muted);margin-left:auto}
-.preview-area{flex-shrink:0;height:44vh;display:flex;align-items:center;justify-content:center;background:#080808;position:relative;overflow:hidden}
+.tabs{display:flex;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
+.tab{padding:9px 22px;font-size:12px;letter-spacing:.08em;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;font-family:inherit;background:none;border-top:none;border-left:none;border-right:none;transition:color .15s}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab:hover:not(.active){color:var(--text)}
+.panel{flex:1;display:none;flex-direction:column;overflow:hidden;min-height:0}
+.panel.active{display:flex}
+/* UGC panel */
+.preview-area{flex-shrink:0;height:38vh;display:flex;align-items:center;justify-content:center;background:#080808;overflow:hidden}
 .preview-area img{max-width:100%;max-height:100%;object-fit:contain;display:block;image-rendering:pixelated}
 .preview-placeholder{color:#333;font-size:12px;letter-spacing:.1em;text-transform:uppercase}
 .checker{background-image:repeating-conic-gradient(#111 0% 25%,#0d0d0d 0% 50%);background-size:16px 16px}
-.info-bar{background:var(--surface);padding:5px 16px;font-size:11px;color:var(--muted);border-top:1px solid var(--border);border-bottom:1px solid var(--border);min-height:26px;letter-spacing:.04em;flex-shrink:0}
-.list-wrap{flex:1;overflow-y:auto;background:var(--bg)}
+.info-bar{background:var(--surface);padding:5px 16px;font-size:11px;color:var(--muted);border-top:1px solid var(--border);border-bottom:1px solid var(--border);min-height:26px;flex-shrink:0}
+.list-wrap{flex:1;overflow-y:auto;background:var(--bg);min-height:0}
 .list-wrap::-webkit-scrollbar{width:4px}
 .list-wrap::-webkit-scrollbar-thumb{background:var(--border)}
 .list-label{padding:7px 16px;font-size:10px;color:var(--muted);letter-spacing:.12em;text-transform:uppercase;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:1}
 .entry{padding:9px 16px;cursor:pointer;border-bottom:1px solid #181818;display:flex;align-items:center;gap:8px;transition:background .1s}
 .entry:hover{background:var(--surface)}
 .entry.active{background:var(--surface2);border-left:2px solid var(--accent)}
-.entry-name{font-size:13px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.02em}
-.tag{font-size:10px;background:#2a2000;color:#a07830;padding:1px 5px;border-radius:2px;letter-spacing:.04em}
+.entry-name{font-size:13px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .toolbar{background:var(--surface);padding:9px 16px;display:flex;gap:8px;border-top:1px solid var(--border);align-items:center;flex-shrink:0}
 .btn{padding:6px 14px;border:1px solid var(--border);border-radius:3px;font-size:12px;font-family:inherit;letter-spacing:.06em;cursor:pointer;background:var(--surface2);color:var(--text);transition:border-color .15s,color .15s}
 .btn:disabled{opacity:.35;cursor:not-allowed}
@@ -98,9 +106,18 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px;letter-spacing:
 .btn-primary{border-color:#3a5a3a;color:var(--ok)}
 .btn-primary:hover:not(:disabled){border-color:var(--ok);color:var(--ok)}
 .status{font-size:11px;padding:4px 10px;border-radius:2px;flex:1;min-width:0;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.status.ok{color:var(--ok)}
-.status.err{color:var(--err)}
-.status.info{color:var(--muted)}
+.status.ok{color:var(--ok)}.status.err{color:var(--err)}.status.info{color:var(--muted)}
+/* Mii panel */
+.mii-layout{display:flex;flex:1;min-height:0;overflow:hidden}
+.mii-list-col{width:320px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid var(--border)}
+.mii-detail{flex:1;display:flex;flex-direction:column;padding:20px;gap:16px;overflow-y:auto}
+.mii-detail h2{font-size:18px;font-weight:400;color:var(--accent);letter-spacing:.06em}
+.mii-detail p{font-size:12px;color:var(--muted);line-height:1.6}
+.mii-actions{display:flex;gap:8px;flex-wrap:wrap}
+.mii-import-area{border:1px dashed var(--border);border-radius:4px;padding:20px;text-align:center;font-size:12px;color:var(--muted);cursor:pointer;transition:border-color .15s}
+.mii-import-area:hover{border-color:var(--accent);color:var(--accent)}
+.mii-badge{font-size:10px;background:#2a1a00;color:#a07830;padding:1px 5px;border-radius:2px}
+/* Modal */
 .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;align-items:center;justify-content:center}
 .overlay.open{display:flex}
 .dialog{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:24px;max-width:400px;width:90%;text-align:center}
@@ -113,24 +130,51 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px;letter-spacing:
 </head>
 <body>
 <header>
-  <h1>TomoToolNX <span>tomodachi life ugc editor</span></h1>
+  <h1>TomoToolNX <span>tomodachi life editor</span></h1>
   <span id="hdr-count"></span>
 </header>
-<div class="preview-area checker">
-  <div class="preview-placeholder" id="placeholder">no selection</div>
-  <img id="preview-img" style="display:none" alt="">
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('ugc',this)">textures</button>
+  <button class="tab" onclick="switchTab('mii',this)">miis</button>
 </div>
-<div class="info-bar" id="info-bar"></div>
-<div class="list-wrap">
-  <div class="list-label">textures</div>
-  <div id="list"></div>
+
+<!-- UGC Panel -->
+<div class="panel active" id="panel-ugc">
+  <div class="preview-area checker">
+    <div class="preview-placeholder" id="placeholder">no selection</div>
+    <img id="preview-img" style="display:none" alt="">
+  </div>
+  <div class="info-bar" id="info-bar"></div>
+  <div class="list-wrap">
+    <div class="list-label">textures</div>
+    <div id="list"></div>
+  </div>
+  <div class="toolbar">
+    <button class="btn btn-primary" id="btn-import" disabled onclick="doImport()">import</button>
+    <button class="btn" id="btn-export" disabled onclick="doExport()">export</button>
+    <button class="btn" onclick="loadList()">refresh</button>
+    <div class="status info" id="status"></div>
+  </div>
 </div>
-<div class="toolbar">
-  <button class="btn btn-primary" id="btn-import" disabled onclick="doImport()">import</button>
-  <button class="btn" id="btn-export" disabled onclick="doExport()">export</button>
-  <button class="btn" onclick="loadList()">refresh</button>
-  <div class="status info" id="status"></div>
+
+<!-- Mii Panel -->
+<div class="panel" id="panel-mii">
+  <div class="mii-layout">
+    <div class="mii-list-col">
+      <div class="list-label">miis <span id="mii-count"></span></div>
+      <div class="list-wrap" id="mii-list"></div>
+      <div class="toolbar">
+        <button class="btn" onclick="loadMiis()">refresh</button>
+        <div class="status info" id="mii-status"></div>
+      </div>
+    </div>
+    <div class="mii-detail" id="mii-detail">
+      <p style="color:var(--muted);margin-top:40px;text-align:center">select a mii to see options</p>
+    </div>
+  </div>
 </div>
+
+<!-- Shared modal -->
 <div class="overlay" id="overlay">
   <div class="dialog">
     <div class="spinner" id="spinner"></div>
@@ -143,7 +187,19 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px;letter-spacing:
   </div>
 </div>
 <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="fileChosen()">
+<input type="file" id="mii-file-input" accept=".ltd" style="display:none" onchange="miiFileChosen()">
+
 <script>
+// ── Tab switching ──────────────────────────────────────────────────────────────
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('panel-'+name).classList.add('active');
+  if(name==='mii' && miiEntries.length===0) loadMiis();
+}
+
+// ── UGC ────────────────────────────────────────────────────────────────────────
 let entries=[],selected=null,pendingFile=null;
 async function loadList(){
   setStatus('loading...','info');
@@ -161,7 +217,7 @@ async function loadList(){
 }
 async function selectEntry(e){
   selected=e;
-  document.querySelectorAll('.entry').forEach((el,i)=>el.classList.toggle('active',entries[i].stem===e.stem));
+  document.querySelectorAll('#list .entry').forEach((el,i)=>el.classList.toggle('active',entries[i].stem===e.stem));
   document.getElementById('btn-import').disabled=false;
   document.getElementById('btn-export').disabled=false;
   document.getElementById('placeholder').style.display='none';
@@ -169,36 +225,13 @@ async function selectEntry(e){
   document.getElementById('info-bar').textContent='';
   setStatus('loading '+e.stem+'...','info');
   const img=document.getElementById('preview-img');
-  img.onload=()=>{
-    img.style.display='block';
-    document.getElementById('info-bar').textContent=e.stem+'   '+img.naturalWidth+' x '+img.naturalHeight;
-    setStatus('','info');
-  };
+  img.onload=()=>{img.style.display='block';document.getElementById('info-bar').textContent=e.stem+'   '+img.naturalWidth+' x '+img.naturalHeight+(e.hasCanvas?'   canvas':'');setStatus('','info');};
   img.onerror=()=>{img.style.display='none';document.getElementById('placeholder').style.display='';document.getElementById('placeholder').textContent='decode failed';setStatus('decode error','err');};
   img.src='/api/preview?stem='+encodeURIComponent(e.stem)+'&t='+Date.now();
 }
-function doExport(){if(!selected)return;const a=document.createElement('a');a.href='/api/export?stem='+encodeURIComponent(selected.stem);a.download=selected.stem+'.png';a.click();setStatus('exported '+selected.stem+'.png','ok');}
+function doExport(){if(!selected)return;const a=document.createElement('a');a.href='/api/export?stem='+encodeURIComponent(selected.stem);a.download=selected.stem+'.png';a.click();setStatus('exported','ok');}
 function doImport(){if(!selected)return;document.getElementById('file-input').click();}
-function fileChosen(){
-  const fi=document.getElementById('file-input');if(!fi.files.length)return;pendingFile=fi.files[0];fi.value='';
-  uploadFile();
-}
-function showDialog(title,msg,btns){
-  document.getElementById('dlg-title').textContent=title;
-  document.getElementById('dlg-msg').textContent=msg;
-  document.getElementById('dlg-btns').style.display=btns?'flex':'none';
-  document.getElementById('spinner').style.display='none';
-  document.getElementById('overlay').classList.add('open');
-}
-function showSpinner(msg){
-  document.getElementById('dlg-title').textContent=msg;
-  document.getElementById('dlg-msg').textContent='';
-  document.getElementById('dlg-btns').style.display='none';
-  document.getElementById('spinner').style.display='block';
-  document.getElementById('overlay').classList.add('open');
-}
-function modalClose(){document.getElementById('overlay').classList.remove('open');pendingFile=null;}
-function modalYes(){uploadFile(true);}
+function fileChosen(){const fi=document.getElementById('file-input');if(!fi.files.length)return;pendingFile=fi.files[0];fi.value='';uploadFile();}
 async function uploadFile(){
   showSpinner('importing...');
   const fd=new FormData();fd.append('file',pendingFile);fd.append('stem',selected.stem);
@@ -209,6 +242,88 @@ async function uploadFile(){
   pendingFile=null;
 }
 function setStatus(msg,cls){const el=document.getElementById('status');el.textContent=msg;el.className='status '+cls;}
+
+// ── Miis ───────────────────────────────────────────────────────────────────────
+let miiEntries=[], selectedMii=null, pendingMiiSlot=null;
+async function loadMiis(){
+  setMiiStatus('loading...','info');
+  const d=await(await fetch('/api/mii/list')).json();
+  miiEntries=d.miis||[];
+  const l=document.getElementById('mii-list');l.innerHTML='';
+  miiEntries.forEach(m=>{
+    const div=document.createElement('div');
+    div.className='entry'+(selectedMii&&selectedMii.slot===m.slot?' active':'');
+    div.innerHTML='<span class="entry-name">'+m.name+'</span>'+(m.hasFacepaint?'<span class="mii-badge">paint</span>':'');
+    div.onclick=()=>selectMii(m);
+    l.appendChild(div);
+  });
+  document.getElementById('mii-count').textContent='('+miiEntries.length+')';
+  setMiiStatus('','info');
+}
+function selectMii(m){
+  selectedMii=m;
+  document.querySelectorAll('#mii-list .entry').forEach((el,i)=>el.classList.toggle('active',miiEntries[i].slot===m.slot));
+  const det=document.getElementById('mii-detail');
+  det.innerHTML=`
+    <h2>${m.name}</h2>
+    <p>slot ${m.slot}${m.hasFacepaint?' &nbsp;·&nbsp; has facepaint':''}</p>
+    <div class="mii-actions">
+      <button class="btn btn-primary" onclick="doMiiExport(${m.slot})">export .ltd</button>
+      <button class="btn" onclick="doMiiImport(${m.slot})">import .ltd</button>
+    </div>
+    <div class="mii-import-area" onclick="doMiiImport(${m.slot})">
+      drop a .ltd file here or click to import
+    </div>
+  `;
+  // Wire up drag and drop on the import area
+  const area=det.querySelector('.mii-import-area');
+  area.addEventListener('dragover',e=>{e.preventDefault();area.style.borderColor='var(--accent)';});
+  area.addEventListener('dragleave',()=>{area.style.borderColor='';});
+  area.addEventListener('drop',e=>{
+    e.preventDefault();area.style.borderColor='';
+    const f=e.dataTransfer.files[0];
+    if(f&&f.name.endsWith('.ltd')){pendingMiiSlot=m.slot;uploadMiiFile(f);}
+  });
+}
+function doMiiExport(slot){
+  const a=document.createElement('a');
+  a.href='/api/mii/export?slot='+slot;
+  a.download='Mii_slot'+slot+'.ltd';
+  a.click();
+  setMiiStatus('exported slot '+slot,'ok');
+}
+function doMiiImport(slot){
+  pendingMiiSlot=slot;
+  document.getElementById('mii-file-input').click();
+}
+function miiFileChosen(){
+  const fi=document.getElementById('mii-file-input');
+  if(!fi.files.length)return;
+  const f=fi.files[0];fi.value='';
+  uploadMiiFile(f);
+}
+async function uploadMiiFile(file){
+  showSpinner('importing mii...');
+  const fd=new FormData();fd.append('file',file);fd.append('slot',String(pendingMiiSlot));
+  const d=await(await fetch('/api/mii/import',{method:'POST',body:fd})).json();
+  modalClose();
+  if(d.ok){setMiiStatus('imported into slot '+pendingMiiSlot,'ok');await loadMiis();const fresh=miiEntries.find(m=>m.slot===pendingMiiSlot);if(fresh)selectMii(fresh);}
+  else setMiiStatus('failed: '+d.error,'err');
+  pendingMiiSlot=null;
+}
+function setMiiStatus(msg,cls){const el=document.getElementById('mii-status');el.textContent=msg;el.className='status '+cls;}
+
+// ── Modal ──────────────────────────────────────────────────────────────────────
+function showSpinner(msg){
+  document.getElementById('dlg-title').textContent=msg;
+  document.getElementById('dlg-msg').textContent='';
+  document.getElementById('dlg-btns').style.display='none';
+  document.getElementById('spinner').style.display='block';
+  document.getElementById('overlay').classList.add('open');
+}
+function modalClose(){document.getElementById('overlay').classList.remove('open');}
+function modalYes(){}
+
 loadList();
 </script>
 </body>
@@ -313,7 +428,7 @@ static void HandleImport(int fd,const Request& req){
 
     TextureProcessor::ImportOptions opts;
     opts.pngPath=tmpPath;opts.destStem=found->directory()+"/"+found->stem;
-    opts.writeCanvas=found->hasCanvas();opts.writeThumb=found->hasThumb();opts.noSrgb=false;opts.originalUgctexPath=found->ugctexPath;
+    opts.writeCanvas=found->hasCanvas();opts.writeThumb=false;opts.noSrgb=false;opts.originalUgctexPath=found->ugctexPath;
 
     SrvLog("Import: queuing PNG decode on main thread (IMG_Load not thread-safe)");
     {mutexLock(&s_importMutex);s_importJob={opts,tmpPath};s_importState=ImportState::Queued;s_importResult="";mutexUnlock(&s_importMutex);}
@@ -335,6 +450,90 @@ static void HandleImport(int fd,const Request& req){
     Send200(fd,"application/json","{\"ok\":true}");
 }
 
+// GET /api/mii/list
+static void HandleMiiList(int fd){
+    auto miis = MiiManager::ListMiis();
+    SrvLog("WebUI: mii list ("+std::to_string(miis.size())+" miis)");
+    std::string json="{\"miis\":[";
+    for(size_t i=0;i<miis.size();i++){
+        if(i)json+=",";
+        // Escape name for JSON
+        std::string name;
+        for(char c:miis[i].name){
+            if(c=='"')name+="\\\"";
+            else if(c=='\\')name+="\\\\";
+            else name+=c;
+        }
+        json+="{\"slot\":"+std::to_string(miis[i].slot)+
+              ",\"name\":\""+name+"\""+
+              ",\"hasFacepaint\":"+(miis[i].hasFacepaint?"true":"false")+"}";
+    }
+    json+="]}";
+    Send200(fd,"application/json",json);
+}
+
+// GET /api/mii/export?slot=N
+static void HandleMiiExport(int fd,const std::string& query){
+    std::string slotStr=GetQueryParam(query,"slot");
+    if(slotStr.empty()){Send500(fd,"Missing slot");return;}
+    int slot=atoi(slotStr.c_str());
+    SrvLog("WebUI: mii export slot "+std::to_string(slot));
+
+    // Export to a temp path then serve the bytes
+    std::string tmpPath="/switch/TomoToolNX/.mii_export_tmp.ltd";
+    std::string err=MiiManager::ExportMii(slot,tmpPath);
+    // ExportMii appends .ltd and may uniquify — find the actual file
+    if(!err.empty()){SrvLog("Mii export failed: "+err,true);Send500(fd,err);return;}
+
+    // Find the actual written file (may have been uniquified)
+    std::string actualPath=tmpPath;
+    if(!FileExists(actualPath)){
+        // Try with .ltd appended
+        actualPath=tmpPath+".ltd";
+    }
+
+    std::vector<uint8_t> data;
+    FILE* f=fopen(actualPath.c_str(),"rb");
+    if(!f){Send500(fd,"Cannot read exported file");return;}
+    fseek(f,0,SEEK_END);size_t sz=(size_t)ftell(f);fseek(f,0,SEEK_SET);
+    data.resize(sz);fread(data.data(),1,sz,f);fclose(f);
+    remove(actualPath.c_str());
+
+    // Suggest filename from slot
+    std::string disp="attachment; filename=\"Mii_slot"+std::to_string(slot)+".ltd\"";
+    Send200Bin(fd,"application/octet-stream",data,disp);
+    SrvLog("Mii export slot "+std::to_string(slot)+" OK");
+}
+
+// POST /api/mii/import — multipart: file + slot
+static void HandleMiiImport(int fd,const Request& req){
+    auto fields=ParseMultipart(req.body,req.contentType);
+    std::string slotStr;std::vector<uint8_t> fileData;
+    for(auto& f:fields){
+        if(f.name=="slot")slotStr=f.data;
+        else if(f.name=="file")fileData.assign(f.data.begin(),f.data.end());
+    }
+    if(slotStr.empty()||fileData.empty()){Send500(fd,"Missing slot or file");return;}
+    int slot=atoi(slotStr.c_str());
+    SrvLog("Mii import: slot "+std::to_string(slot)+" ("+std::to_string(fileData.size())+" bytes)");
+
+    // Write temp file
+    MkdirP("/switch/TomoToolNX");
+    std::string tmpPath="/switch/TomoToolNX/.mii_import_tmp.ltd";
+    {FILE* f=fopen(tmpPath.c_str(),"wb");
+    if(!f){Send500(fd,"Cannot write temp file");return;}
+    fwrite(fileData.data(),1,fileData.size(),f);fclose(f);}
+
+    std::string err=MiiManager::ImportMii(slot,tmpPath);
+    remove(tmpPath.c_str());
+
+    if(!err.empty()){SrvLog("Mii import failed: "+err,true);Send500(fd,err);return;}
+
+    SrvLog("Mii import slot "+std::to_string(slot)+" OK");
+    mutexLock(&s_mutex);s_pendingCommit=true;mutexUnlock(&s_mutex);
+    Send200(fd,"application/json","{\"ok\":true}");
+}
+
 static void HandleConnection(int fd){
     Request req;if(!ReadRequest(fd,req)){close(fd);return;}
     if(req.method=="GET"&&req.path=="/"){SrvLog("WebUI: page loaded");Send200(fd,"text/html; charset=utf-8",std::string(HTML_UI));}
@@ -342,6 +541,9 @@ static void HandleConnection(int fd){
     else if(req.method=="GET"&&req.path=="/api/preview")HandlePreview(fd,req.query);
     else if(req.method=="GET"&&req.path=="/api/export")HandleExport(fd,req.query);
     else if(req.method=="POST"&&req.path=="/api/import")HandleImport(fd,req);
+    else if(req.method=="GET"  &&req.path=="/api/mii/list")  HandleMiiList(fd);
+    else if(req.method=="GET"  &&req.path=="/api/mii/export") HandleMiiExport(fd,req.query);
+    else if(req.method=="POST" &&req.path=="/api/mii/import") HandleMiiImport(fd,req);
     else Send404(fd);
     close(fd);
 }

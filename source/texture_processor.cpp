@@ -327,7 +327,7 @@ static void Bc1EncodeBlock(const uint8_t blk[64], bool hasAlpha,
     if(oc==0){ memset(out+off,0,4); memset(out+off+4,0xFF,4); return; }
     uint16_t c0=Rgb565Encode((uint8_t)maxR,(uint8_t)maxG,(uint8_t)maxB);
     uint16_t c1=Rgb565Encode((uint8_t)minR,(uint8_t)minG,(uint8_t)minB);
-    if(hasAlpha){ if(c0>c1) std::swap(c0,c1); }
+    if(hasAlpha){ if(c0>c1) std::swap(c0,c1); if(c0==c1){if(c1<0xFFFF)c1++;else if(c0>0)c0--;} }
     else { if(c0<c1) std::swap(c0,c1); if(c0==c1){if(c0<0xFFFF)c0++;else c1--;} }
     auto [r0,g0,b0]=Rgb565Decode(c0); auto [r1,g1,b1]=Rgb565Decode(c1);
     int pr2,pg2,pb2,pr3,pg3,pb3; bool t3;
@@ -536,6 +536,32 @@ std::string DecodeFile(const std::string& path, RgbaImage& out, bool noSrgb) {
 // PNG I/O via SDL2_image  (no exceptions)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Pad a non-square image to square by centering it on a transparent background.
+// This prevents cropping when the source isn't square.
+static RgbaImage PadToSquare(const RgbaImage& src) {
+    int size = std::max(src.width, src.height);
+    if (src.width == src.height) return src;
+    RgbaImage dst(size, size);
+    // dst.pixels is zero-initialized (transparent black)
+    int ox = (size - src.width)  / 2;
+    int oy = (size - src.height) / 2;
+    for (int y = 0; y < src.height; y++)
+        memcpy(dst.pixels.data() + ((oy+y)*size + ox)*4,
+               src.pixels.data() + y*src.width*4,
+               src.width * 4);
+    return dst;
+}
+
+// Threshold alpha to eliminate semi-transparent edge fringing.
+// Pixels with alpha < threshold become fully transparent (discarded).
+// Pixels with alpha >= threshold become fully opaque.
+// This removes the white outline caused by background-removal tools leaving
+// semi-transparent fringe pixels with light/white color values.
+static void ThresholdAlpha(std::vector<uint8_t>& rgba, uint8_t threshold=128) {
+    for (size_t i = 3; i < rgba.size(); i += 4)
+        rgba[i] = (rgba[i] >= threshold) ? 255 : 0;
+}
+
 static RgbaImage ResizeNearest(const RgbaImage& src, int dw, int dh) {
     RgbaImage dst(dw, dh);
     for (int y=0;y<dh;y++) {
@@ -553,10 +579,7 @@ static bool LoadPng(const std::string& path, RgbaImage& out, std::string& errOut
     SDL_Surface* surf = IMG_Load(path.c_str());
     if (!surf) { errOut = std::string("IMG_Load: ") + IMG_GetError(); return false; }
 
-    // SDL_PIXELFORMAT_RGBA32 is endian-dependent — on little-endian ARM (Switch)
-    // it maps to ABGR8888 in memory, so bytes come out A,B,G,R not R,G,B,A.
-    // Use ABGR8888 explicitly so memory layout is always R[0] G[1] B[2] A[3].
-    SDL_Surface* conv = SDL_ConvertSurfaceFormat(surf, SDL_PIXELFORMAT_ABGR8888, 0);
+    SDL_Surface* conv = SDL_ConvertSurfaceFormat(surf, SDL_PIXELFORMAT_RGBA32, 0);
     SDL_FreeSurface(surf);
     if (!conv) { errOut = std::string("SDL_ConvertSurface: ") + SDL_GetError(); return false; }
 
@@ -601,6 +624,7 @@ std::string ImportPng(const ImportOptions& opts) {
         const int cW=256, cH=256;
         RgbaImage ci = (src.width!=cW||src.height!=cH) ? ResizeNearest(src,cW,cH) : src;
         auto rgba = ci.pixels;
+        ThresholdAlpha(rgba); // prevent holes from semi-transparent edges
         if (!opts.noSrgb) ConvertSrgbToLinear(rgba);
         auto sw = SwizzleBlockLinear(rgba, cW, cH, 4, DefaultBlockHeight);
         auto comp = ZstdCompress(sw);
@@ -612,6 +636,7 @@ std::string ImportPng(const ImportOptions& opts) {
         int uW=layout.Width, uH=layout.Height;
         RgbaImage ui = (src.width!=uW||src.height!=uH) ? ResizeNearest(src,uW,uH) : src;
         auto rgba = ui.pixels;
+        ThresholdAlpha(rgba); // BC1 can't handle semi-transparent pixels
         if (!opts.noSrgb) ConvertSrgbToLinear(rgba);
 
         std::vector<uint8_t> blocks = (layout.Format == TextureFormat::Bc3)

@@ -12,6 +12,9 @@ build/
 *.o
 *.a
 
+# Empty romfs folder - not used
+romfs/
+
 # Runtime files written to SD card (not part of source)
 debug.log
 
