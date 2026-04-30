@@ -96,27 +96,3 @@ Textures are zstd-compressed NX block-linear images:
 | `.canvas.zs` | RGBA8, 256x256 | 262144 B |
 
 Mii data is stored in `.ltd` files (v3 format, compatible with ShareMii).
-
----
-
-## Project structure
-
-```
-TomoToolNX/
-├── Makefile
-├── include/
-│   ├── http_server.h
-│   ├── texture_processor.h
-│   ├── ugc_scanner.h
-│   ├── backup.h
-│   ├── mii_manager.h
-│   └── save_mount.h
-└── source/
-    ├── main.cpp
-    ├── http_server.cpp
-    ├── texture_processor.cpp
-    ├── ugc_scanner.cpp
-    ├── backup.cpp
-    ├── mii_manager.cpp
-    └── save_mount.cpp
-```
