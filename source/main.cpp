@@ -42,83 +42,70 @@ static const SDL_Color COL_ACCENT = {120, 180, 200, 255};
 static PadState      gPad;
 static SDL_Renderer* gRen = nullptr;
 
-// ─── Bitmap font ──────────────────────────────────────────────────────────────
+// ─── SDL_ttf font renderer ────────────────────────────────────────────────────
 
-static const uint8_t FONT5x7[][7] = {
-    {0x00,0x00,0x00,0x00,0x00,0x00,0x00},{0x04,0x04,0x04,0x04,0x00,0x04,0x00},
-    {0x0A,0x0A,0x00,0x00,0x00,0x00,0x00},{0x0A,0x1F,0x0A,0x1F,0x0A,0x00,0x00},
-    {0x0E,0x15,0x07,0x1C,0x15,0x0E,0x00},{0x19,0x1A,0x04,0x0B,0x13,0x00,0x00},
-    {0x06,0x09,0x06,0x15,0x12,0x0D,0x00},{0x06,0x04,0x00,0x00,0x00,0x00,0x00},
-    {0x02,0x04,0x08,0x08,0x08,0x04,0x02},{0x08,0x04,0x02,0x02,0x02,0x04,0x08},
-    {0x00,0x0A,0x04,0x1F,0x04,0x0A,0x00},{0x00,0x04,0x04,0x1F,0x04,0x04,0x00},
-    {0x00,0x00,0x00,0x00,0x06,0x04,0x08},{0x00,0x00,0x00,0x1F,0x00,0x00,0x00},
-    {0x00,0x00,0x00,0x00,0x00,0x06,0x00},{0x01,0x02,0x02,0x04,0x08,0x08,0x10},
-    {0x0E,0x11,0x13,0x15,0x19,0x11,0x0E},{0x04,0x0C,0x04,0x04,0x04,0x0E,0x00},
-    {0x0E,0x11,0x01,0x06,0x08,0x1F,0x00},{0x0E,0x11,0x01,0x06,0x01,0x11,0x0E},
-    {0x02,0x06,0x0A,0x12,0x1F,0x02,0x00},{0x1F,0x10,0x1E,0x01,0x01,0x11,0x0E},
-    {0x06,0x08,0x10,0x1E,0x11,0x11,0x0E},{0x1F,0x01,0x02,0x04,0x08,0x08,0x00},
-    {0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E},{0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C},
-    {0x00,0x06,0x00,0x00,0x06,0x00,0x00},{0x00,0x06,0x00,0x00,0x06,0x04,0x08},
-    {0x02,0x04,0x08,0x10,0x08,0x04,0x02},{0x00,0x1F,0x00,0x1F,0x00,0x00,0x00},
-    {0x08,0x04,0x02,0x01,0x02,0x04,0x08},{0x0E,0x11,0x01,0x06,0x04,0x00,0x04},
-    {0x0E,0x11,0x17,0x15,0x17,0x10,0x0E},{0x04,0x0A,0x11,0x1F,0x11,0x11,0x00},
-    {0x1E,0x11,0x11,0x1E,0x11,0x11,0x1E},{0x0E,0x11,0x10,0x10,0x10,0x11,0x0E},
-    {0x1C,0x12,0x11,0x11,0x11,0x12,0x1C},{0x1F,0x10,0x10,0x1E,0x10,0x10,0x1F},
-    {0x1F,0x10,0x10,0x1E,0x10,0x10,0x10},{0x0E,0x11,0x10,0x17,0x11,0x11,0x0F},
-    {0x11,0x11,0x11,0x1F,0x11,0x11,0x11},{0x0E,0x04,0x04,0x04,0x04,0x04,0x0E},
-    {0x07,0x02,0x02,0x02,0x02,0x12,0x0C},{0x11,0x12,0x14,0x18,0x14,0x12,0x11},
-    {0x10,0x10,0x10,0x10,0x10,0x10,0x1F},{0x11,0x1B,0x15,0x11,0x11,0x11,0x11},
-    {0x11,0x19,0x15,0x13,0x11,0x11,0x11},{0x0E,0x11,0x11,0x11,0x11,0x11,0x0E},
-    {0x1E,0x11,0x11,0x1E,0x10,0x10,0x10},{0x0E,0x11,0x11,0x11,0x15,0x12,0x0D},
-    {0x1E,0x11,0x11,0x1E,0x14,0x12,0x11},{0x0F,0x10,0x10,0x0E,0x01,0x01,0x1E},
-    {0x1F,0x04,0x04,0x04,0x04,0x04,0x04},{0x11,0x11,0x11,0x11,0x11,0x11,0x0E},
-    {0x11,0x11,0x11,0x11,0x0A,0x0A,0x04},{0x11,0x11,0x11,0x15,0x15,0x1B,0x11},
-    {0x11,0x11,0x0A,0x04,0x0A,0x11,0x11},{0x11,0x11,0x0A,0x04,0x04,0x04,0x04},
-    {0x1F,0x01,0x02,0x04,0x08,0x10,0x1F},{0x0E,0x08,0x08,0x08,0x08,0x08,0x0E},
-    {0x10,0x08,0x08,0x04,0x02,0x02,0x01},{0x0E,0x02,0x02,0x02,0x02,0x02,0x0E},
-    {0x04,0x0A,0x11,0x00,0x00,0x00,0x00},{0x00,0x00,0x00,0x00,0x00,0x00,0x1F},
-    {0x08,0x04,0x00,0x00,0x00,0x00,0x00},{0x00,0x00,0x0E,0x01,0x0F,0x11,0x0F},
-    {0x10,0x10,0x1E,0x11,0x11,0x11,0x1E},{0x00,0x00,0x0E,0x10,0x10,0x10,0x0E},
-    {0x01,0x01,0x0F,0x11,0x11,0x11,0x0F},{0x00,0x00,0x0E,0x11,0x1F,0x10,0x0E},
-    {0x06,0x09,0x08,0x1C,0x08,0x08,0x08},{0x00,0x00,0x0F,0x11,0x0F,0x01,0x0E},
-    {0x10,0x10,0x16,0x19,0x11,0x11,0x11},{0x04,0x00,0x0C,0x04,0x04,0x04,0x0E},
-    {0x02,0x00,0x06,0x02,0x02,0x12,0x0C},{0x10,0x10,0x12,0x14,0x18,0x14,0x12},
-    {0x0C,0x04,0x04,0x04,0x04,0x04,0x0E},{0x00,0x00,0x1A,0x15,0x15,0x11,0x11},
-    {0x00,0x00,0x16,0x19,0x11,0x11,0x11},{0x00,0x00,0x0E,0x11,0x11,0x11,0x0E},
-    {0x00,0x00,0x1E,0x11,0x1E,0x10,0x10},{0x00,0x00,0x0F,0x11,0x0F,0x01,0x01},
-    {0x00,0x00,0x16,0x19,0x10,0x10,0x10},{0x00,0x00,0x0E,0x10,0x0E,0x01,0x0E},
-    {0x08,0x08,0x1C,0x08,0x08,0x09,0x06},{0x00,0x00,0x11,0x11,0x11,0x13,0x0D},
-    {0x00,0x00,0x11,0x11,0x11,0x0A,0x04},{0x00,0x00,0x11,0x11,0x15,0x15,0x0A},
-    {0x00,0x00,0x11,0x0A,0x04,0x0A,0x11},{0x00,0x00,0x11,0x11,0x0F,0x01,0x0E},
-    {0x00,0x00,0x1F,0x02,0x04,0x08,0x1F},{0x06,0x08,0x08,0x10,0x08,0x08,0x06},
-    {0x04,0x04,0x04,0x00,0x04,0x04,0x04},{0x0C,0x02,0x02,0x01,0x02,0x02,0x0C},
-    {0x08,0x15,0x02,0x00,0x00,0x00,0x00},
-};
-static const int FONT_N = (int)(sizeof(FONT5x7)/sizeof(FONT5x7[0]));
+#include <SDL2/SDL_ttf.h>
+#include "font_data.h"
 
-static void DrawText(const std::string& text, int x, int y, SDL_Color col, int scale=2) {
-    int cx=x;
-    SDL_SetRenderDrawColor(gRen,col.r,col.g,col.b,col.a);
-    for (char ch : text) {
-        if (ch=='\n'){y+=7*scale+scale;cx=x;continue;}
-        int idx=(unsigned char)ch-32;
-        if(idx<0||idx>=FONT_N){cx+=5*scale+scale;continue;}
-        for(int row=0;row<7;row++){
-            uint8_t bits=FONT5x7[idx][row];
-            for(int px=0;px<5;px++){
-                if(bits&(1<<(4-px))){
-                    SDL_Rect r{cx+px*scale,y+row*scale,scale,scale};
-                    SDL_RenderFillRect(gRen,&r);
-                }
-            }
-        }
-        cx+=5*scale+scale;
+static TTF_Font* gFontSm  = nullptr; // 16px — body text, labels
+static TTF_Font* gFontMd  = nullptr; // 22px — section titles, selected items
+static TTF_Font* gFontLg  = nullptr; // 32px — screen titles, hero text
+
+static void FontInit() {
+    TTF_Init();
+    // Load font from embedded byte array — no romfs required
+    SDL_RWops* rw = SDL_RWFromConstMem(FONT_DATA, (int)FONT_DATA_SIZE);
+    if (rw) {
+        gFontSm = TTF_OpenFontRW(rw, 0, 16);
+        SDL_RWseek(rw, 0, RW_SEEK_SET);
+        gFontMd = TTF_OpenFontRW(rw, 0, 22);
+        SDL_RWseek(rw, 0, RW_SEEK_SET);
+        gFontLg = TTF_OpenFontRW(rw, 1, 32); // 1 = free rw when done
     }
 }
-static void DrawTextC(const std::string& t,int cx,int cy,SDL_Color col,int scale=2){
-    int tw=(int)t.size()*(5*scale+scale);
-    DrawText(t,cx-tw/2,cy-7*scale/2,col,scale);
+static void FontQuit() {
+    if(gFontSm) TTF_CloseFont(gFontSm);
+    if(gFontMd) TTF_CloseFont(gFontMd);
+    if(gFontLg) TTF_CloseFont(gFontLg);
+    TTF_Quit();
 }
+
+enum class Font { Sm, Md, Lg };
+static TTF_Font* GetFont(Font f) {
+    switch(f){ case Font::Md: return gFontMd; case Font::Lg: return gFontLg; default: return gFontSm; }
+}
+
+// Draw text at (x,y) top-left
+static void DrawText(const std::string& text, int x, int y, SDL_Color col, Font f=Font::Sm) {
+    if(text.empty()) return;
+    TTF_Font* font = GetFont(f);
+    SDL_Surface* surf = TTF_RenderUTF8_Blended(font, text.c_str(), col);
+    if(!surf) return;
+    SDL_Texture* tex = SDL_CreateTextureFromSurface(gRen, surf);
+    SDL_FreeSurface(surf);
+    if(!tex) return;
+    int w,h; SDL_QueryTexture(tex,nullptr,nullptr,&w,&h);
+    SDL_Rect dst{x,y,w,h};
+    SDL_RenderCopy(gRen,tex,nullptr,&dst);
+    SDL_DestroyTexture(tex);
+}
+
+// Draw text centered at (cx,cy)
+static void DrawTextC(const std::string& text, int cx, int cy, SDL_Color col, Font f=Font::Sm) {
+    if(text.empty()) return;
+    TTF_Font* font = GetFont(f);
+    int w,h; TTF_SizeUTF8(font, text.c_str(), &w, &h);
+    DrawText(text, cx-w/2, cy-h/2, col, f);
+}
+
+// Draw text right-aligned at (rx,y)
+static void DrawTextR(const std::string& text, int rx, int y, SDL_Color col, Font f=Font::Sm) {
+    if(text.empty()) return;
+    TTF_Font* font = GetFont(f);
+    int w,h; TTF_SizeUTF8(font, text.c_str(), &w, &h);
+    DrawText(text, rx-w, y-h/2, col, f);
+}
+
 static void FillRect(int x,int y,int w,int h,SDL_Color c){
     SDL_SetRenderDrawColor(gRen,c.r,c.g,c.b,c.a);
     SDL_Rect r{x,y,w,h};SDL_RenderFillRect(gRen,&r);
@@ -127,6 +114,23 @@ static void DrawRect(int x,int y,int w,int h,SDL_Color c){
     SDL_SetRenderDrawColor(gRen,c.r,c.g,c.b,c.a);
     SDL_Rect r{x,y,w,h};SDL_RenderDrawRect(gRen,&r);
 }
+
+// Draw a filled+outlined box sized to fit text with padding, then draw the text.
+static int DrawTextBox(const std::string& text, int cx, int y, SDL_Color textCol,
+                        SDL_Color boxCol, int padX=18, int padY=8, Font f=Font::Sm) {
+    TTF_Font* font = GetFont(f);
+    int tw=0, th=0;
+    if (!text.empty() && font) TTF_SizeUTF8(font, text.c_str(), &tw, &th);
+    int bw = tw + padX*2, bh = th + padY*2;
+    int bx = cx - bw/2;
+    FillRect(bx, y, bw, bh, COL_PANEL);
+    DrawRect(bx, y, bw, bh, boxCol);
+    DrawText(text, bx+padX, y+padY, textCol, f);
+    return bh;
+}
+
+
+
 
 // ─── Screens ──────────────────────────────────────────────────────────────────
 
@@ -187,12 +191,11 @@ static void FreePreview() {
 static void LoadPreview(const UgcTextureEntry& e) {
     FreePreview();
     RgbaImage img;
-    std::string err = TextureProcessor::DecodeFile(e.ugctexPath, img);
+    std::string err = TextureProcessor::DecodeFile(e.ugctexPath, img, false);
     if (!err.empty()) { gOnSwitchMsg=err; gOnSwitchMsgCol=COL_RED; return; }
-    // Upload to GPU texture
     SDL_Surface* surf = SDL_CreateRGBSurfaceFrom(
         img.pixels.data(), img.width, img.height, 32, img.width*4,
-        0x000000FF,0x0000FF00,0x00FF0000,0xFF000000);
+        0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
     if (!surf) return;
     gPreviewTex  = SDL_CreateTextureFromSurface(gRen, surf);
     SDL_FreeSurface(surf);
@@ -292,192 +295,218 @@ static void DoOnSwitchImport(const std::string& pngPath) {
 // ─── Draw helpers ─────────────────────────────────────────────────────────────
 
 static void DrawHeader(const std::string& title) {
-    FillRect(0,0,SCREEN_W,44,COL_PANEL);
-    DrawRect(0,0,SCREEN_W,44,COL_BORDER);
-    DrawText("TomoToolNX",16,14,COL_GOLD,2);
-    if (!title.empty()) {
-        DrawText(" / "+title,16+11*12,14,COL_DIM,2);
-    }
+    FillRect(0,0,SCREEN_W,28,COL_PANEL);
+    DrawRect(0,27,SCREEN_W,1,COL_BORDER);
+    DrawText("TomoToolNX",10,6,COL_GOLD);
+    if (!title.empty())
+        DrawText("  /  "+title, 10+100, 6, COL_DIM);
 }
 
 static void DrawFooter(const std::string& hints) {
-    FillRect(0,SCREEN_H-38,SCREEN_W,38,COL_PANEL);
-    DrawRect(0,SCREEN_H-38,SCREEN_W,1,COL_BORDER);
-    DrawTextC(hints, SCREEN_W/2, SCREEN_H-19, COL_DIM, 1);
+    FillRect(0,SCREEN_H-30,SCREEN_W,30,COL_PANEL);
+    DrawRect(0,SCREEN_H-30,SCREEN_W,1,COL_BORDER);
+    DrawTextC(hints, SCREEN_W/2, SCREEN_H-15, COL_DIM);
 }
 
 // ─── Screen draws ─────────────────────────────────────────────────────────────
 
 static void DrawUserPick() {
-    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
+    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
     SDL_RenderClear(gRen);
     DrawHeader("");
-    DrawTextC("select user", SCREEN_W/2, 90, COL_DIM, 1);
-
-    int listTop=120, itemH=52;
+    DrawTextC("select user", SCREEN_W/2, 44, COL_DIM);
+    {
+    TTF_Font* fMd3=GetFont(Font::Md); int mh=0,tmp2=0;
+    if(fMd3) TTF_SizeUTF8(fMd3,"A",&tmp2,&mh);
+    int itemH=mh+16, listTop=66;
     for (int i=0;i<(int)gUsers.size();i++){
         bool sel=(i==gUserSel);
-        FillRect(SCREEN_W/2-220,listTop+i*itemH,440,itemH-2, sel?COL_SEL:COL_PANEL);
-        if(sel) DrawRect(SCREEN_W/2-220,listTop+i*itemH,440,itemH-2,COL_ACCENT);
-        DrawTextC(gUsers[i].nickname, SCREEN_W/2, listTop+i*itemH+(itemH-2)/2, sel?COL_TEXT:COL_DIM, 2);
+        FillRect(SCREEN_W/2-280,listTop+i*(itemH+4),560,itemH, sel?COL_SEL:COL_PANEL);
+        if(sel) DrawRect(SCREEN_W/2-280,listTop+i*(itemH+4),560,itemH,COL_ACCENT);
+        DrawTextC(gUsers[i].nickname, SCREEN_W/2, listTop+i*(itemH+4)+itemH/2, sel?COL_TEXT:COL_DIM, Font::Md);
+    }
     }
     DrawFooter("Up/Down  navigate    A  select    +  quit");
     SDL_RenderPresent(gRen);
 }
 
 static void DrawBackupPrompt() {
-    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
+    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
     SDL_RenderClear(gRen);
     DrawHeader("");
-    DrawTextC("previous backup found", SCREEN_W/2, 130, COL_DIM, 2);
-    DrawTextC("what would you like to do?", SCREEN_W/2, 170, COL_TEXT, 2);
+    DrawTextC("previous backup found", SCREEN_W/2, 58, COL_DIM);
+    DrawTextC("what would you like to do?", SCREEN_W/2, 82, COL_TEXT, Font::Md);
 
-    int cy=220, cw=300, ch=160, gap=40;
-    int x1=SCREEN_W/2-cw-gap/2, x2=SCREEN_W/2+gap/2;
+    // Measure to size cards
+    {
+    TTF_Font* fMd2=GetFont(Font::Md), *fSm2=GetFont(Font::Sm);
+    int px=20, py=10, gap2=20;
+    int smh2=0, mdh2=0, tmp=0;
+    if(fMd2) TTF_SizeUTF8(fMd2,"A",&tmp,&mdh2);
+    if(fSm2) TTF_SizeUTF8(fSm2,"A",&tmp,&smh2);
+    // widest text
+    int maxw=0;
+    const char* labels[]={"delete old backup","then make new one","skip backup","keep old as-is","keep old + make new","saves both backups"};
+    for(auto l:labels){int w=0,h=0;if(fSm2)TTF_SizeUTF8(fSm2,l,&w,&h);if(w>maxw)maxw=w;}
+    int cw2=maxw+px*2+40; // extra for key label
+    int ch2=py+mdh2+8+smh2+6+smh2+py;
+    int gap3=20, x1=SCREEN_W/2-cw2-gap3/2, x2=SCREEN_W/2+gap3/2;
+    int cy2=100;
 
-    // A — delete old, make new
-    FillRect(x1,cy,cw,ch,COL_PANEL); DrawRect(x1,cy,cw,ch,COL_RED);
-    DrawTextC("[A]",               x1+cw/2, cy+30,  COL_RED,  3);
-    DrawTextC("delete old backup", x1+cw/2, cy+80,  COL_TEXT, 2);
-    DrawTextC("then make new one", x1+cw/2, cy+110, COL_DIM,  2);
+    FillRect(x1,cy2,cw2,ch2,COL_PANEL); DrawRect(x1,cy2,cw2,ch2,COL_RED);
+    DrawTextC("[A]",               x1+cw2/2, cy2+py+mdh2/2,              COL_RED, Font::Md);
+    DrawTextC("delete old backup", x1+cw2/2, cy2+py+mdh2+8+smh2/2,       COL_TEXT);
+    DrawTextC("then make new one", x1+cw2/2, cy2+py+mdh2+8+smh2+6+smh2/2,COL_DIM);
 
-    // B — skip, keep old
-    FillRect(x2,cy,cw,ch,COL_PANEL); DrawRect(x2,cy,cw,ch,COL_ACCENT);
-    DrawTextC("[B]",             x2+cw/2, cy+30,  COL_ACCENT, 3);
-    DrawTextC("skip backup",     x2+cw/2, cy+80,  COL_TEXT,   2);
-    DrawTextC("keep old as-is",  x2+cw/2, cy+110, COL_DIM,    2);
+    FillRect(x2,cy2,cw2,ch2,COL_PANEL); DrawRect(x2,cy2,cw2,ch2,COL_ACCENT);
+    DrawTextC("[B]",             x2+cw2/2, cy2+py+mdh2/2,              COL_ACCENT, Font::Md);
+    DrawTextC("skip backup",     x2+cw2/2, cy2+py+mdh2+8+smh2/2,       COL_TEXT);
+    DrawTextC("keep old as-is",  x2+cw2/2, cy2+py+mdh2+8+smh2+6+smh2/2,COL_DIM);
 
-    // X — keep old, also make new
-    int x3=SCREEN_W/2-cw/2, cy3=cy+ch+30;
-    FillRect(x3,cy3,cw,ch,COL_PANEL); DrawRect(x3,cy3,cw,ch,COL_GOLD);
-    DrawTextC("[X]",                    x3+cw/2, cy3+30,  COL_GOLD, 3);
-    DrawTextC("keep old + make new",    x3+cw/2, cy3+80,  COL_TEXT, 2);
-    DrawTextC("saves both backups",     x3+cw/2, cy3+110, COL_DIM,  2);
+    int x3=SCREEN_W/2-cw2/2, cy3=cy2+ch2+14;
+    FillRect(x3,cy3,cw2,ch2,COL_PANEL); DrawRect(x3,cy3,cw2,ch2,COL_GOLD);
+    DrawTextC("[X]",                 x3+cw2/2, cy3+py+mdh2/2,              COL_GOLD, Font::Md);
+    DrawTextC("keep old + make new", x3+cw2/2, cy3+py+mdh2+8+smh2/2,       COL_TEXT);
+    DrawTextC("saves both backups",  x3+cw2/2, cy3+py+mdh2+8+smh2+6+smh2/2,COL_DIM);
+    }
 
     DrawFooter("A  delete old + new    B  skip    X  keep old + new alongside    +  quit");
     SDL_RenderPresent(gRen);
 }
 
 static void DrawBackingUp() {
-    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
+    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
     SDL_RenderClear(gRen);
     DrawHeader("");
-    DrawTextC("backing up save data...", SCREEN_W/2, SCREEN_H/2-40, COL_DIM, 2);
-
-    // Progress bar
+    DrawTextC("backing up save data...", SCREEN_W/2, SCREEN_H/2-30, COL_DIM, Font::Md);
     float prog = BackupService::BackupProgress();
-    int bw=600, bh=16, bx=SCREEN_W/2-bw/2, by=SCREEN_H/2;
+    int bw=700, bh=10, bx=SCREEN_W/2-bw/2, by=SCREEN_H/2;
     FillRect(bx,by,bw,bh,COL_PANEL);
     DrawRect(bx,by,bw,bh,COL_BORDER);
     FillRect(bx,by,(int)(bw*prog),bh,COL_ACCENT);
-
     char pct[16]; snprintf(pct,sizeof(pct),"%d%%",(int)(prog*100));
-    DrawTextC(pct, SCREEN_W/2, by+bh+20, COL_DIM, 1);
-    DrawTextC("do not turn off the console", SCREEN_W/2, SCREEN_H/2+80, COL_DIM, 1);
+    DrawTextC(pct, SCREEN_W/2, by+bh+18, COL_DIM);
+    DrawTextC("do not turn off the console", SCREEN_W/2, by+bh+42, COL_DIM);
     SDL_RenderPresent(gRen);
 }
 
 static void DrawModePick() {
-    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
+    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
     SDL_RenderClear(gRen);
     DrawHeader("");
-    DrawTextC("choose mode", SCREEN_W/2, 110, COL_DIM, 1);
+    DrawTextC("choose mode", SCREEN_W/2, 62, COL_DIM);
 
-    // Left card — WebUI
-    int cx1=SCREEN_W/2-240, cx2=SCREEN_W/2+40;
-    int cy=240, cw=200, ch=180;
-    FillRect(cx1,cy,cw,ch,COL_PANEL);
-    DrawRect(cx1,cy,cw,ch,COL_ACCENT);
-    DrawTextC("WebUI",    cx1+cw/2, cy+50,  COL_TEXT,  2);
-    DrawTextC("browser on", cx1+cw/2, cy+90,  COL_DIM, 1);
-    DrawTextC("PC or phone", cx1+cw/2, cy+106, COL_DIM, 1);
-    DrawTextC("[L]", cx1+cw/2, cy+140, COL_ACCENT, 2);
+    // Measure text to size cards dynamically
+    TTF_Font* fLg=GetFont(Font::Lg), *fSm=GetFont(Font::Sm), *fMd=GetFont(Font::Md);
+    int gap=24, padX=28, padY=14;
+    auto cardW = [&](const std::string& main, const std::string& sub) {
+        int w1=0,w2=0,h=0;
+        if(fLg) TTF_SizeUTF8(fLg,main.c_str(),&w1,&h);
+        if(fSm) TTF_SizeUTF8(fSm,sub.c_str(),&w2,&h);
+        return std::max(w1,w2)+padX*2;
+    };
+    int cw1=cardW("WebUI","browser on PC or phone");
+    int cw2=cardW("On-Switch","controller, no network");
+    int cw=std::max(cw1,cw2);
 
-    // Right card — On-Switch
-    FillRect(cx2,cy,cw,ch,COL_PANEL);
-    DrawRect(cx2,cy,cw,ch,COL_GOLD);
-    DrawTextC("On-Switch", cx2+cw/2, cy+50,  COL_TEXT, 2);
-    DrawTextC("controller",  cx2+cw/2, cy+90,  COL_DIM, 1);
-    DrawTextC("no network",  cx2+cw/2, cy+106, COL_DIM, 1);
-    DrawTextC("[R]", cx2+cw/2, cy+140, COL_GOLD, 2);
+    // Card height: Lg title + gap + Sm sub + gap + Md button
+    int lgh=0,smh=0,mdh=0;
+    if(fLg) TTF_SizeUTF8(fLg,"A",&lgh,&lgh);
+    if(fSm) TTF_SizeUTF8(fSm,"A",&smh,&smh);
+    if(fMd) TTF_SizeUTF8(fMd,"A",&mdh,&mdh);
+    int ch = padY + lgh + 10 + smh + 10 + mdh + padY;
+
+    int cy=82, cx1=SCREEN_W/2-cw-gap/2, cx2=SCREEN_W/2+gap/2;
+
+    // WebUI card
+    FillRect(cx1,cy,cw,ch,COL_PANEL); DrawRect(cx1,cy,cw,ch,COL_ACCENT);
+    DrawTextC("WebUI",                 cx1+cw/2, cy+padY+lgh/2,                COL_TEXT, Font::Lg);
+    DrawTextC("browser on PC or phone",cx1+cw/2, cy+padY+lgh+10+smh/2,         COL_DIM);
+    DrawTextC("[L]",                   cx1+cw/2, cy+padY+lgh+10+smh+10+mdh/2,  COL_ACCENT, Font::Md);
+
+    // On-Switch card
+    FillRect(cx2,cy,cw,ch,COL_PANEL); DrawRect(cx2,cy,cw,ch,COL_GOLD);
+    DrawTextC("On-Switch",             cx2+cw/2, cy+padY+lgh/2,                COL_TEXT, Font::Lg);
+    DrawTextC("controller, no network",cx2+cw/2, cy+padY+lgh+10+smh/2,         COL_DIM);
+    DrawTextC("[R]",                   cx2+cw/2, cy+padY+lgh+10+smh+10+mdh/2,  COL_GOLD, Font::Md);
 
     DrawFooter("L  WebUI mode    R  On-Switch mode    B  back    +  quit");
     SDL_RenderPresent(gRen);
 }
 
 static void DrawMounting() {
-    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
+    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
     SDL_RenderClear(gRen);
-    DrawTextC("mounting save...", SCREEN_W/2, SCREEN_H/2, COL_DIM, 2);
+    DrawTextC("mounting save...", SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
     SDL_RenderPresent(gRen);
 }
 
 static void DrawWebUI() {
-    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
+    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
     SDL_RenderClear(gRen);
     DrawHeader("webui");
-
-    // URL box
-    FillRect(SCREEN_W/2-320,80,640,70,COL_PANEL);
-    DrawRect(SCREEN_W/2-320,80,640,70,COL_BORDER);
-    DrawTextC("open in browser", SCREEN_W/2, 100, COL_DIM, 1);
-    DrawTextC("http://"+gIP+":"+std::to_string(HTTP_PORT), SCREEN_W/2, 124, COL_GOLD, 2);
-
-    // Log
-    int logY=170;
-    for (auto& line : gLog) {
-        DrawText(line.text, 40, logY, line.col, 1);
-        logY+=14;
+    {
+    std::string url="http://"+gIP+":"+std::to_string(HTTP_PORT);
+    TTF_Font* fMd4=GetFont(Font::Md),*fSm4=GetFont(Font::Sm);
+    int uw=0,uh=0,sh=0,tmp3=0;
+    if(fMd4) TTF_SizeUTF8(fMd4,url.c_str(),&uw,&uh);
+    if(fSm4) TTF_SizeUTF8(fSm4,"open in browser",&tmp3,&sh);
+    int bw=uw+40, bh=sh+8+uh+16, bx=SCREEN_W/2-bw/2;
+    FillRect(bx,40,bw,bh,COL_PANEL); DrawRect(bx,40,bw,bh,COL_BORDER);
+    DrawTextC("open in browser", SCREEN_W/2, 40+8+sh/2, COL_DIM);
+    DrawTextC(url, SCREEN_W/2, 40+8+sh+8+uh/2, COL_GOLD, Font::Md);
+    int logY2=40+bh+10;
+    for (auto& line : gLog) { DrawText(line.text, 16, logY2, line.col); logY2+=20; }
     }
-    DrawFooter("B  back to mode select    +  quit");
+    DrawFooter("B  back    +  quit");
     SDL_RenderPresent(gRen);
 }
 
-static const int LIST_X=40, LIST_W=420, LIST_Y=50, LIST_H=SCREEN_H-120, ITEM_H=36;
-static const int PREVIEW_X=490, PREVIEW_Y=50, PREVIEW_W=750, PREVIEW_H=480;
+static const int LIST_X=12, LIST_W=380, LIST_Y=30, LIST_H=SCREEN_H-62, ITEM_H=28;
+static const int PREVIEW_X=400, PREVIEW_Y=30, PREVIEW_W=868, PREVIEW_H=498;
 static const int VISIBLE = LIST_H/ITEM_H;
 
 static void DrawFilePicker(const std::vector<std::string>& files, int sel, int scroll,
                            const std::string& title, const std::string& ext) {
-    FillRect(80,50,SCREEN_W-160,SCREEN_H-100,COL_PANEL);
-    DrawRect(80,50,SCREEN_W-160,SCREEN_H-100,COL_BORDER);
-    DrawTextC(title, SCREEN_W/2, 80, COL_DIM, 1);
+    FillRect(40,36,SCREEN_W-80,SCREEN_H-66,COL_PANEL);
+    DrawRect(40,36,SCREEN_W-80,SCREEN_H-66,COL_BORDER);
+    DrawTextC(title, SCREEN_W/2, 56, COL_DIM, Font::Md);
     if (files.empty()) {
         DrawTextC("no "+ext+" files found in /switch/TomoToolNX/ or /switch/",
-                  SCREEN_W/2, SCREEN_H/2, COL_DIM, 1);
+                  SCREEN_W/2, SCREEN_H/2, COL_DIM);
     } else {
-        int py=110, ph=32;
-        int pvis=(SCREEN_H-200)/ph;
+        int py=76, ph=26;
+        int pvis=(SCREEN_H-136)/ph;
         for (int i=0;i<pvis;i++){
             int idx=scroll+i;
             if (idx>=(int)files.size()) break;
             bool isSel=(idx==sel);
-            FillRect(100,py+i*ph,SCREEN_W-200,ph-2, isSel?COL_SEL:COL_PANEL2);
-            if(isSel) DrawRect(100,py+i*ph,SCREEN_W-200,ph-2,COL_ACCENT);
+            FillRect(52,py+i*ph,SCREEN_W-104,ph-2, isSel?COL_SEL:COL_PANEL2);
+            if(isSel) DrawRect(52,py+i*ph,SCREEN_W-104,ph-2,COL_ACCENT);
             std::string name=files[idx];
             size_t sl=name.rfind('/');
             if(sl!=std::string::npos) name=name.substr(sl+1);
-            DrawText(name,116,py+i*ph+9,isSel?COL_TEXT:COL_DIM,1);
+            DrawText(name,60,py+i*ph+5,isSel?COL_TEXT:COL_DIM);
         }
     }
     DrawFooter("Up/Down  navigate    A  select    B  cancel");
 }
 
 static void DrawOnSwitch() {
-    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
+    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
     SDL_RenderClear(gRen);
     DrawHeader("on-switch");
 
     // Mode tabs
     {
-        int tw=200, th=32, tx=SCREEN_W/2-tw-4, ty=6;
+        int tw=180, th=24, tx=SCREEN_W/2-tw-2, ty=8;
         FillRect(tx,ty,tw,th, gOnSwitchMode==OnSwitchMode::UGC?COL_SEL:COL_PANEL);
         DrawRect(tx,ty,tw,th, gOnSwitchMode==OnSwitchMode::UGC?COL_ACCENT:COL_BORDER);
-        DrawTextC("textures [L]", tx+tw/2, ty+th/2, gOnSwitchMode==OnSwitchMode::UGC?COL_TEXT:COL_DIM, 1);
-        tx=SCREEN_W/2+4;
+        DrawTextC("textures [L]", tx+tw/2, ty+th/2, gOnSwitchMode==OnSwitchMode::UGC?COL_TEXT:COL_DIM);
+        tx=SCREEN_W/2+2;
         FillRect(tx,ty,tw,th, gOnSwitchMode==OnSwitchMode::Mii?COL_SEL:COL_PANEL);
         DrawRect(tx,ty,tw,th, gOnSwitchMode==OnSwitchMode::Mii?COL_GOLD:COL_BORDER);
-        DrawTextC("miis [R]", tx+tw/2, ty+th/2, gOnSwitchMode==OnSwitchMode::Mii?COL_TEXT:COL_DIM, 1);
+        DrawTextC("miis [R]", tx+tw/2, ty+th/2, gOnSwitchMode==OnSwitchMode::Mii?COL_TEXT:COL_DIM);
     }
 
     // ── File pickers (overlay) ───────────────────────────────────────────────
@@ -500,7 +529,7 @@ static void DrawOnSwitch() {
             bool sel=(idx==gEntrySel);
             FillRect(LIST_X,LIST_Y+i*ITEM_H,LIST_W,ITEM_H-1, sel?COL_SEL:COL_BG);
             if(sel) DrawRect(LIST_X,LIST_Y+i*ITEM_H,LIST_W,ITEM_H-1,COL_ACCENT);
-            DrawText(gEntries[idx].stem, LIST_X+8, LIST_Y+i*ITEM_H+10, sel?COL_TEXT:COL_DIM, 1);
+            DrawText(gEntries[idx].stem, LIST_X+6, LIST_Y+i*ITEM_H+6, sel?COL_TEXT:COL_DIM);
         }
         if ((int)gEntries.size()>VISIBLE){
             int barH=LIST_H*VISIBLE/gEntries.size();
@@ -516,15 +545,14 @@ static void DrawOnSwitch() {
             SDL_Rect dst{PREVIEW_X+(PREVIEW_W-dw)/2, PREVIEW_Y+(PREVIEW_H-dh)/2, dw, dh};
             SDL_RenderCopy(gRen,gPreviewTex,nullptr,&dst);
             DrawTextC(gPreviewStem+" ("+std::to_string(tw)+"x"+std::to_string(th)+")",
-                      PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H+16, COL_DIM, 1);
+                      PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H+16, COL_DIM);
         } else {
-            DrawTextC("no preview", PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H/2, COL_BORDER, 1);
+            DrawTextC("no preview", PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H/2, COL_BORDER);
         }
         if (!gOnSwitchMsg.empty())
-            DrawTextC(gOnSwitchMsg, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H+20, gOnSwitchMsgCol, 1);
-        // Activity log
-        int logY = PREVIEW_Y+PREVIEW_H+38;
-        for (auto& line : gLog) { DrawText(line.text, PREVIEW_X, logY, line.col, 1); logY+=13; }
+            DrawTextC(gOnSwitchMsg, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H+10, gOnSwitchMsgCol);
+        int logY = PREVIEW_Y+PREVIEW_H+30;
+        for (auto& line : gLog) { DrawText(line.text, PREVIEW_X, logY, line.col); logY+=20; }
         DrawFooter("Up/Down  select    A  import PNG    Y  export PNG    R  miis tab    B  back    +  quit");
     }
 
@@ -540,7 +568,7 @@ static void DrawOnSwitch() {
             if(sel) DrawRect(LIST_X,LIST_Y+i*ITEM_H,LIST_W,ITEM_H-1,COL_GOLD);
             std::string label=gMiis[idx].name;
             if(gMiis[idx].hasFacepaint) label+=" *";
-            DrawText(label, LIST_X+8, LIST_Y+i*ITEM_H+10, sel?COL_TEXT:COL_DIM, 1);
+            DrawText(label, LIST_X+6, LIST_Y+i*ITEM_H+6, sel?COL_TEXT:COL_DIM);
         }
         if ((int)gMiis.size()>VISIBLE){
             int barH=LIST_H*VISIBLE/gMiis.size();
@@ -553,17 +581,17 @@ static void DrawOnSwitch() {
         DrawRect(PREVIEW_X,PREVIEW_Y,PREVIEW_W,PREVIEW_H,COL_BORDER);
         if (!gMiis.empty()) {
             const auto& m=gMiis[gMiiSel];
-            DrawTextC(m.name, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+60, COL_TEXT, 3);
+            DrawTextC(m.name, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+30, COL_TEXT, Font::Lg);
             DrawTextC("slot "+std::to_string(m.slot)+(m.hasFacepaint?"   has facepaint":""),
-                      PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+110, COL_DIM, 1);
-            DrawTextC("A  import .ltd", PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+200, COL_ACCENT, 2);
-            DrawTextC("Y  export .ltd", PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+240, COL_GOLD,   2);
+                      PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+72, COL_DIM);
+            DrawTextC("A  import .ltd", PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+110, COL_ACCENT);
+            DrawTextC("Y  export .ltd", PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+138, COL_GOLD);
         }
         if (!gOnSwitchMsg.empty())
-            DrawTextC(gOnSwitchMsg, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H+20, gOnSwitchMsgCol, 1);
+            DrawTextC(gOnSwitchMsg, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H+20, gOnSwitchMsgCol);
         // Activity log
         int mlogY = PREVIEW_Y+PREVIEW_H+38;
-        for (auto& line : gLog) { DrawText(line.text, PREVIEW_X, mlogY, line.col, 1); mlogY+=13; }
+        for (auto& line : gLog) { DrawText(line.text, PREVIEW_X, mlogY, line.col); mlogY+=20; }
         DrawFooter("Up/Down  select    A  import .ltd    Y  export .ltd    L  textures tab    B  back    +  quit");
     }
 
@@ -571,11 +599,11 @@ static void DrawOnSwitch() {
 }
 
 static void DrawError() {
-    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
+    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
     SDL_RenderClear(gRen);
     DrawHeader("");
-    DrawTextC("error", SCREEN_W/2, SCREEN_H/2-30, COL_RED, 2);
-    DrawTextC(gError,  SCREEN_W/2, SCREEN_H/2+10, COL_DIM, 1);
+    DrawTextC("error", SCREEN_W/2, SCREEN_H/2-20, COL_RED, Font::Lg);
+    DrawTextC(gError,  SCREEN_W/2, SCREEN_H/2+16, COL_DIM);
     DrawFooter("+  quit");
     SDL_RenderPresent(gRen);
 }
@@ -587,15 +615,17 @@ int main(int,char**) {
     socketInitialize(socketGetDefaultInitConfig());
     SDL_Init(SDL_INIT_VIDEO|SDL_INIT_JOYSTICK);
     IMG_Init(IMG_INIT_PNG|IMG_INIT_JPG);
+    TTF_Init();
 
     SDL_Window* win=SDL_CreateWindow("TomoToolNX",
         SDL_WINDOWPOS_UNDEFINED,SDL_WINDOWPOS_UNDEFINED,SCREEN_W,SCREEN_H,0);
     gRen=SDL_CreateRenderer(win,-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
     SDL_SetRenderDrawBlendMode(gRen,SDL_BLENDMODE_BLEND);
+    FontInit();
 
     padConfigureInput(1,HidNpadStyleSet_NpadStandard);
     padInitializeDefault(&gPad);
-    mkdir("/switch/TomoToolNX",0777);
+    mkdir("/switch/TomoToolNX", 0777);
 
     gUsers=SaveMount::GetUsers();
     if (gUsers.empty()){
@@ -785,13 +815,13 @@ int main(int,char**) {
                     const auto& e=gEntries[gEntrySel];
                     LogINF("Exporting "+e.stem+"...");
                     RgbaImage img;
-                    std::string err=TextureProcessor::DecodeFile(e.ugctexPath,img);
+                    std::string err=TextureProcessor::DecodeFile(e.ugctexPath,img,true);
                     if (!err.empty()){gOnSwitchMsg=err;gOnSwitchMsgCol=COL_RED;LogERR("Export failed: "+err);}
                     else {
                         std::string outPath="/switch/TomoToolNX/"+e.stem+".png";
-                        SDL_Surface* surf=SDL_CreateRGBSurfaceFrom(
+                        SDL_Surface* surf=SDL_CreateRGBSurfaceWithFormatFrom(
                             img.pixels.data(),img.width,img.height,32,img.width*4,
-                            0x000000FF,0x0000FF00,0x00FF0000,0xFF000000);
+                            SDL_PIXELFORMAT_RGBA32);
                         if(surf){IMG_SavePNG(surf,outPath.c_str());SDL_FreeSurface(surf);
                             gOnSwitchMsg="Exported to "+outPath;gOnSwitchMsgCol=COL_GREEN;
                             LogOK("Exported: "+e.stem+".png");}
@@ -823,7 +853,11 @@ int main(int,char**) {
                 if (kDown&HidNpadButton_Y && !gMiis.empty()){
                     int slot=gMiis[gMiiSel].slot;
                     std::string outPath="/switch/TomoToolNX/"+gMiis[gMiiSel].name+"_slot"+std::to_string(slot)+".ltd";
-                    for(auto& c:outPath) if(c==' ') c='_';
+                    for(auto& c:outPath){
+                        if(c==' '||c=='/'||c=='\\'||c==':'||c=='*'||c=='?'||
+                           c=='"'||c=='<'||c=='>'||c=='|'||(uint8_t)c>127)
+                            c='_';
+                    }
                     LogINF("Exporting Mii slot "+std::to_string(slot)+"...");
                     std::string err=MiiManager::ExportMii(slot,outPath);
                     if(!err.empty()){gOnSwitchMsg=err;gOnSwitchMsgCol=COL_RED;LogERR("Mii export failed: "+err);}
@@ -847,6 +881,7 @@ int main(int,char**) {
     FreePreview();
     HttpServer::Stop();
     SaveMount::Unmount();
+    FontQuit();
     nifmExit();
     socketExit();
     SDL_DestroyRenderer(gRen);

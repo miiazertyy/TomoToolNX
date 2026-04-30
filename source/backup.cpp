@@ -71,9 +71,18 @@ static int CountFiles(const std::string& path) {
     return total;
 }
 
+// ─── Async backup state ───────────────────────────────────────────────────────
+
+static Thread  s_thread;
+static Mutex   s_mutex;
+static float   s_progress  = 0.0f;
+static bool    s_done      = false;
+static std::string s_error;
+static std::string s_saveRoot;
+
 // Recursive copy — copies src tree into dst (dst must already exist)
 static void CopyTree(const std::string& src, const std::string& dst,
-                     int& done, int total, float& progressOut) {
+                     int& done, int total) {
     DIR* d = opendir(src.c_str());
     if (!d) return;
     struct dirent* de;
@@ -85,24 +94,19 @@ static void CopyTree(const std::string& src, const std::string& dst,
         if (stat(srcChild.c_str(), &st) != 0) continue;
         if (S_ISDIR(st.st_mode)) {
             MkdirP(dstChild);
-            CopyTree(srcChild, dstChild, done, total, progressOut);
+            CopyTree(srcChild, dstChild, done, total);
         } else {
             CopyFile(srcChild, dstChild);
             done++;
-            if (total > 0) progressOut = (float)done / total;
+            if (total > 0) {
+                mutexLock(&s_mutex);
+                s_progress = (float)done / total;
+                mutexUnlock(&s_mutex);
+            }
         }
     }
     closedir(d);
 }
-
-// ─── Async backup state ───────────────────────────────────────────────────────
-
-static Thread  s_thread;
-static Mutex   s_mutex;
-static float   s_progress  = 0.0f;
-static bool    s_done      = false;
-static std::string s_error;
-static std::string s_saveRoot;
 
 static void BackupThreadFunc(void*) {
     std::string root = s_saveRoot;
@@ -111,12 +115,10 @@ static void BackupThreadFunc(void*) {
     MkdirP(BACKUP_ROOT);
     MkdirP(dest);
 
-    // Count files for progress
     int total = CountFiles(root);
     int done  = 0;
-    float prog = 0.0f;
 
-    CopyTree(root, dest, done, total, prog);
+    CopyTree(root, dest, done, total);
 
     mutexLock(&s_mutex);
     s_progress = 1.0f;

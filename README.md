@@ -15,7 +15,7 @@ Mii sharing based on [ShareMii](https://github.com/Star-F0rce/ShareMii) by Star-
 devkitPro with `devkitA64`, libnx, and the following portlibs:
 
 ```
-dkp-pacman -S switch-sdl2 switch-sdl2_image switch-zstd
+dkp-pacman -S switch-sdl2 switch-sdl2_image switch-sdl2_ttf switch-freetype switch-harfbuzz switch-zstd
 ```
 
 ## Build

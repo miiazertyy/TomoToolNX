@@ -1,6 +1,6 @@
 #---------------------------------------------------------------------------------
 # Tomodachi Life UGC Editor - Nintendo Switch NRO
-# Requires devkitPro + libnx + SDL2 + SDL2_image + zstd (portlibs)
+# Requires devkitPro + libnx + SDL2 + SDL2_image + SDL2_ttf + zstd (portlibs)
 #---------------------------------------------------------------------------------
 .SUFFIXES:
 
@@ -22,13 +22,13 @@ include $(DEVKITPRO)/libnx/switch_rules
 #---------------------------------------------------------------------------------
 TARGET      := TomoToolNX
 APP_TITLE   := TomoToolNX
-APP_AUTHOR  := miiazertyy
+APP_AUTHOR  := Imprimante
 APP_VERSION := 1.1.0
 BUILD		:=	build
 SOURCES		:=	source
 DATA		:=	data
 INCLUDES	:=	include
-ROMFS		:=
+ROMFS		:=	
 
 #---------------------------------------------------------------------------------
 # options for code generation
@@ -46,7 +46,7 @@ CXXFLAGS	:= $(CFLAGS) -std=c++17 -fno-rtti -fno-exceptions
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
-LIBS	:= -lSDL2_image -lSDL2 -lpng -ljpeg -lwebp -lz -lzstd -lEGL -lglapi -ldrm_nouveau -lnx
+LIBS	:= -lSDL2_ttf -lfreetype -lharfbuzz -lbz2 -lSDL2_image -lSDL2 -lpng -ljpeg -lwebp -lz -lzstd -lEGL -lglapi -ldrm_nouveau -lnx
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries

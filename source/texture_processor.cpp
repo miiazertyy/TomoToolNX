@@ -536,21 +536,6 @@ std::string DecodeFile(const std::string& path, RgbaImage& out, bool noSrgb) {
 // PNG I/O via SDL2_image  (no exceptions)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Pad a non-square image to square by centering it on a transparent background.
-// This prevents cropping when the source isn't square.
-static RgbaImage PadToSquare(const RgbaImage& src) {
-    int size = std::max(src.width, src.height);
-    if (src.width == src.height) return src;
-    RgbaImage dst(size, size);
-    // dst.pixels is zero-initialized (transparent black)
-    int ox = (size - src.width)  / 2;
-    int oy = (size - src.height) / 2;
-    for (int y = 0; y < src.height; y++)
-        memcpy(dst.pixels.data() + ((oy+y)*size + ox)*4,
-               src.pixels.data() + y*src.width*4,
-               src.width * 4);
-    return dst;
-}
 
 // Threshold alpha to eliminate semi-transparent edge fringing.
 // Pixels with alpha < threshold become fully transparent (discarded).
