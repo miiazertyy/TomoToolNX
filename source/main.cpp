@@ -331,7 +331,7 @@ static void DrawUpdateAvailable() {
     SDL_RenderClear(gRen);
     DrawHeader("");
     DrawTextC("update available!", SCREEN_W/2, SCREEN_H/2-40, COL_GREEN, Font::Lg);
-    DrawTextC("v" APP_VERSION + std::string("  →  v") + Updater::GetLatestVersion(),
+    DrawTextC("v" APP_VERSION + std::string("  ->  v") + Updater::GetLatestVersion(),
               SCREEN_W/2, SCREEN_H/2+2, COL_TEXT, Font::Md);
     DrawFooter("A  download and install    B  skip    +  quit");
     SDL_RenderPresent(gRen);
@@ -533,7 +533,8 @@ static void DrawOnSwitch() {
             bool sel=(idx==gEntrySel);
             FillRect(LIST_X,LIST_Y+LIST_PAD_TOP+i*ITEM_H,LIST_W,ITEM_H-1, sel?COL_SEL:COL_BG);
             if(sel) DrawRect(LIST_X,LIST_Y+LIST_PAD_TOP+i*ITEM_H,LIST_W,ITEM_H-1,COL_ACCENT);
-            DrawText(gEntries[idx].stem, LIST_X+6, LIST_Y+LIST_PAD_TOP+i*ITEM_H+6, sel?COL_TEXT:COL_DIM);
+            { TTF_Font* f=GetFont(Font::Sm); int fw=0,fh=0; if(f)TTF_SizeUTF8(f,gEntries[idx].stem.c_str(),&fw,&fh);
+                    DrawText(gEntries[idx].stem, LIST_X+6, LIST_Y+LIST_PAD_TOP+i*ITEM_H+(ITEM_H-fh)/2, sel?COL_TEXT:COL_DIM); }
         }
         if ((int)gEntries.size()>VISIBLE){
             int barH=LIST_H*VISIBLE/gEntries.size();
@@ -570,7 +571,8 @@ static void DrawOnSwitch() {
             if(sel) DrawRect(LIST_X,LIST_Y+LIST_PAD_TOP+i*ITEM_H,LIST_W,ITEM_H-1,COL_GOLD);
             std::string label=gMiis[idx].name;
             if(gMiis[idx].hasFacepaint) label+=" *";
-            DrawText(label, LIST_X+6, LIST_Y+LIST_PAD_TOP+i*ITEM_H+6, sel?COL_TEXT:COL_DIM);
+            { TTF_Font* f=GetFont(Font::Sm); int fw=0,fh=0; if(f)TTF_SizeUTF8(f,label.c_str(),&fw,&fh);
+                    DrawText(label, LIST_X+6, LIST_Y+LIST_PAD_TOP+i*ITEM_H+(ITEM_H-fh)/2, sel?COL_TEXT:COL_DIM); }
         }
         if ((int)gMiis.size()>VISIBLE){
             int barH=LIST_H*VISIBLE/gMiis.size();
@@ -581,11 +583,31 @@ static void DrawOnSwitch() {
         DrawRect(PREVIEW_X,PREVIEW_Y,PREVIEW_W,PREVIEW_H,COL_BORDER);
         if (!gMiis.empty()) {
             const auto& m=gMiis[gMiiSel];
-            DrawTextC(m.name, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+30, COL_TEXT, Font::Lg);
-            DrawTextC("slot "+std::to_string(m.slot)+(m.hasFacepaint?"   has facepaint":""),
-                      PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+72, COL_DIM);
-            DrawTextC("A  import .ltd", PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+110, COL_ACCENT);
-            DrawTextC("Y  export .ltd", PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+138, COL_GOLD);
+            int cx = PREVIEW_X+PREVIEW_W/2;
+            int cy = PREVIEW_Y+PREVIEW_H/2;
+
+            // Name — large, centered vertically in upper half
+            DrawTextC(m.name, cx, PREVIEW_Y+PREVIEW_H/4, COL_TEXT, Font::Lg);
+
+            // Slot + facepaint badge below name
+            std::string meta = "slot "+std::to_string(m.slot);
+            if (m.hasFacepaint) meta += "   ·   has facepaint";
+            DrawTextC(meta, cx, PREVIEW_Y+PREVIEW_H/4+44, COL_DIM);
+
+            // Divider
+            FillRect(PREVIEW_X+40, cy-1, PREVIEW_W-80, 1, COL_BORDER);
+
+            // Import / Export buttons — styled boxes in lower half
+            int btnW=220, btnH=46, gap=24;
+            int btn1X=cx-btnW-gap/2, btn2X=cx+gap/2, btnY=cy+30;
+
+            FillRect(btn1X,btnY,btnW,btnH,COL_SEL);
+            DrawRect(btn1X,btnY,btnW,btnH,COL_ACCENT);
+            DrawTextC("A   import .ltd", btn1X+btnW/2, btnY+btnH/2, COL_ACCENT, Font::Md);
+
+            FillRect(btn2X,btnY,btnW,btnH,COL_PANEL);
+            DrawRect(btn2X,btnY,btnW,btnH,COL_GOLD);
+            DrawTextC("Y   export .ltd", btn2X+btnW/2, btnY+btnH/2, COL_GOLD, Font::Md);
         }
         if (!gOnSwitchMsg.empty())
             DrawTextC(gOnSwitchMsg, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H+14, gOnSwitchMsgCol);
