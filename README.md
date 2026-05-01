@@ -5,9 +5,9 @@ A Nintendo Switch homebrew tool for editing Tomodachi Life UGC textures and Miis
 Based on [LivinTheDreamToolkit](https://gamebanana.com/tools/22435) by the UGC editor contributors.
 Mii sharing based on [ShareMii](https://github.com/Star-F0rce/ShareMii) by Star-F0rce.
 
-<img src="https://i.imgur.com/QQ9qFNz.png" width="640">
-<img src="https://i.imgur.com/u4KvIKd.png" width="640">
-
+<img src="https://i.imgur.com/KRxI1qw.png" width="320">
+<img src="https://i.imgur.com/E6wlQGr.png" width="320">
+<img src="https://i.imgur.com/SuKirsn.png" width="320">
 ---
 
 ## Requirements
