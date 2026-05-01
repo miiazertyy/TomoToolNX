@@ -16,6 +16,7 @@ namespace SaveMount {
 struct UserInfo {
     AccountUid uid;
     std::string nickname;
+    std::vector<uint8_t> avatarJpeg; // raw JPEG bytes of profile image, may be empty
 };
 
 // Get all user accounts on the system

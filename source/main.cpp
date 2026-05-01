@@ -136,13 +136,14 @@ static int DrawTextBox(const std::string& text, int cx, int y, SDL_Color textCol
 
 // ─── Screens ──────────────────────────────────────────────────────────────────
 
-enum class Screen { UpdatePrompt, UpdateCheck, UpdateAvailable, Downloading, UserPick, BackupPrompt, BackingUp, ModePick, Mounting, WebUI, OnSwitch, Error };
+enum class Screen { UpdateCheck, UpdateAvailable, Downloading, UserPick, BackupPrompt, BackingUp, Mounting, OnSwitch, Error };
 
-static Screen      gScreen  = Screen::UpdatePrompt;
+static Screen      gScreen  = Screen::UpdateCheck;
 static std::string gError;
 static std::string gIP;
 static std::vector<SaveMount::UserInfo> gUsers;
 static int         gUserSel = 0;
+static std::vector<SDL_Texture*> gAvatarTextures;
 
 // ─── Log (WebUI screen) ───────────────────────────────────────────────────────
 
@@ -159,7 +160,7 @@ static void LogERR(const std::string& m){Log(m,COL_RED);}
 
 // ─── On-Switch editor state ───────────────────────────────────────────────────
 
-enum class OnSwitchMode { UGC, Mii };
+enum class OnSwitchMode { UGC, Mii, WebUI };
 static OnSwitchMode gOnSwitchMode = OnSwitchMode::UGC;
 
 static std::vector<UgcTextureEntry> gEntries;
@@ -299,9 +300,13 @@ static void DoOnSwitchImport(const std::string& pngPath) {
 static void DrawHeader(const std::string& title) {
     FillRect(0,0,SCREEN_W,28,COL_PANEL);
     DrawRect(0,27,SCREEN_W,1,COL_BORDER);
+    // Font::Sm = 16px, vertically centered in 28px bar → y=6
     DrawText("TomoToolNX",10,6,COL_GOLD);
-    if (!title.empty())
-        DrawText("  /  "+title, 10+100, 6, COL_DIM);
+    if (!title.empty()) {
+        TTF_Font* fsm=GetFont(Font::Sm); int tw=0,th=0;
+        if(fsm) TTF_SizeUTF8(fsm,"TomoToolNX",&tw,&th);
+        DrawText(" / "+title, 10+tw, 6, COL_DIM);
+    }
 }
 
 static void DrawFooter(const std::string& hints) {
@@ -311,16 +316,6 @@ static void DrawFooter(const std::string& hints) {
 }
 
 // ─── Screen draws ─────────────────────────────────────────────────────────────
-
-static void DrawUpdatePrompt() {
-    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
-    SDL_RenderClear(gRen);
-    DrawHeader("");
-    DrawTextC("check for updates?", SCREEN_W/2, SCREEN_H/2-30, COL_TEXT, Font::Md);
-    DrawTextC("current version: v" APP_VERSION, SCREEN_W/2, SCREEN_H/2+4, COL_DIM);
-    DrawFooter("A  yes    B  skip    +  quit");
-    SDL_RenderPresent(gRen);
-}
 
 static void DrawUpdateCheck() {
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
@@ -371,16 +366,21 @@ static void DrawUserPick() {
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
     SDL_RenderClear(gRen);
     DrawHeader("");
-    DrawTextC("select user", SCREEN_W/2, 44, COL_DIM);
+    DrawTextC("select user", SCREEN_W/2, 36, COL_DIM);
     {
     TTF_Font* fMd3=GetFont(Font::Md); int mh=0,tmp2=0;
     if(fMd3) TTF_SizeUTF8(fMd3,"A",&tmp2,&mh);
-    int itemH=mh+16, listTop=66;
+    int avatarSize=mh+16, itemH=avatarSize, listTop=56, listW=480;
     for (int i=0;i<(int)gUsers.size();i++){
         bool sel=(i==gUserSel);
-        FillRect(SCREEN_W/2-280,listTop+i*(itemH+4),560,itemH, sel?COL_SEL:COL_PANEL);
-        if(sel) DrawRect(SCREEN_W/2-280,listTop+i*(itemH+4),560,itemH,COL_ACCENT);
-        DrawTextC(gUsers[i].nickname, SCREEN_W/2, listTop+i*(itemH+4)+itemH/2, sel?COL_TEXT:COL_DIM, Font::Md);
+        int iy=listTop+i*(itemH+4), ix=SCREEN_W/2-listW/2;
+        FillRect(ix,iy,listW,itemH, sel?COL_SEL:COL_PANEL);
+        if(sel) DrawRect(ix,iy,listW,itemH,COL_ACCENT);
+        if (i<(int)gAvatarTextures.size()&&gAvatarTextures[i]) {
+            SDL_Rect dst{ix+4,iy+2,avatarSize-4,avatarSize-4};
+            SDL_RenderCopy(gRen,gAvatarTextures[i],nullptr,&dst);
+        }
+        DrawText(gUsers[i].nickname, ix+avatarSize+16, iy+itemH/2-mh/2, sel?COL_TEXT:COL_DIM, Font::Md);
     }
     }
     DrawFooter("Up/Down  navigate    A  select    +  quit");
@@ -447,50 +447,6 @@ static void DrawBackingUp() {
     SDL_RenderPresent(gRen);
 }
 
-static void DrawModePick() {
-    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
-    SDL_RenderClear(gRen);
-    DrawHeader("");
-    DrawTextC("choose mode", SCREEN_W/2, 62, COL_DIM);
-
-    // Measure text to size cards dynamically
-    TTF_Font* fLg=GetFont(Font::Lg), *fSm=GetFont(Font::Sm), *fMd=GetFont(Font::Md);
-    int gap=24, padX=28, padY=14;
-    auto cardW = [&](const std::string& main, const std::string& sub) {
-        int w1=0,w2=0,h=0;
-        if(fLg) TTF_SizeUTF8(fLg,main.c_str(),&w1,&h);
-        if(fSm) TTF_SizeUTF8(fSm,sub.c_str(),&w2,&h);
-        return std::max(w1,w2)+padX*2;
-    };
-    int cw1=cardW("WebUI","browser on PC or phone");
-    int cw2=cardW("On-Switch","controller, no network");
-    int cw=std::max(cw1,cw2);
-
-    // Card height: Lg title + gap + Sm sub + gap + Md button
-    int lgh=0,smh=0,mdh=0;
-    if(fLg) TTF_SizeUTF8(fLg,"A",&lgh,&lgh);
-    if(fSm) TTF_SizeUTF8(fSm,"A",&smh,&smh);
-    if(fMd) TTF_SizeUTF8(fMd,"A",&mdh,&mdh);
-    int ch = padY + lgh + 10 + smh + 10 + mdh + padY;
-
-    int cy=82, cx1=SCREEN_W/2-cw-gap/2, cx2=SCREEN_W/2+gap/2;
-
-    // WebUI card
-    FillRect(cx1,cy,cw,ch,COL_PANEL); DrawRect(cx1,cy,cw,ch,COL_ACCENT);
-    DrawTextC("WebUI",                 cx1+cw/2, cy+padY+lgh/2,                COL_TEXT, Font::Lg);
-    DrawTextC("browser on PC or phone",cx1+cw/2, cy+padY+lgh+10+smh/2,         COL_DIM);
-    DrawTextC("[L]",                   cx1+cw/2, cy+padY+lgh+10+smh+10+mdh/2,  COL_ACCENT, Font::Md);
-
-    // On-Switch card
-    FillRect(cx2,cy,cw,ch,COL_PANEL); DrawRect(cx2,cy,cw,ch,COL_GOLD);
-    DrawTextC("On-Switch",             cx2+cw/2, cy+padY+lgh/2,                COL_TEXT, Font::Lg);
-    DrawTextC("controller, no network",cx2+cw/2, cy+padY+lgh+10+smh/2,         COL_DIM);
-    DrawTextC("[R]",                   cx2+cw/2, cy+padY+lgh+10+smh+10+mdh/2,  COL_GOLD, Font::Md);
-
-    DrawFooter("L  WebUI mode    R  On-Switch mode    B  back    +  quit");
-    SDL_RenderPresent(gRen);
-}
-
 static void DrawMounting() {
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
     SDL_RenderClear(gRen);
@@ -498,56 +454,9 @@ static void DrawMounting() {
     SDL_RenderPresent(gRen);
 }
 
-static void DrawWebUI() {
-    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
-    SDL_RenderClear(gRen);
-    DrawHeader("webui");
-
-    bool wifiActive = !gIP.empty() && gIP != "?.?.?.?";
-    std::string url = "http://"+gIP+":"+std::to_string(HTTP_PORT);
-
-    // WiFi status
-    int sy=36;
-    DrawText("WiFi : ", 16, sy, COL_DIM);
-    TTF_Font* fsm=GetFont(Font::Sm); int lw=0,lh=0;
-    if(fsm) TTF_SizeUTF8(fsm,"WiFi : ",&lw,&lh);
-    DrawText(wifiActive?"Active":"Inactive", 16+lw, sy,
-             wifiActive?COL_GREEN:COL_RED);
-
-    // URL
-    DrawTextC(url, SCREEN_W/2, sy+lh+12, COL_GOLD, Font::Md);
-
-    // QR code rendered with SDL (so user can scan with phone)
-    if (wifiActive) {
-        QR::Mat mat;
-        if (QR::build(url, mat)) {
-            int ms=5, border=2;
-            int qrSize=mat.N*ms+border*2*ms;
-            int qx=SCREEN_W-qrSize-20, qy=30;
-            // White background
-            FillRect(qx,qy,qrSize,qrSize,{255,255,255,255});
-            // Dark modules
-            SDL_SetRenderDrawColor(gRen,0,0,0,255);
-            for (int y=0;y<mat.N;y++) for (int x=0;x<mat.N;x++) {
-                if (mat.get(x,y)) {
-                    SDL_Rect r{qx+(x+border)*ms, qy+(y+border)*ms, ms, ms};
-                    SDL_RenderFillRect(gRen,&r);
-                }
-            }
-            DrawTextC("scan to open", qx+qrSize/2, qy+qrSize+12, COL_DIM);
-        }
-    }
-
-    // Log
-    int logY=36+lh+lh+28;
-    for (auto& line : gLog) { DrawText(line.text, 16, logY, line.col); logY+=20; }
-
-    DrawFooter("B  back    +  quit");
-    SDL_RenderPresent(gRen);
-}
-
-static const int LIST_X=12, LIST_W=380, LIST_Y=30, LIST_H=SCREEN_H-62, ITEM_H=28;
-static const int PREVIEW_X=400, PREVIEW_Y=30, PREVIEW_W=868, PREVIEW_H=498;
+static const int LIST_X=12, LIST_W=380, LIST_Y=64, LIST_H=SCREEN_H-96, ITEM_H=28;
+static const int LIST_PAD_TOP=6; // padding between box top and first item
+static const int PREVIEW_X=400, PREVIEW_Y=60, PREVIEW_W=868, PREVIEW_H=468;
 static const int VISIBLE = LIST_H/ITEM_H;
 
 static void DrawFilePicker(const std::vector<std::string>& files, int sel, int scroll,
@@ -577,20 +486,30 @@ static void DrawFilePicker(const std::vector<std::string>& files, int sel, int s
 }
 
 static void DrawOnSwitch() {
-    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
+    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
     SDL_RenderClear(gRen);
-    DrawHeader("on-switch");
 
-    // Mode tabs
+    // Header with subtitle
+    std::string subtitle = gOnSwitchMode==OnSwitchMode::UGC ? "textures" :
+                           gOnSwitchMode==OnSwitchMode::Mii ? "miis" : "webui";
+    DrawHeader(subtitle);
+
+    // Tab bar (below header, above content)
     {
-        int tw=180, th=24, tx=SCREEN_W/2-tw-2, ty=8;
-        FillRect(tx,ty,tw,th, gOnSwitchMode==OnSwitchMode::UGC?COL_SEL:COL_PANEL);
-        DrawRect(tx,ty,tw,th, gOnSwitchMode==OnSwitchMode::UGC?COL_ACCENT:COL_BORDER);
-        DrawTextC("textures [L]", tx+tw/2, ty+th/2, gOnSwitchMode==OnSwitchMode::UGC?COL_TEXT:COL_DIM);
-        tx=SCREEN_W/2+2;
-        FillRect(tx,ty,tw,th, gOnSwitchMode==OnSwitchMode::Mii?COL_SEL:COL_PANEL);
-        DrawRect(tx,ty,tw,th, gOnSwitchMode==OnSwitchMode::Mii?COL_GOLD:COL_BORDER);
-        DrawTextC("miis [R]", tx+tw/2, ty+th/2, gOnSwitchMode==OnSwitchMode::Mii?COL_TEXT:COL_DIM);
+        int tw=180, th=22, gap=4;
+        int totalW=tw*3+gap*2, tx=SCREEN_W/2-totalW/2, ty=28;
+        struct { const char* label; OnSwitchMode mode; SDL_Color col; } tabs[]={
+            {"textures", OnSwitchMode::UGC,   COL_ACCENT},
+            {"miis",         OnSwitchMode::Mii,   COL_GOLD},
+            {"webui",    OnSwitchMode::WebUI, COL_GREEN},
+        };
+        for (auto& t : tabs) {
+            bool sel = gOnSwitchMode==t.mode;
+            FillRect(tx,ty,tw,th, sel?COL_SEL:COL_PANEL);
+            DrawRect(tx,ty,tw,th, sel?t.col:COL_BORDER);
+            DrawTextC(t.label, tx+tw/2, ty+th/2, sel?t.col:COL_DIM);
+            tx+=tw+gap;
+        }
     }
 
     // ── File pickers (overlay) ───────────────────────────────────────────────
@@ -603,17 +522,17 @@ static void DrawOnSwitch() {
         SDL_RenderPresent(gRen); return;
     }
 
-    // ── UGC mode ─────────────────────────────────────────────────────────────
+    // ── UGC tab ──────────────────────────────────────────────────────────────
     if (gOnSwitchMode == OnSwitchMode::UGC) {
-        FillRect(LIST_X-4,LIST_Y-4,LIST_W+8,LIST_H+8,COL_PANEL);
-        DrawRect(LIST_X-4,LIST_Y-4,LIST_W+8,LIST_H+8,COL_BORDER);
+        FillRect(LIST_X-4,LIST_Y,LIST_W+8,LIST_H+4,COL_PANEL);
+        DrawRect(LIST_X-4,LIST_Y,LIST_W+8,LIST_H+4,COL_BORDER);
         for (int i=0;i<VISIBLE;i++){
             int idx=gEntryScroll+i;
             if (idx>=(int)gEntries.size()) break;
             bool sel=(idx==gEntrySel);
-            FillRect(LIST_X,LIST_Y+i*ITEM_H,LIST_W,ITEM_H-1, sel?COL_SEL:COL_BG);
-            if(sel) DrawRect(LIST_X,LIST_Y+i*ITEM_H,LIST_W,ITEM_H-1,COL_ACCENT);
-            DrawText(gEntries[idx].stem, LIST_X+6, LIST_Y+i*ITEM_H+6, sel?COL_TEXT:COL_DIM);
+            FillRect(LIST_X,LIST_Y+LIST_PAD_TOP+i*ITEM_H,LIST_W,ITEM_H-1, sel?COL_SEL:COL_BG);
+            if(sel) DrawRect(LIST_X,LIST_Y+LIST_PAD_TOP+i*ITEM_H,LIST_W,ITEM_H-1,COL_ACCENT);
+            DrawText(gEntries[idx].stem, LIST_X+6, LIST_Y+LIST_PAD_TOP+i*ITEM_H+6, sel?COL_TEXT:COL_DIM);
         }
         if ((int)gEntries.size()>VISIBLE){
             int barH=LIST_H*VISIBLE/gEntries.size();
@@ -629,38 +548,34 @@ static void DrawOnSwitch() {
             SDL_Rect dst{PREVIEW_X+(PREVIEW_W-dw)/2, PREVIEW_Y+(PREVIEW_H-dh)/2, dw, dh};
             SDL_RenderCopy(gRen,gPreviewTex,nullptr,&dst);
             DrawTextC(gPreviewStem+" ("+std::to_string(tw)+"x"+std::to_string(th)+")",
-                      PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H+16, COL_DIM);
+                      PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H+14, COL_DIM);
         } else {
             DrawTextC("no preview", PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H/2, COL_BORDER);
         }
         if (!gOnSwitchMsg.empty())
-            DrawTextC(gOnSwitchMsg, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H+10, gOnSwitchMsgCol);
-        int logY = PREVIEW_Y+PREVIEW_H+30;
-        for (auto& line : gLog) { DrawText(line.text, PREVIEW_X, logY, line.col); logY+=20; }
-        DrawFooter("Up/Down  select    A  import PNG    Y  export PNG    R  miis tab    B  back    +  quit");
+            DrawTextC(gOnSwitchMsg, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H+14, gOnSwitchMsgCol);
+        DrawFooter("Up/Down  navigate    A  import PNG    Y  export PNG    L/R  switch tab    B  back");
     }
 
-    // ── Mii mode ─────────────────────────────────────────────────────────────
-    else {
-        FillRect(LIST_X-4,LIST_Y-4,LIST_W+8,LIST_H+8,COL_PANEL);
-        DrawRect(LIST_X-4,LIST_Y-4,LIST_W+8,LIST_H+8,COL_BORDER);
+    // ── Mii tab ───────────────────────────────────────────────────────────────
+    else if (gOnSwitchMode == OnSwitchMode::Mii) {
+        FillRect(LIST_X-4,LIST_Y,LIST_W+8,LIST_H+4,COL_PANEL);
+        DrawRect(LIST_X-4,LIST_Y,LIST_W+8,LIST_H+4,COL_BORDER);
         for (int i=0;i<VISIBLE;i++){
             int idx=gMiiScroll+i;
             if (idx>=(int)gMiis.size()) break;
             bool sel=(idx==gMiiSel);
-            FillRect(LIST_X,LIST_Y+i*ITEM_H,LIST_W,ITEM_H-1, sel?COL_SEL:COL_BG);
-            if(sel) DrawRect(LIST_X,LIST_Y+i*ITEM_H,LIST_W,ITEM_H-1,COL_GOLD);
+            FillRect(LIST_X,LIST_Y+LIST_PAD_TOP+i*ITEM_H,LIST_W,ITEM_H-1, sel?COL_SEL:COL_BG);
+            if(sel) DrawRect(LIST_X,LIST_Y+LIST_PAD_TOP+i*ITEM_H,LIST_W,ITEM_H-1,COL_GOLD);
             std::string label=gMiis[idx].name;
             if(gMiis[idx].hasFacepaint) label+=" *";
-            DrawText(label, LIST_X+6, LIST_Y+i*ITEM_H+6, sel?COL_TEXT:COL_DIM);
+            DrawText(label, LIST_X+6, LIST_Y+LIST_PAD_TOP+i*ITEM_H+6, sel?COL_TEXT:COL_DIM);
         }
         if ((int)gMiis.size()>VISIBLE){
             int barH=LIST_H*VISIBLE/gMiis.size();
             int barY=LIST_Y+LIST_H*gMiiScroll/gMiis.size();
             FillRect(LIST_X+LIST_W+2,barY,4,barH,COL_BORDER);
         }
-
-        // Detail panel
         FillRect(PREVIEW_X,PREVIEW_Y,PREVIEW_W,PREVIEW_H,{8,8,8,255});
         DrawRect(PREVIEW_X,PREVIEW_Y,PREVIEW_W,PREVIEW_H,COL_BORDER);
         if (!gMiis.empty()) {
@@ -672,11 +587,88 @@ static void DrawOnSwitch() {
             DrawTextC("Y  export .ltd", PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+138, COL_GOLD);
         }
         if (!gOnSwitchMsg.empty())
-            DrawTextC(gOnSwitchMsg, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H+20, gOnSwitchMsgCol);
-        // Activity log
-        int mlogY = PREVIEW_Y+PREVIEW_H+38;
-        for (auto& line : gLog) { DrawText(line.text, PREVIEW_X, mlogY, line.col); mlogY+=20; }
-        DrawFooter("Up/Down  select    A  import .ltd    Y  export .ltd    L  textures tab    B  back    +  quit");
+            DrawTextC(gOnSwitchMsg, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H+14, gOnSwitchMsgCol);
+        DrawFooter("Up/Down  navigate    A  import .ltd    Y  export .ltd    L/R  switch tab    B  back");
+    }
+
+    // ── WebUI tab ─────────────────────────────────────────────────────────────
+    else {
+        bool wifiActive = !gIP.empty() && gIP!="?.?.?.?";
+        std::string url = "http://"+gIP+":"+std::to_string(HTTP_PORT);
+
+        // Layout: log box on left, wifi status + QR on right
+        int margin=12;
+        int contentY = LIST_Y;
+        int contentH = SCREEN_H-contentY-32;
+
+        // Log box — left half
+        int logBoxW = SCREEN_W/2-margin-margin/2;
+        int logBoxH = contentH;
+        FillRect(margin,contentY,logBoxW,logBoxH,COL_PANEL);
+        DrawRect(margin,contentY,logBoxW,logBoxH,COL_BORDER);
+        DrawText("activity log", margin+8, contentY+6, COL_DIM);
+        {
+            int logY=contentY+26, logMaxY=contentY+logBoxH-10, lineH=20;
+            int maxLines=(logMaxY-logY)/lineH;
+            int startLine=(int)gLog.size()>maxLines?(int)gLog.size()-maxLines:0;
+            for (int i=startLine;i<(int)gLog.size();i++) {
+                if (logY+lineH>logMaxY) break;
+                DrawText(gLog[i].text, margin+8, logY, gLog[i].col);
+                logY+=lineH;
+            }
+            if (gLog.empty())
+                DrawTextC("no activity yet", margin+logBoxW/2, contentY+logBoxH/2, COL_BORDER);
+        }
+
+        // Right half — QR top, then WiFi status, then URL
+        int rightX = SCREEN_W/2+margin/2;
+        int rightW = SCREEN_W-rightX-margin;
+
+        // QR code at the top of right column
+        if (wifiActive) {
+            QR::Mat mat;
+            if (QR::build(url, mat)) {
+                int qrAvailW = rightW;
+                int qrAvailH = contentH - 60; // leave room for wifi + url below
+                int ms = std::min(qrAvailW, qrAvailH) / (mat.N+4);
+                if (ms<3) ms=3;
+                int border=2;
+                int qrSize=mat.N*ms+border*2*ms;
+                int qrX=rightX+(rightW-qrSize)/2;
+                int qrY=contentY;
+                FillRect(qrX,qrY,qrSize,qrSize,{255,255,255,255});
+                SDL_SetRenderDrawColor(gRen,0,0,0,255);
+                for (int y=0;y<mat.N;y++) for (int x=0;x<mat.N;x++) {
+                    if (mat.get(x,y)) {
+                        SDL_Rect r{qrX+(x+border)*ms, qrY+(y+border)*ms, ms, ms};
+                        SDL_RenderFillRect(gRen,&r);
+                    }
+                }
+                DrawTextC("scan to open", rightX+rightW/2, qrY+qrSize+10, COL_DIM);
+
+                // WiFi status below QR
+                int statusY = qrY+qrSize+28;
+                TTF_Font* fsm=GetFont(Font::Sm); int lw=0,lh=0;
+                if(fsm) TTF_SizeUTF8(fsm,"WiFi : ",&lw,&lh);
+                int totalStatusW=0; int iw=0;
+                if(fsm) TTF_SizeUTF8(fsm,wifiActive?"Active":"Inactive",&iw,&lh);
+                totalStatusW=lw+iw;
+                int sxBase=rightX+(rightW-totalStatusW)/2;
+                DrawText("WiFi : ", sxBase, statusY, COL_DIM);
+                DrawText(wifiActive?"Active":"Inactive", sxBase+lw, statusY, wifiActive?COL_GREEN:COL_RED);
+
+                // URL below WiFi (Font::Md = bigger)
+                DrawTextC(url, rightX+rightW/2, statusY+lh+10, COL_GOLD, Font::Md);
+            }
+        } else {
+            // No wifi — just show status
+            TTF_Font* fsm=GetFont(Font::Sm); int lw=0,lh=0;
+            if(fsm) TTF_SizeUTF8(fsm,"WiFi : ",&lw,&lh);
+            DrawText("WiFi : ", rightX, contentY+contentH/2-lh, COL_DIM);
+            DrawText("Inactive", rightX+lw, contentY+contentH/2-lh, COL_RED);
+        }
+
+        DrawFooter("L/R  switch tab    B  back    +  quit");
     }
 
     SDL_RenderPresent(gRen);
@@ -711,10 +703,34 @@ int main(int,char**) {
     padInitializeDefault(&gPad);
     mkdir("/switch/TomoToolNX", 0777);
 
+    // Auto-check for updates only if WiFi is active — no prompt
+    {
+        std::string ip = SaveMount::GetLocalIP();
+        if (!ip.empty()) {
+            Updater::StartCheck();
+            gScreen = Screen::UpdateCheck;
+        } else {
+            gScreen = Screen::UserPick;
+        }
+    }
+
     gUsers=SaveMount::GetUsers();
     if (gUsers.empty()){
         gError="No user accounts found.";
         gScreen=Screen::Error;
+    }
+
+    // Load avatar textures from JPEG data
+    for (auto& u : gUsers) {
+        SDL_Texture* tex = nullptr;
+        if (!u.avatarJpeg.empty()) {
+            SDL_RWops* rw = SDL_RWFromConstMem(u.avatarJpeg.data(), (int)u.avatarJpeg.size());
+            if (rw) {
+                SDL_Surface* surf = IMG_Load_RW(rw, 1);
+                if (surf) { tex = SDL_CreateTextureFromSurface(gRen, surf); SDL_FreeSurface(surf); }
+            }
+        }
+        gAvatarTextures.push_back(tex);
     }
 
     bool running = true; (void)running;
@@ -727,20 +743,12 @@ int main(int,char**) {
 
         switch (gScreen) {
 
-        case Screen::UpdatePrompt:
-            if (kDown&HidNpadButton_A) {
-                Updater::StartCheck();
-                gScreen=Screen::UpdateCheck;
-            }
-            if (kDown&HidNpadButton_B) { gScreen=Screen::UserPick; }
-            DrawUpdatePrompt();
-            break;
-
         case Screen::UpdateCheck:
+            // Auto-check: started at launch only if WiFi is active
             {
                 auto state = Updater::GetState();
                 if (state==Updater::State::UpdateAvailable) gScreen=Screen::UpdateAvailable;
-                else if (state==Updater::State::NoUpdate||state==Updater::State::Error)
+                else if (state==Updater::State::NoUpdate||state==Updater::State::Error||state==Updater::State::Idle)
                     gScreen=Screen::UserPick;
             }
             DrawUpdateCheck();
@@ -798,7 +806,7 @@ int main(int,char**) {
             }
             if (kDown&HidNpadButton_B) {
                 // Keep old, skip backup — go straight to mode picker
-                gScreen=Screen::ModePick;
+                gScreen=Screen::OnSwitch;
             }
             if (kDown&HidNpadButton_X) {
                 // Keep old (rename save/ to save_old/), then make new save/
@@ -811,70 +819,29 @@ int main(int,char**) {
 
         case Screen::BackingUp:
             if (BackupService::BackupDone()) {
-                gScreen=Screen::ModePick;
+                gScreen=Screen::OnSwitch;
             }
             DrawBackingUp();
             break;
 
-        case Screen::ModePick:
-            if (kDown&HidNpadButton_B) {
-                // Back to user pick — unmount save
-                SaveMount::Unmount();
-                gScreen=Screen::UserPick;
-            }
-            if (kDown&HidNpadButton_L || kDown&HidNpadButton_ZL) {
-                gIP=SaveMount::GetLocalIP();
-                if (gIP.empty()) gIP="?.?.?.?";
-                HttpServer::Start(HTTP_PORT, SAVE_UGC_PATH);
-                gScreen=Screen::WebUI;
-            }
-            if (kDown&HidNpadButton_R || kDown&HidNpadButton_ZR) {
-                gEntries=UgcScanner::Scan(SAVE_UGC_PATH);
-                gMiis=MiiManager::ListMiis();
-                gEntrySel=0; gEntryScroll=0;
-                FreePreview();
-                gOnSwitchMsg="";
-                if (!gEntries.empty()) LoadPreview(gEntries[0]);
-                gScreen=Screen::OnSwitch;
-            }
-            DrawModePick();
-            break;
-
         case Screen::Mounting:
             DrawMounting();
-            break;
-
-        case Screen::WebUI:
-            if (kDown&HidNpadButton_B){
-                HttpServer::Stop();
-                gLog.clear();
-                gScreen=Screen::ModePick;
-                break;
-            }
-            {
-                std::vector<HttpServer::LogEntry> httpLogs;
-                HttpServer::DrainLog(httpLogs);
-                for (auto& hl:httpLogs) Log(hl.text, hl.isError?COL_RED:COL_ACCENT);
-            }
-            if (HttpServer::HasPendingImport()) {
-                auto job=HttpServer::TakePendingImport();
-                std::string importErr=TextureProcessor::ImportPng(job.opts);
-                remove(job.tmpPath.c_str());
-                HttpServer::FinishImport(importErr);
-                if (!importErr.empty()) LogERR("Import: "+importErr);
-                else LogOK("Import OK");
-            }
-            if (HttpServer::HasPendingCommit()) {
-                LogINF("Committing save...");
-                HttpServer::ClearPendingCommit();
-                std::string cerr=SaveMount::Commit();
-                if (cerr.empty()) LogOK("Saved");
-                else LogERR("Commit: "+cerr);
-            }
-            DrawWebUI();
+            // Init happens in mounting thread — once save is mounted we go to OnSwitch
+            // and start both HTTP server and scan entries
             break;
 
         case Screen::OnSwitch:
+            // On first entry: start HTTP server, scan UGC and Miis
+            if (gEntries.empty() && gMiis.empty()) {
+                gIP=SaveMount::GetLocalIP();
+                if (gIP.empty()) gIP="?.?.?.?";
+                HttpServer::Start(HTTP_PORT, SAVE_UGC_PATH);
+                gEntries=UgcScanner::Scan(SAVE_UGC_PATH);
+                gMiis=MiiManager::ListMiis();
+                gEntrySel=0; gEntryScroll=0;
+                gOnSwitchMsg="";
+                if (!gEntries.empty()) LoadPreview(gEntries[0]);
+            }
             // File pickers take priority
             if (gShowPngPicker) {
                 if (kDown&HidNpadButton_Up){
@@ -915,6 +882,9 @@ int main(int,char**) {
                     if(gMiis.empty()) gMiis=MiiManager::ListMiis();
                     gOnSwitchMsg=""; break;
                 }
+                if (kDown&HidNpadButton_L||kDown&HidNpadButton_ZL){
+                    gOnSwitchMode=OnSwitchMode::WebUI; gOnSwitchMsg=""; break;
+                }
                 if (kDown&HidNpadButton_Up){
                     if(gEntrySel>0){
                         gEntrySel--;
@@ -952,12 +922,16 @@ int main(int,char**) {
                 }
                 if (kDown&HidNpadButton_B){
                     FreePreview(); HttpServer::Stop(); gLog.clear();
-                    gScreen=Screen::ModePick;
+                    gEntries.clear(); gMiis.clear();
+                    gScreen=Screen::UserPick; SaveMount::Unmount();
                 }
-            } else { // Mii mode
+            } else if (gOnSwitchMode == OnSwitchMode::Mii) {
                 // Tab switch
                 if (kDown&HidNpadButton_L||kDown&HidNpadButton_ZL){
                     gOnSwitchMode=OnSwitchMode::UGC; gOnSwitchMsg=""; break;
+                }
+                if (kDown&HidNpadButton_R||kDown&HidNpadButton_ZR){
+                    gOnSwitchMode=OnSwitchMode::WebUI; gOnSwitchMsg=""; break;
                 }
                 if (kDown&HidNpadButton_Up){
                     if(gMiiSel>0){gMiiSel--;if(gMiiSel<gMiiScroll)gMiiScroll=gMiiSel;}
@@ -988,7 +962,41 @@ int main(int,char**) {
                 }
                 if (kDown&HidNpadButton_B){
                     FreePreview(); HttpServer::Stop(); gLog.clear();
-                    gScreen=Screen::ModePick;
+                    gEntries.clear(); gMiis.clear();
+                    gScreen=Screen::UserPick; SaveMount::Unmount();
+                }
+            } else { // WebUI tab
+                // Handle HTTP server events
+                {
+                    std::vector<HttpServer::LogEntry> httpLogs;
+                    HttpServer::DrainLog(httpLogs);
+                    for (auto& hl:httpLogs) Log(hl.text, hl.isError?COL_RED:COL_ACCENT);
+                }
+                if (HttpServer::HasPendingImport()) {
+                    auto job=HttpServer::TakePendingImport();
+                    std::string importErr=TextureProcessor::ImportPng(job.opts);
+                    remove(job.tmpPath.c_str());
+                    HttpServer::FinishImport(importErr);
+                    if (!importErr.empty()) LogERR("Import: "+importErr);
+                    else { LogOK("Import OK"); gEntries=UgcScanner::Scan(SAVE_UGC_PATH); }
+                }
+                if (HttpServer::HasPendingCommit()) {
+                    LogINF("Committing save...");
+                    HttpServer::ClearPendingCommit();
+                    std::string cerr=SaveMount::Commit();
+                    if (cerr.empty()) LogOK("Saved"); else LogERR("Commit: "+cerr);
+                }
+                // Tab switch
+                if (kDown&HidNpadButton_L||kDown&HidNpadButton_ZL){
+                    gOnSwitchMode=OnSwitchMode::Mii; gOnSwitchMsg=""; break;
+                }
+                if (kDown&HidNpadButton_R||kDown&HidNpadButton_ZR){
+                    gOnSwitchMode=OnSwitchMode::UGC; gOnSwitchMsg=""; break;
+                }
+                if (kDown&HidNpadButton_B){
+                    FreePreview(); HttpServer::Stop(); gLog.clear();
+                    gEntries.clear(); gMiis.clear();
+                    gScreen=Screen::UserPick; SaveMount::Unmount();
                 }
             }
             DrawOnSwitch();

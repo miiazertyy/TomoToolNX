@@ -32,6 +32,18 @@ std::vector<UserInfo> GetUsers() {
         UserInfo info;
         info.uid = uids[i];
         info.nickname = std::string(base.nickname);
+
+        // Load avatar image
+        u32 imgSize = 0;
+        if (R_SUCCEEDED(accountProfileGetImageSize(&profile, &imgSize)) && imgSize > 0) {
+            info.avatarJpeg.resize(imgSize);
+            u32 actualSize = 0;
+            if (R_FAILED(accountProfileLoadImage(&profile, info.avatarJpeg.data(), imgSize, &actualSize)))
+                info.avatarJpeg.clear();
+            else
+                info.avatarJpeg.resize(actualSize);
+        }
+
         users.push_back(info);
         accountProfileClose(&profile);
     }

@@ -23,7 +23,7 @@ include $(DEVKITPRO)/libnx/switch_rules
 TARGET      := TomoToolNX
 APP_TITLE   := TomoToolNX
 APP_AUTHOR  := Imprimante
-APP_VERSION := 1.1.1
+APP_VERSION := 1.1.2
 BUILD		:=	build
 SOURCES		:=	source
 DATA		:=	data
@@ -41,12 +41,12 @@ CFLAGS	:=	-g -Wall -O2 -ffunction-sections \
 CFLAGS	+=	$(INCLUDE) -D__SWITCH__ \
 			-DSDL_DISABLE_IMMINTRIN_H
 
-CXXFLAGS	:= $(CFLAGS) -std=c++17 -fno-rtti -fno-exceptions -DAPP_VERSION=\"$(APP_VERSION)\"
+CXXFLAGS	:= $(CFLAGS) -std=c++17 -fno-rtti -fno-exceptions
 
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
-LIBS	:= -lcurl -lSDL2_ttf -lfreetype -lharfbuzz -lbz2 -lSDL2_image -lSDL2 -lpng -ljpeg -lwebp -lz -lzstd -lEGL -lglapi -ldrm_nouveau -lnx
+LIBS	:= -lSDL2_ttf -lfreetype -lharfbuzz -lbz2 -lSDL2_image -lSDL2 -lpng -ljpeg -lwebp -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -lz -lzstd -lEGL -lglapi -ldrm_nouveau -lnx
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries

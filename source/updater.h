@@ -4,9 +4,7 @@
 
 #include <string>
 
-#ifndef APP_VERSION
-#define APP_VERSION "0.0.0"  // fallback; real value injected by Makefile
-#endif
+#define APP_VERSION "1.1.2"  // bump this before each release
 #define GITHUB_REPO "miiazertyy/TomoToolNX"
 #define UPDATE_NRO_PATH "sdmc:/switch/TomoToolNX/TomoToolNX.nro"
 
