@@ -322,6 +322,7 @@ static void DrawUpdateCheck() {
     SDL_RenderClear(gRen);
     DrawHeader("");
     DrawTextC("checking for updates...", SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
+    DrawFooter("B  skip");
     SDL_RenderPresent(gRen);
 }
 
@@ -751,6 +752,7 @@ int main(int,char**) {
                 else if (state==Updater::State::NoUpdate||state==Updater::State::Error||state==Updater::State::Idle)
                     gScreen=Screen::UserPick;
             }
+            if (kDown&HidNpadButton_B) gScreen=Screen::UserPick;
             DrawUpdateCheck();
             break;
 
