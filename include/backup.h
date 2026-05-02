@@ -23,6 +23,11 @@ float BackupProgress();
 // True when the background thread has finished (success or error).
 bool BackupDone();
 
+// Wait for the backup thread to finish and release its resources.
+// Safe to call even if no backup was started. Must be called before
+// unmounting the save filesystem.
+void Cleanup();
+
 // Error string from the backup thread, empty on success.
 std::string BackupError();
 

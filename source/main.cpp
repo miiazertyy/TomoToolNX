@@ -171,30 +171,81 @@ static std::string  gPreviewStem;
 static std::string  gOnSwitchMsg;
 static SDL_Color    gOnSwitchMsgCol = COL_TEXT;
 
-// PNG files on SD available for import
-static std::vector<std::string> gPngFiles;
-static int gPngSel    = 0;
-static int gPngScroll = 0;
-static bool gShowPngPicker = false;
+// File browser
+struct BrowseEntry { std::string name; bool isDir; };
+static bool gShowFileBrowser = false;
+static bool gBrowseForMii    = false;
+static std::string gBrowseCurPath;
+static std::string gBrowsePngPath = "/switch/TomoToolNX";
+static std::string gBrowseLtdPath = "/switch/TomoToolNX";
+static std::vector<BrowseEntry> gBrowseEntries;
+static int gBrowseSel    = 0;
+static int gBrowseScroll = 0;
 
 // Mii state
 static std::vector<MiiManager::MiiSlot> gMiis;
 static int gMiiSel    = 0;
 static int gMiiScroll = 0;
-static std::vector<std::string> gLtdFiles;
-static int gLtdSel    = 0;
-static int gLtdScroll = 0;
-static bool gShowLtdPicker = false;
+
+// Windows-style accelerating key repeat for directional navigation.
+// Returns kDown OR any held directional buttons that should fire this frame.
+static int s_navHold[64] = {};
+static u64 NavRepeat(u64 kDown, u64 kHeld) {
+    u64 result = kDown;
+    static const u64 MASK =
+        HidNpadButton_Up    | HidNpadButton_Down  |
+        HidNpadButton_Left  | HidNpadButton_Right |
+        HidNpadButton_StickLUp   | HidNpadButton_StickLDown  |
+        HidNpadButton_StickLLeft | HidNpadButton_StickLRight |
+        HidNpadButton_StickRUp   | HidNpadButton_StickRDown  |
+        HidNpadButton_StickRLeft | HidNpadButton_StickRRight;
+    for (u64 m = MASK, bit; m; m &= ~bit) {
+        bit = m & (u64)(-(s64)m);
+        int idx = __builtin_ctzll(bit);
+        if (kHeld & bit) {
+            int f = ++s_navHold[idx];
+            if (f > 15 && (f - 15) % 2 == 0) result |= bit;
+        } else {
+            s_navHold[idx] = 0;
+        }
+    }
+    return result;
+}
 
 static void FreePreview() {
     if (gPreviewTex) { SDL_DestroyTexture(gPreviewTex); gPreviewTex=nullptr; }
     gPreviewStem = "";
 }
 
+static std::string FormatStem(const std::string& stem) {
+    static const struct { const char* key; const char* label; } MAP[] = {
+        {"ugcfood",       "Food"},
+        {"ugccloth",      "Cloth"},
+        {"ugcgoods",      "Goods"},
+        {"ugcinterior",   "Interior"},
+        {"ugcexterior",   "Exterior"},
+        {"ugcmapobject",  "Map Object"},
+        {"ugcmapfloor",   "Map Floor"},
+        {"ugcfacepaint",  "Face Paint"},
+    };
+    std::string low = stem;
+    for (auto& c : low) c = (char)tolower((unsigned char)c);
+    for (auto& m : MAP) {
+        size_t kl = strlen(m.key);
+        if (low.size() > kl && low.compare(0, kl, m.key) == 0) {
+            std::string num = stem.substr(kl);
+            size_t nz = num.find_first_not_of('0');
+            num = (nz == std::string::npos) ? "0" : num.substr(nz);
+            return std::string(m.label) + " " + num;
+        }
+    }
+    return stem;
+}
+
 static void LoadPreview(const UgcTextureEntry& e) {
     FreePreview();
     RgbaImage img;
-    std::string err = TextureProcessor::DecodeFile(e.ugctexPath, img, true);
+    std::string err = TextureProcessor::DecodeFile(e.ugctexPath, img, false);
     if (!err.empty()) { gOnSwitchMsg=err; gOnSwitchMsgCol=COL_RED; return; }
     SDL_Surface* surf = SDL_CreateRGBSurfaceFrom(
         img.pixels.data(), img.width, img.height, 32, img.width*4,
@@ -206,48 +257,48 @@ static void LoadPreview(const UgcTextureEntry& e) {
     gOnSwitchMsg = "";
 }
 
-static void ScanPngs() {
-    gPngFiles.clear();
-    // Scan /switch/ for PNG files (one level deep)
-    const char* roots[] = {"/switch/TomoToolNX", "/switch"};
-    for (auto root : roots) {
-        DIR* d = opendir(root);
-        if (!d) continue;
-        struct dirent* de;
-        while ((de=readdir(d))!=nullptr) {
-            std::string name = de->d_name;
-            if (name.size()<4) continue;
-            std::string ext = name.substr(name.size()-4);
-            for (auto& c:ext) c=tolower(c);
-            if (ext==".png") {
-                gPngFiles.push_back(std::string(root)+"/"+name);
-            }
-        }
-        closedir(d);
-    }
-    std::sort(gPngFiles.begin(), gPngFiles.end());
-    gPngSel=0; gPngScroll=0;
-}
+static void BrowseRefresh(const std::string& path) {
+    gBrowseCurPath = path;
+    if (gBrowseCurPath.size() > 1 && gBrowseCurPath.back() == '/')
+        gBrowseCurPath.pop_back();
+    gBrowseEntries.clear();
+    gBrowseSel = 0;
+    gBrowseScroll = 0;
 
-static void ScanLtds() {
-    gLtdFiles.clear();
-    const char* roots[] = {"/switch/TomoToolNX", "/switch"};
-    for (auto root : roots) {
-        DIR* d = opendir(root);
-        if (!d) continue;
-        struct dirent* de;
-        while ((de=readdir(d))!=nullptr) {
-            std::string name = de->d_name;
-            if (name.size()<4) continue;
-            std::string ext = name.substr(name.size()-4);
-            for (auto& c:ext) c=tolower(c);
-            if (ext==".ltd")
-                gLtdFiles.push_back(std::string(root)+"/"+name);
+    std::string ext = gBrowseForMii ? ".ltd" : ".png";
+
+    DIR* d = opendir(gBrowseCurPath.c_str());
+    if (!d) return;
+
+    std::vector<std::string> dirs, files;
+    struct dirent* de;
+    while ((de = readdir(d)) != nullptr) {
+        std::string name = de->d_name;
+        if (name == "." || name == "..") continue;
+        std::string full = gBrowseCurPath + "/" + name;
+        bool isDir = (de->d_type == DT_DIR);
+        if (de->d_type == DT_UNKNOWN) {
+            struct stat st;
+            if (stat(full.c_str(), &st) == 0) isDir = S_ISDIR(st.st_mode);
         }
-        closedir(d);
+        if (isDir) {
+            dirs.push_back(name);
+        } else {
+            std::string lower = name;
+            for (auto& c : lower) c = (char)tolower((unsigned char)c);
+            if (lower.size() >= ext.size() &&
+                lower.compare(lower.size() - ext.size(), ext.size(), ext) == 0)
+                files.push_back(name);
+        }
     }
-    std::sort(gLtdFiles.begin(), gLtdFiles.end());
-    gLtdSel=0; gLtdScroll=0;
+    closedir(d);
+
+    std::sort(dirs.begin(), dirs.end());
+    std::sort(files.begin(), files.end());
+
+    if (gBrowseCurPath != "/") gBrowseEntries.push_back({"[..]", true});
+    for (auto& dn : dirs)  gBrowseEntries.push_back({dn, true});
+    for (auto& fn : files) gBrowseEntries.push_back({fn, false});
 }
 
 static void DoMiiImport(const std::string& ltdPath) {
@@ -289,6 +340,7 @@ static void DoOnSwitchImport(const std::string& pngPath) {
     }
     // Reload entry list and preview
     gEntries = UgcScanner::Scan(SAVE_UGC_PATH);
+    MiiManager::LoadUgcNames();
     if (gEntrySel >= (int)gEntries.size()) gEntrySel=(int)gEntries.size()-1;
     if (!gEntries.empty()) LoadPreview(gEntries[gEntrySel]);
     gOnSwitchMsg="Imported successfully"; gOnSwitchMsgCol=COL_GREEN;
@@ -300,13 +352,16 @@ static void DoOnSwitchImport(const std::string& pngPath) {
 static void DrawHeader(const std::string& title) {
     FillRect(0,0,SCREEN_W,28,COL_PANEL);
     DrawRect(0,27,SCREEN_W,1,COL_BORDER);
-    // Font::Sm = 16px, vertically centered in 28px bar → y=6
-    DrawText("TomoToolNX",10,6,COL_GOLD);
-    if (!title.empty()) {
-        TTF_Font* fsm=GetFont(Font::Sm); int tw=0,th=0;
-        if(fsm) TTF_SizeUTF8(fsm,"TomoToolNX",&tw,&th);
-        DrawText(" / "+title, 10+tw, 6, COL_DIM);
-    }
+    TTF_Font* fsm=GetFont(Font::Sm);
+    int tw=0,fh=0;
+    if(fsm) TTF_SizeUTF8(fsm,"TomoToolNX",&tw,&fh);
+    int y=(28-fh)/2;
+    DrawText("TomoToolNX",10,y,COL_GOLD);
+    if (!title.empty())
+        DrawText(" / "+title, 10+tw, y, COL_DIM);
+    int vw=0;
+    if(fsm) TTF_SizeUTF8(fsm,"v" APP_VERSION,&vw,&fh);
+    DrawText("v" APP_VERSION, SCREEN_W-vw-10, y, COL_DIM);
 }
 
 static void DrawFooter(const std::string& hints) {
@@ -364,71 +419,93 @@ static void DrawDownloading() {
 }
 
 static void DrawUserPick() {
-    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
+    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
     SDL_RenderClear(gRen);
     DrawHeader("");
-    DrawTextC("select user", SCREEN_W/2, 36, COL_DIM);
-    {
-    TTF_Font* fMd3=GetFont(Font::Md); int mh=0,tmp2=0;
-    if(fMd3) TTF_SizeUTF8(fMd3,"A",&tmp2,&mh);
-    int avatarSize=mh+16, itemH=avatarSize, listTop=56, listW=480;
-    for (int i=0;i<(int)gUsers.size();i++){
-        bool sel=(i==gUserSel);
-        int iy=listTop+i*(itemH+4), ix=SCREEN_W/2-listW/2;
-        FillRect(ix,iy,listW,itemH, sel?COL_SEL:COL_PANEL);
-        if(sel) DrawRect(ix,iy,listW,itemH,COL_ACCENT);
-        if (i<(int)gAvatarTextures.size()&&gAvatarTextures[i]) {
-            SDL_Rect dst{ix+4,iy+2,avatarSize-4,avatarSize-4};
-            SDL_RenderCopy(gRen,gAvatarTextures[i],nullptr,&dst);
+    DrawTextC("select user", SCREEN_W/2, 44, COL_DIM, Font::Md);
+
+    int n = (int)gUsers.size();
+    if (n == 0) { DrawFooter("+  quit"); SDL_RenderPresent(gRen); return; }
+
+    const int GAP      = 24;
+    const int MAX_VIS  = std::min(n, 5);
+    const int CARD_W   = std::min(220, (SCREEN_W - 120 - (MAX_VIS-1)*GAP) / MAX_VIS);
+    const int AV_SIZE  = CARD_W - 30;
+    const int CARD_H   = AV_SIZE + 66;
+
+    int scroll = 0;
+    if (n > MAX_VIS) {
+        scroll = gUserSel - MAX_VIS/2;
+        scroll = std::max(0, std::min(scroll, n - MAX_VIS));
+    }
+
+    int totalW = MAX_VIS*CARD_W + (MAX_VIS-1)*GAP;
+    int startX = (SCREEN_W - totalW) / 2;
+    int startY = 68 + (SCREEN_H - 36 - 68 - CARD_H) / 2;
+
+    for (int i = 0; i < MAX_VIS; i++) {
+        int idx = scroll + i;
+        if (idx >= n) break;
+        bool sel = (idx == gUserSel);
+        int cx = startX + i*(CARD_W + GAP);
+
+        FillRect(cx, startY, CARD_W, CARD_H, sel ? COL_SEL : COL_PANEL);
+        DrawRect(cx, startY, CARD_W, CARD_H, sel ? COL_GOLD : COL_BORDER);
+        if (sel) DrawRect(cx+1, startY+1, CARD_W-2, CARD_H-2, COL_GOLD);
+
+        int avX = cx + (CARD_W - AV_SIZE)/2;
+        int avY = startY + 14;
+        if (idx < (int)gAvatarTextures.size() && gAvatarTextures[idx]) {
+            SDL_Rect dst{avX, avY, AV_SIZE, AV_SIZE};
+            SDL_RenderCopy(gRen, gAvatarTextures[idx], nullptr, &dst);
+        } else {
+            FillRect(avX, avY, AV_SIZE, AV_SIZE, COL_PANEL2);
+            DrawRect(avX, avY, AV_SIZE, AV_SIZE, COL_BORDER);
+            DrawTextC("?", cx+CARD_W/2, avY+AV_SIZE/2, COL_DIM, Font::Lg);
         }
-        DrawText(gUsers[i].nickname, ix+avatarSize+16, iy+itemH/2-mh/2, sel?COL_TEXT:COL_DIM, Font::Md);
+
+        DrawTextC(gUsers[idx].nickname, cx+CARD_W/2, avY+AV_SIZE+20,
+                  sel ? COL_TEXT : COL_DIM, Font::Sm);
     }
-    }
-    DrawFooter("Up/Down  navigate    A  select    +  quit");
+
+    if (scroll > 0)
+        DrawTextC("<", startX-18, startY+CARD_H/2, COL_DIM, Font::Md);
+    if (scroll + MAX_VIS < n)
+        DrawTextC(">", startX+totalW+18, startY+CARD_H/2, COL_DIM, Font::Md);
+
+    DrawFooter("Left/Right  navigate    A  select    +  quit");
     SDL_RenderPresent(gRen);
 }
 
 static void DrawBackupPrompt() {
-    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
+    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
     SDL_RenderClear(gRen);
     DrawHeader("");
-    DrawTextC("previous backup found", SCREEN_W/2, 58, COL_DIM);
-    DrawTextC("what would you like to do?", SCREEN_W/2, 82, COL_TEXT, Font::Md);
+    DrawTextC("previous backup found", SCREEN_W/2, 44, COL_DIM, Font::Md);
 
-    // Measure to size cards
-    {
-    TTF_Font* fMd2=GetFont(Font::Md), *fSm2=GetFont(Font::Sm);
-    int px=20, py=10, gap2=20;
-    int smh2=0, mdh2=0, tmp=0;
-    if(fMd2) TTF_SizeUTF8(fMd2,"A",&tmp,&mdh2);
-    if(fSm2) TTF_SizeUTF8(fSm2,"A",&tmp,&smh2);
-    // widest text
-    int maxw=0;
-    const char* labels[]={"delete old backup","then make new one","skip backup","keep old as-is","keep old + make new","saves both backups"};
-    for(auto l:labels){int w=0,h=0;if(fSm2)TTF_SizeUTF8(fSm2,l,&w,&h);if(w>maxw)maxw=w;}
-    int cw2=maxw+px*2+40; // extra for key label
-    int ch2=py+mdh2+8+smh2+6+smh2+py;
-    int gap3=20, x1=SCREEN_W/2-cw2-gap3/2, x2=SCREEN_W/2+gap3/2;
-    int cy2=100;
+    const int cw  = 300;
+    const int ch  = 148;
+    const int gap = 20;
+    const int cx  = SCREEN_W/2 - (3*cw + 2*gap)/2;
+    const int cy  = SCREEN_H/2 - ch/2 + 10;
+    int x1=cx, x2=cx+cw+gap, x3=cx+(cw+gap)*2;
 
-    FillRect(x1,cy2,cw2,ch2,COL_PANEL); DrawRect(x1,cy2,cw2,ch2,COL_RED);
-    DrawTextC("[A]",               x1+cw2/2, cy2+py+mdh2/2,              COL_RED, Font::Md);
-    DrawTextC("delete old backup", x1+cw2/2, cy2+py+mdh2+8+smh2/2,       COL_TEXT);
-    DrawTextC("then make new one", x1+cw2/2, cy2+py+mdh2+8+smh2+6+smh2/2,COL_DIM);
+    FillRect(x1,cy,cw,ch,COL_PANEL); DrawRect(x1,cy,cw,ch,COL_RED);
+    DrawTextC("[A]",                x1+cw/2, cy+36,  COL_RED,    Font::Lg);
+    DrawTextC("delete old backup",  x1+cw/2, cy+86,  COL_TEXT,   Font::Md);
+    DrawTextC("then make a new one",x1+cw/2, cy+116, COL_DIM,    Font::Sm);
 
-    FillRect(x2,cy2,cw2,ch2,COL_PANEL); DrawRect(x2,cy2,cw2,ch2,COL_ACCENT);
-    DrawTextC("[B]",             x2+cw2/2, cy2+py+mdh2/2,              COL_ACCENT, Font::Md);
-    DrawTextC("skip backup",     x2+cw2/2, cy2+py+mdh2+8+smh2/2,       COL_TEXT);
-    DrawTextC("keep old as-is",  x2+cw2/2, cy2+py+mdh2+8+smh2+6+smh2/2,COL_DIM);
+    FillRect(x2,cy,cw,ch,COL_PANEL); DrawRect(x2,cy,cw,ch,COL_ACCENT);
+    DrawTextC("[B]",           x2+cw/2, cy+36,  COL_ACCENT, Font::Lg);
+    DrawTextC("skip backup",   x2+cw/2, cy+86,  COL_TEXT,   Font::Md);
+    DrawTextC("keep old as-is",x2+cw/2, cy+116, COL_DIM,    Font::Sm);
 
-    int x3=SCREEN_W/2-cw2/2, cy3=cy2+ch2+14;
-    FillRect(x3,cy3,cw2,ch2,COL_PANEL); DrawRect(x3,cy3,cw2,ch2,COL_GOLD);
-    DrawTextC("[X]",                 x3+cw2/2, cy3+py+mdh2/2,              COL_GOLD, Font::Md);
-    DrawTextC("keep old + make new", x3+cw2/2, cy3+py+mdh2+8+smh2/2,       COL_TEXT);
-    DrawTextC("saves both backups",  x3+cw2/2, cy3+py+mdh2+8+smh2+6+smh2/2,COL_DIM);
-    }
+    FillRect(x3,cy,cw,ch,COL_PANEL); DrawRect(x3,cy,cw,ch,COL_GOLD);
+    DrawTextC("[X]",                 x3+cw/2, cy+36,  COL_GOLD, Font::Lg);
+    DrawTextC("keep old + make new", x3+cw/2, cy+86,  COL_TEXT, Font::Md);
+    DrawTextC("saves both backups",  x3+cw/2, cy+116, COL_DIM,  Font::Sm);
 
-    DrawFooter("A  delete old + new    B  skip    X  keep old + new alongside    +  quit");
+    DrawFooter("A  delete + new    B  skip    X  keep both    +  quit");
     SDL_RenderPresent(gRen);
 }
 
@@ -438,7 +515,7 @@ static void DrawBackingUp() {
     DrawHeader("");
     DrawTextC("backing up save data...", SCREEN_W/2, SCREEN_H/2-30, COL_DIM, Font::Md);
     float prog = BackupService::BackupProgress();
-    int bw=700, bh=10, bx=SCREEN_W/2-bw/2, by=SCREEN_H/2;
+    int bw=1000, bh=10, bx=SCREEN_W/2-bw/2, by=SCREEN_H/2;
     FillRect(bx,by,bw,bh,COL_PANEL);
     DrawRect(bx,by,bw,bh,COL_BORDER);
     FillRect(bx,by,(int)(bw*prog),bh,COL_ACCENT);
@@ -457,33 +534,34 @@ static void DrawMounting() {
 
 static const int LIST_X=12, LIST_W=380, LIST_Y=64, LIST_H=SCREEN_H-96, ITEM_H=28;
 static const int LIST_PAD_TOP=6; // padding between box top and first item
-static const int PREVIEW_X=400, PREVIEW_Y=60, PREVIEW_W=868, PREVIEW_H=468;
+static const int PREVIEW_X=400, PREVIEW_Y=LIST_Y, PREVIEW_W=868, PREVIEW_H=LIST_H;
 static const int VISIBLE = LIST_H/ITEM_H;
 
-static void DrawFilePicker(const std::vector<std::string>& files, int sel, int scroll,
-                           const std::string& title, const std::string& ext) {
+static void DrawFileBrowser() {
     FillRect(40,36,SCREEN_W-80,SCREEN_H-66,COL_PANEL);
     DrawRect(40,36,SCREEN_W-80,SCREEN_H-66,COL_BORDER);
-    DrawTextC(title, SCREEN_W/2, 56, COL_DIM, Font::Md);
-    if (files.empty()) {
-        DrawTextC("no "+ext+" files found in /switch/TomoToolNX/ or /switch/",
-                  SCREEN_W/2, SCREEN_H/2, COL_DIM);
+    DrawTextC(gBrowseForMii ? "select .ltd" : "select PNG", SCREEN_W/2, 52, COL_DIM, Font::Md);
+    DrawTextC(gBrowseCurPath, SCREEN_W/2, 72, COL_DIM);
+    if (gBrowseEntries.empty()) {
+        DrawTextC("empty folder", SCREEN_W/2, SCREEN_H/2, COL_DIM);
     } else {
-        int py=76, ph=26;
-        int pvis=(SCREEN_H-136)/ph;
+        int py=88, ph=26;
+        int pvis=(SCREEN_H-148)/ph;
+        TTF_Font* f=GetFont(Font::Sm); int fh=0,fw=0;
+        if(f) TTF_SizeUTF8(f,"A",&fw,&fh);
         for (int i=0;i<pvis;i++){
-            int idx=scroll+i;
-            if (idx>=(int)files.size()) break;
-            bool isSel=(idx==sel);
+            int idx=gBrowseScroll+i;
+            if (idx>=(int)gBrowseEntries.size()) break;
+            bool isSel=(idx==gBrowseSel);
+            auto& entry=gBrowseEntries[idx];
             FillRect(52,py+i*ph,SCREEN_W-104,ph-2, isSel?COL_SEL:COL_PANEL2);
-            if(isSel) DrawRect(52,py+i*ph,SCREEN_W-104,ph-2,COL_ACCENT);
-            std::string name=files[idx];
-            size_t sl=name.rfind('/');
-            if(sl!=std::string::npos) name=name.substr(sl+1);
-            DrawText(name,60,py+i*ph+5,isSel?COL_TEXT:COL_DIM);
+            SDL_Color border = COL_GOLD;
+            if (isSel) DrawRect(52,py+i*ph,SCREEN_W-104,ph-2,border);
+            std::string label = (entry.isDir && entry.name!="[..]") ? "/"+entry.name : entry.name;
+            DrawText(label, 60, py+i*ph+(ph-2-fh)/2, isSel?COL_TEXT:COL_DIM);
         }
     }
-    DrawFooter("Up/Down  navigate    A  select    B  cancel");
+    DrawFooter("Up/Down  navigate    A  open / select    B  back    X  cancel");
 }
 
 static void DrawOnSwitch() {
@@ -500,9 +578,9 @@ static void DrawOnSwitch() {
         int tw=180, th=22, gap=4;
         int totalW=tw*3+gap*2, tx=SCREEN_W/2-totalW/2, ty=28;
         struct { const char* label; OnSwitchMode mode; SDL_Color col; } tabs[]={
-            {"textures", OnSwitchMode::UGC,   COL_ACCENT},
-            {"miis",         OnSwitchMode::Mii,   COL_GOLD},
-            {"webui",    OnSwitchMode::WebUI, COL_GREEN},
+            {"textures", OnSwitchMode::UGC,   COL_GOLD},
+            {"miis",     OnSwitchMode::Mii,   COL_GOLD},
+            {"webui",    OnSwitchMode::WebUI, COL_GOLD},
         };
         for (auto& t : tabs) {
             bool sel = gOnSwitchMode==t.mode;
@@ -513,13 +591,9 @@ static void DrawOnSwitch() {
         }
     }
 
-    // ── File pickers (overlay) ───────────────────────────────────────────────
-    if (gShowPngPicker) {
-        DrawFilePicker(gPngFiles, gPngSel, gPngScroll, "select PNG to import", "PNG");
-        SDL_RenderPresent(gRen); return;
-    }
-    if (gShowLtdPicker) {
-        DrawFilePicker(gLtdFiles, gLtdSel, gLtdScroll, "select .ltd Mii file to import", "ltd");
+    // ── File browser (overlay) ───────────────────────────────────────────────
+    if (gShowFileBrowser) {
+        DrawFileBrowser();
         SDL_RenderPresent(gRen); return;
     }
 
@@ -532,9 +606,10 @@ static void DrawOnSwitch() {
             if (idx>=(int)gEntries.size()) break;
             bool sel=(idx==gEntrySel);
             FillRect(LIST_X,LIST_Y+LIST_PAD_TOP+i*ITEM_H,LIST_W,ITEM_H-1, sel?COL_SEL:COL_BG);
-            if(sel) DrawRect(LIST_X,LIST_Y+LIST_PAD_TOP+i*ITEM_H,LIST_W,ITEM_H-1,COL_ACCENT);
-            { TTF_Font* f=GetFont(Font::Sm); int fw=0,fh=0; if(f)TTF_SizeUTF8(f,gEntries[idx].stem.c_str(),&fw,&fh);
-                    DrawText(gEntries[idx].stem, LIST_X+6, LIST_Y+LIST_PAD_TOP+i*ITEM_H+(ITEM_H-fh)/2, sel?COL_TEXT:COL_DIM); }
+            if(sel) DrawRect(LIST_X,LIST_Y+LIST_PAD_TOP+i*ITEM_H,LIST_W,ITEM_H-1,COL_GOLD);
+            { std::string dn=MiiManager::GetUgcName(gEntries[idx].stem); if(dn.empty())dn=FormatStem(gEntries[idx].stem);
+              TTF_Font* f=GetFont(Font::Sm); int fw=0,fh=0; if(f)TTF_SizeUTF8(f,dn.c_str(),&fw,&fh);
+              DrawText(dn, LIST_X+6, LIST_Y+LIST_PAD_TOP+i*ITEM_H+(ITEM_H-fh)/2, sel?COL_TEXT:COL_DIM); }
         }
         if ((int)gEntries.size()>VISIBLE){
             int barH=LIST_H*VISIBLE/gEntries.size();
@@ -543,19 +618,26 @@ static void DrawOnSwitch() {
         }
         FillRect(PREVIEW_X,PREVIEW_Y,PREVIEW_W,PREVIEW_H,{8,8,8,255});
         DrawRect(PREVIEW_X,PREVIEW_Y,PREVIEW_W,PREVIEW_H,COL_BORDER);
-        if (gPreviewTex) {
-            int tw,th; SDL_QueryTexture(gPreviewTex,nullptr,nullptr,&tw,&th);
-            float scale=std::min((float)PREVIEW_W/tw,(float)PREVIEW_H/th);
-            int dw=(int)(tw*scale), dh=(int)(th*scale);
-            SDL_Rect dst{PREVIEW_X+(PREVIEW_W-dw)/2, PREVIEW_Y+(PREVIEW_H-dh)/2, dw, dh};
-            SDL_RenderCopy(gRen,gPreviewTex,nullptr,&dst);
-            DrawTextC(gPreviewStem+" ("+std::to_string(tw)+"x"+std::to_string(th)+")",
-                      PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H+14, COL_DIM);
-        } else {
-            DrawTextC("no preview", PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H/2, COL_BORDER);
-        }
+        // Header strip: show export/import message if active, else file stem
         if (!gOnSwitchMsg.empty())
-            DrawTextC(gOnSwitchMsg, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H+14, gOnSwitchMsgCol);
+            DrawTextC(gOnSwitchMsg, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+14, gOnSwitchMsgCol);
+        else
+            DrawTextC(gPreviewStem, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+14, COL_TEXT);
+        {
+            int imgY = PREVIEW_Y + 28;
+            int imgH = PREVIEW_H - 28;
+            if (gPreviewTex) {
+                int tw,th; SDL_QueryTexture(gPreviewTex,nullptr,nullptr,&tw,&th);
+                float scale=std::min((float)PREVIEW_W/tw,(float)imgH/th);
+                int dw=(int)(tw*scale), dh=(int)(th*scale);
+                SDL_Rect dst{PREVIEW_X+(PREVIEW_W-dw)/2, imgY+(imgH-dh)/2, dw, dh};
+                SDL_RenderCopy(gRen,gPreviewTex,nullptr,&dst);
+                DrawTextC(std::to_string(tw)+"x"+std::to_string(th),
+                          PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H-16, COL_DIM);
+            } else {
+                DrawTextC("no preview", PREVIEW_X+PREVIEW_W/2, imgY+imgH/2, COL_BORDER);
+            }
+        }
         DrawFooter("Up/Down  navigate    A  import PNG    Y  export PNG    L/R  switch tab    B  back");
     }
 
@@ -610,7 +692,7 @@ static void DrawOnSwitch() {
             DrawTextC("Y   export .ltd", btn2X+btnW/2, btnY+btnH/2, COL_GOLD, Font::Md);
         }
         if (!gOnSwitchMsg.empty())
-            DrawTextC(gOnSwitchMsg, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H+14, gOnSwitchMsgCol);
+            DrawTextC(gOnSwitchMsg, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H/2+110, gOnSwitchMsgCol);
         DrawFooter("Up/Down  navigate    A  import .ltd    Y  export .ltd    L/R  switch tab    B  back");
     }
 
@@ -643,52 +725,66 @@ static void DrawOnSwitch() {
                 DrawTextC("no activity yet", margin+logBoxW/2, contentY+logBoxH/2, COL_BORDER);
         }
 
-        // Right half — QR top, then WiFi status, then URL
+        // Right half — URL top, WiFi status under it, QR code at bottom
         int rightX = SCREEN_W/2+margin/2;
         int rightW = SCREEN_W-rightX-margin;
 
-        // QR code at the top of right column
         if (wifiActive) {
+            TTF_Font* fsm=GetFont(Font::Sm); int lw=0,lh=0;
+            if(fsm) TTF_SizeUTF8(fsm,"WiFi : ",&lw,&lh);
+
+            // URL in styled box with gap from tab bar
+            int urlY = contentY + 16;
+            int urlBoxH = 0;
+            {
+                TTF_Font* fmd = GetFont(Font::Md);
+                int urlTW=0, urlTH=0;
+                if (fmd) TTF_SizeUTF8(fmd, url.c_str(), &urlTW, &urlTH);
+                int bpx=18, bpy=8;
+                int urlBoxW = urlTW + bpx*2;
+                urlBoxH = urlTH + bpy*2;
+                int urlBoxX = rightX + (rightW - urlBoxW) / 2;
+                FillRect(urlBoxX, urlY, urlBoxW, urlBoxH, {18, 18, 38, 255});
+                DrawRect(urlBoxX, urlY, urlBoxW, urlBoxH, COL_GOLD);
+                DrawText(url, urlBoxX + bpx, urlY + bpy, COL_GOLD, Font::Md);
+            }
+
+            // WiFi status below URL box with comfortable gap
+            int statusY = urlY + urlBoxH + 16;
+            int iw=0;
+            if(fsm) TTF_SizeUTF8(fsm,wifiActive?"Active":"Inactive",&iw,&lh);
+            int totalStatusW=lw+iw;
+            int sxBase=rightX+(rightW-totalStatusW)/2;
+            DrawText("WiFi : ", sxBase, statusY, COL_DIM);
+            DrawText("Active", sxBase+lw, statusY, COL_GREEN);
+
+            // QR code below WiFi status
             QR::Mat mat;
             if (QR::build(url, mat)) {
+                int qrTop = statusY + lh + 14;
                 int qrAvailW = rightW;
-                int qrAvailH = contentH - 60; // leave room for wifi + url below
+                int qrAvailH = contentY + contentH - qrTop;
                 int ms = std::min(qrAvailW, qrAvailH) / (mat.N+4);
                 if (ms<3) ms=3;
                 int border=2;
                 int qrSize=mat.N*ms+border*2*ms;
                 int qrX=rightX+(rightW-qrSize)/2;
-                int qrY=contentY;
-                FillRect(qrX,qrY,qrSize,qrSize,{255,255,255,255});
+                FillRect(qrX,qrTop,qrSize,qrSize,{255,255,255,255});
                 SDL_SetRenderDrawColor(gRen,0,0,0,255);
                 for (int y=0;y<mat.N;y++) for (int x=0;x<mat.N;x++) {
                     if (mat.get(x,y)) {
-                        SDL_Rect r{qrX+(x+border)*ms, qrY+(y+border)*ms, ms, ms};
+                        SDL_Rect r{qrX+(x+border)*ms, qrTop+(y+border)*ms, ms, ms};
                         SDL_RenderFillRect(gRen,&r);
                     }
                 }
-                DrawTextC("scan to open", rightX+rightW/2, qrY+qrSize+10, COL_DIM);
-
-                // WiFi status below QR
-                int statusY = qrY+qrSize+28;
-                TTF_Font* fsm=GetFont(Font::Sm); int lw=0,lh=0;
-                if(fsm) TTF_SizeUTF8(fsm,"WiFi : ",&lw,&lh);
-                int totalStatusW=0; int iw=0;
-                if(fsm) TTF_SizeUTF8(fsm,wifiActive?"Active":"Inactive",&iw,&lh);
-                totalStatusW=lw+iw;
-                int sxBase=rightX+(rightW-totalStatusW)/2;
-                DrawText("WiFi : ", sxBase, statusY, COL_DIM);
-                DrawText(wifiActive?"Active":"Inactive", sxBase+lw, statusY, wifiActive?COL_GREEN:COL_RED);
-
-                // URL below WiFi (Font::Md = bigger)
-                DrawTextC(url, rightX+rightW/2, statusY+lh+10, COL_GOLD, Font::Md);
             }
         } else {
-            // No wifi — just show status
+            // No wifi — just show status centered
             TTF_Font* fsm=GetFont(Font::Sm); int lw=0,lh=0;
             if(fsm) TTF_SizeUTF8(fsm,"WiFi : ",&lw,&lh);
-            DrawText("WiFi : ", rightX, contentY+contentH/2-lh, COL_DIM);
-            DrawText("Inactive", rightX+lw, contentY+contentH/2-lh, COL_RED);
+            int cy2 = contentY+contentH/2-lh;
+            DrawText("WiFi : ",  rightX+(rightW-lw)/2-20, cy2, COL_DIM);
+            DrawText("Inactive", rightX+(rightW-lw)/2-20+lw, cy2, COL_RED);
         }
 
         DrawFooter("L/R  switch tab    B  back    +  quit");
@@ -725,6 +821,10 @@ int main(int,char**) {
     padConfigureInput(1,HidNpadStyleSet_NpadStandard);
     padInitializeDefault(&gPad);
     mkdir("/switch/TomoToolNX", 0777);
+    // Two-step rename so exFAT (case-insensitive) picks up the capital E
+    rename("/switch/TomoToolNX/exports", "/switch/TomoToolNX/__exports_tmp__");
+    rename("/switch/TomoToolNX/__exports_tmp__", "/switch/TomoToolNX/Exports");
+    mkdir("/switch/TomoToolNX/Exports", 0777);
 
     // Auto-check for updates only if WiFi is active — no prompt
     {
@@ -761,6 +861,8 @@ int main(int,char**) {
     while (appletMainLoop()) {
         padUpdate(&gPad);
         u64 kDown=padGetButtonsDown(&gPad);
+        u64 kHeld=padGetButtons(&gPad);
+        u64 kNav =NavRepeat(kDown,kHeld);
 
         if (kDown&HidNpadButton_Plus) break;
 
@@ -799,8 +901,8 @@ int main(int,char**) {
             break;
 
         case Screen::UserPick:
-            if (kDown&HidNpadButton_Up)   { if(gUserSel>0) gUserSel--; }
-            if (kDown&HidNpadButton_Down) { if(gUserSel+1<(int)gUsers.size()) gUserSel++; }
+            if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))   { gUserSel = (gUserSel>0) ? gUserSel-1 : (int)gUsers.size()-1; }
+            if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) { gUserSel = (gUserSel+1<(int)gUsers.size()) ? gUserSel+1 : 0; }
             if (kDown&HidNpadButton_A) {
                 // Mount save first so we can check backup state
                 gScreen=Screen::Mounting;
@@ -861,72 +963,113 @@ int main(int,char**) {
                 if (gIP.empty()) gIP="?.?.?.?";
                 HttpServer::Start(HTTP_PORT, SAVE_UGC_PATH);
                 gEntries=UgcScanner::Scan(SAVE_UGC_PATH);
+                MiiManager::LoadUgcNames();
                 gMiis=MiiManager::ListMiis();
                 gEntrySel=0; gEntryScroll=0;
                 gOnSwitchMsg="";
                 if (!gEntries.empty()) LoadPreview(gEntries[0]);
             }
-            // File pickers take priority
-            if (gShowPngPicker) {
-                if (kDown&HidNpadButton_Up){
-                    if(gPngSel>0){gPngSel--;if(gPngSel<gPngScroll)gPngScroll=gPngSel;}
+            // HTTP server events — process regardless of active tab
+            {
+                std::vector<HttpServer::LogEntry> httpLogs;
+                HttpServer::DrainLog(httpLogs);
+                for (auto& hl:httpLogs) Log(hl.text, hl.isError?COL_RED:COL_GOLD);
+            }
+            if (HttpServer::HasPendingImport()) {
+                auto job=HttpServer::TakePendingImport();
+                std::string importErr=TextureProcessor::ImportPng(job.opts);
+                remove(job.tmpPath.c_str());
+                HttpServer::FinishImport(importErr);
+                if (!importErr.empty()) LogERR("Import: "+importErr);
+                else { LogOK("Import OK"); gEntries=UgcScanner::Scan(SAVE_UGC_PATH);
+                       MiiManager::LoadUgcNames();
+                       if (!gEntries.empty()) LoadPreview(gEntries[gEntrySel < (int)gEntries.size() ? gEntrySel : 0]); }
+            }
+            if (HttpServer::HasPendingCommit()) {
+                LogINF("Committing save...");
+                HttpServer::ClearPendingCommit();
+                std::string cerr=SaveMount::Commit();
+                if (cerr.empty()) LogOK("Saved"); else LogERR("Commit: "+cerr);
+            }
+            // File browser takes priority
+            if (gShowFileBrowser) {
+                int pvis=(SCREEN_H-148)/26;
+                if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp)){
+                    if(gBrowseSel>0){gBrowseSel--;if(gBrowseSel<gBrowseScroll)gBrowseScroll=gBrowseSel;}
                 }
-                if (kDown&HidNpadButton_Down){
-                    if(gPngSel+1<(int)gPngFiles.size()){
-                        gPngSel++;
-                        int pvis=(SCREEN_H-200)/32;
-                        if(gPngSel>=gPngScroll+pvis)gPngScroll=gPngSel-pvis+1;
+                if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown)){
+                    if(gBrowseSel+1<(int)gBrowseEntries.size()){
+                        gBrowseSel++;
+                        if(gBrowseSel>=gBrowseScroll+pvis)gBrowseScroll=gBrowseSel-pvis+1;
                     }
                 }
-                if (kDown&HidNpadButton_A && !gPngFiles.empty()){
-                    gShowPngPicker=false;
-                    DoOnSwitchImport(gPngFiles[gPngSel]);
-                }
-                if (kDown&HidNpadButton_B) gShowPngPicker=false;
-            } else if (gShowLtdPicker) {
-                if (kDown&HidNpadButton_Up){
-                    if(gLtdSel>0){gLtdSel--;if(gLtdSel<gLtdScroll)gLtdScroll=gLtdSel;}
-                }
-                if (kDown&HidNpadButton_Down){
-                    if(gLtdSel+1<(int)gLtdFiles.size()){
-                        gLtdSel++;
-                        int pvis=(SCREEN_H-200)/32;
-                        if(gLtdSel>=gLtdScroll+pvis)gLtdScroll=gLtdSel-pvis+1;
+                if (kDown&HidNpadButton_A && !gBrowseEntries.empty()){
+                    auto& entry=gBrowseEntries[gBrowseSel];
+                    if (entry.isDir){
+                        std::string newPath;
+                        if (entry.name=="[..]"){
+                            size_t pos=gBrowseCurPath.rfind('/');
+                            newPath=(pos==0)?"/":gBrowseCurPath.substr(0,pos);
+                        } else {
+                            newPath=gBrowseCurPath+"/"+entry.name;
+                        }
+                        BrowseRefresh(newPath);
+                    } else {
+                        std::string fullPath=gBrowseCurPath+"/"+entry.name;
+                        if (gBrowseForMii) gBrowseLtdPath=gBrowseCurPath;
+                        else gBrowsePngPath=gBrowseCurPath;
+                        gShowFileBrowser=false;
+                        if (gBrowseForMii) DoMiiImport(fullPath);
+                        else DoOnSwitchImport(fullPath);
                     }
                 }
-                if (kDown&HidNpadButton_A && !gLtdFiles.empty()){
-                    gShowLtdPicker=false;
-                    DoMiiImport(gLtdFiles[gLtdSel]);
+                if (kDown&HidNpadButton_B && gBrowseCurPath!="/"){
+                    size_t pos=gBrowseCurPath.rfind('/');
+                    BrowseRefresh((pos==0)?"/":gBrowseCurPath.substr(0,pos));
                 }
-                if (kDown&HidNpadButton_B) gShowLtdPicker=false;
+                if (kDown&HidNpadButton_X) {
+                    if (gBrowseForMii) gBrowseLtdPath=gBrowseCurPath;
+                    else gBrowsePngPath=gBrowseCurPath;
+                    gShowFileBrowser=false;
+                }
             } else if (gOnSwitchMode == OnSwitchMode::UGC) {
                 // Tab switch
-                if (kDown&HidNpadButton_R||kDown&HidNpadButton_ZR){
+                if (kDown&(HidNpadButton_R|HidNpadButton_ZR)){
                     gOnSwitchMode=OnSwitchMode::Mii;
                     if(gMiis.empty()) gMiis=MiiManager::ListMiis();
                     gOnSwitchMsg=""; break;
                 }
-                if (kDown&HidNpadButton_L||kDown&HidNpadButton_ZL){
+                if (kDown&(HidNpadButton_L|HidNpadButton_ZL)){
                     gOnSwitchMode=OnSwitchMode::WebUI; gOnSwitchMsg=""; break;
                 }
-                if (kDown&HidNpadButton_Up){
-                    if(gEntrySel>0){
-                        gEntrySel--;
-                        if(gEntrySel<gEntryScroll)gEntryScroll=gEntrySel;
-                        if(!gEntries.empty())LoadPreview(gEntries[gEntrySel]);
-                    }
-                }
-                if (kDown&HidNpadButton_Down){
-                    if(gEntrySel+1<(int)gEntries.size()){
-                        gEntrySel++;
-                        if(gEntrySel>=gEntryScroll+VISIBLE)gEntryScroll=gEntrySel-VISIBLE+1;
+                if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp)){
+                    if (!gEntries.empty()) {
+                        gEntrySel = (gEntrySel>0) ? gEntrySel-1 : (int)gEntries.size()-1;
+                        if(gEntrySel<gEntryScroll) gEntryScroll=gEntrySel;
+                        if(gEntrySel>=(int)gEntries.size()-1) gEntryScroll=std::max(0,(int)gEntries.size()-VISIBLE);
                         LoadPreview(gEntries[gEntrySel]);
                     }
                 }
+                if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown)){
+                    if (!gEntries.empty()) {
+                        gEntrySel = (gEntrySel+1<(int)gEntries.size()) ? gEntrySel+1 : 0;
+                        if(gEntrySel>=gEntryScroll+VISIBLE) gEntryScroll=gEntrySel-VISIBLE+1;
+                        if(gEntrySel==0) gEntryScroll=0;
+                        LoadPreview(gEntries[gEntrySel]);
+                    }
+                }
+                if (kDown&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft) && !gEntries.empty()){
+                    gEntrySel=0; gEntryScroll=0; LoadPreview(gEntries[0]);
+                }
+                if (kDown&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight) && !gEntries.empty()){
+                    gEntrySel=(int)gEntries.size()-1;
+                    gEntryScroll=std::max(0,(int)gEntries.size()-VISIBLE);
+                    LoadPreview(gEntries[gEntrySel]);
+                }
                 if (kDown&HidNpadButton_A){
-                    ScanPngs();
-                    if(gPngFiles.empty()){gOnSwitchMsg="No PNG files found";gOnSwitchMsgCol=COL_RED;}
-                    else gShowPngPicker=true;
+                    gBrowseForMii=false;
+                    BrowseRefresh(gBrowsePngPath);
+                    gShowFileBrowser=true;
                 }
                 if (kDown&HidNpadButton_Y && !gEntries.empty()){
                     const auto& e=gEntries[gEntrySel];
@@ -935,12 +1078,12 @@ int main(int,char**) {
                     std::string err=TextureProcessor::DecodeFile(e.ugctexPath,img,true);
                     if (!err.empty()){gOnSwitchMsg=err;gOnSwitchMsgCol=COL_RED;LogERR("Export failed: "+err);}
                     else {
-                        std::string outPath="/switch/TomoToolNX/"+e.stem+".png";
+                        std::string outPath="/switch/TomoToolNX/Exports/"+e.stem+".png";
                         SDL_Surface* surf=SDL_CreateRGBSurfaceWithFormatFrom(
                             img.pixels.data(),img.width,img.height,32,img.width*4,
                             SDL_PIXELFORMAT_RGBA32);
                         if(surf){IMG_SavePNG(surf,outPath.c_str());SDL_FreeSurface(surf);
-                            gOnSwitchMsg="Exported to "+outPath;gOnSwitchMsgCol=COL_GREEN;
+                            gOnSwitchMsg="Exported: "+e.stem+".png";gOnSwitchMsgCol=COL_GREEN;
                             LogOK("Exported: "+e.stem+".png");}
                     }
                 }
@@ -951,38 +1094,51 @@ int main(int,char**) {
                 }
             } else if (gOnSwitchMode == OnSwitchMode::Mii) {
                 // Tab switch
-                if (kDown&HidNpadButton_L||kDown&HidNpadButton_ZL){
+                if (kDown&(HidNpadButton_L|HidNpadButton_ZL)){
                     gOnSwitchMode=OnSwitchMode::UGC; gOnSwitchMsg=""; break;
                 }
-                if (kDown&HidNpadButton_R||kDown&HidNpadButton_ZR){
+                if (kDown&(HidNpadButton_R|HidNpadButton_ZR)){
                     gOnSwitchMode=OnSwitchMode::WebUI; gOnSwitchMsg=""; break;
                 }
-                if (kDown&HidNpadButton_Up){
-                    if(gMiiSel>0){gMiiSel--;if(gMiiSel<gMiiScroll)gMiiScroll=gMiiSel;}
-                }
-                if (kDown&HidNpadButton_Down){
-                    if(gMiiSel+1<(int)gMiis.size()){
-                        gMiiSel++;
-                        if(gMiiSel>=gMiiScroll+VISIBLE)gMiiScroll=gMiiSel-VISIBLE+1;
+                if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp)){
+                    if (!gMiis.empty()) {
+                        gMiiSel = (gMiiSel>0) ? gMiiSel-1 : (int)gMiis.size()-1;
+                        if(gMiiSel<gMiiScroll) gMiiScroll=gMiiSel;
+                        if(gMiiSel>=(int)gMiis.size()-1) gMiiScroll=std::max(0,(int)gMiis.size()-VISIBLE);
                     }
                 }
+                if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown)){
+                    if (!gMiis.empty()) {
+                        gMiiSel = (gMiiSel+1<(int)gMiis.size()) ? gMiiSel+1 : 0;
+                        if(gMiiSel>=gMiiScroll+VISIBLE) gMiiScroll=gMiiSel-VISIBLE+1;
+                        if(gMiiSel==0) gMiiScroll=0;
+                    }
+                }
+                if (kDown&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft) && !gMiis.empty()){
+                    gMiiSel=0; gMiiScroll=0;
+                }
+                if (kDown&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight) && !gMiis.empty()){
+                    gMiiSel=(int)gMiis.size()-1;
+                    gMiiScroll=std::max(0,(int)gMiis.size()-VISIBLE);
+                }
                 if (kDown&HidNpadButton_A && !gMiis.empty()){
-                    ScanLtds();
-                    if(gLtdFiles.empty()){gOnSwitchMsg="No .ltd files found in /switch/TomoToolNX/";gOnSwitchMsgCol=COL_RED;}
-                    else gShowLtdPicker=true;
+                    gBrowseForMii=true;
+                    BrowseRefresh(gBrowseLtdPath);
+                    gShowFileBrowser=true;
                 }
                 if (kDown&HidNpadButton_Y && !gMiis.empty()){
                     int slot=gMiis[gMiiSel].slot;
-                    std::string outPath="/switch/TomoToolNX/"+gMiis[gMiiSel].name+"_slot"+std::to_string(slot)+".ltd";
-                    for(auto& c:outPath){
+                    std::string fname=gMiis[gMiiSel].name+"_slot"+std::to_string(slot)+".ltd";
+                    for(auto& c:fname){
                         if(c==' '||c=='/'||c=='\\'||c==':'||c=='*'||c=='?'||
                            c=='"'||c=='<'||c=='>'||c=='|'||(uint8_t)c>127)
                             c='_';
                     }
+                    std::string outPath="/switch/TomoToolNX/Exports/"+fname;
                     LogINF("Exporting Mii slot "+std::to_string(slot)+"...");
                     std::string err=MiiManager::ExportMii(slot,outPath);
                     if(!err.empty()){gOnSwitchMsg=err;gOnSwitchMsgCol=COL_RED;LogERR("Mii export failed: "+err);}
-                    else{gOnSwitchMsg="Exported to /switch/TomoToolNX/";gOnSwitchMsgCol=COL_GREEN;LogOK("Mii exported: slot "+std::to_string(slot));}
+                    else{gOnSwitchMsg="Exported: "+fname;gOnSwitchMsgCol=COL_GREEN;LogOK("Mii exported: "+fname);}
                 }
                 if (kDown&HidNpadButton_B){
                     FreePreview(); HttpServer::Stop(); gLog.clear();
@@ -990,31 +1146,11 @@ int main(int,char**) {
                     gScreen=Screen::UserPick; SaveMount::Unmount();
                 }
             } else { // WebUI tab
-                // Handle HTTP server events
-                {
-                    std::vector<HttpServer::LogEntry> httpLogs;
-                    HttpServer::DrainLog(httpLogs);
-                    for (auto& hl:httpLogs) Log(hl.text, hl.isError?COL_RED:COL_ACCENT);
-                }
-                if (HttpServer::HasPendingImport()) {
-                    auto job=HttpServer::TakePendingImport();
-                    std::string importErr=TextureProcessor::ImportPng(job.opts);
-                    remove(job.tmpPath.c_str());
-                    HttpServer::FinishImport(importErr);
-                    if (!importErr.empty()) LogERR("Import: "+importErr);
-                    else { LogOK("Import OK"); gEntries=UgcScanner::Scan(SAVE_UGC_PATH); }
-                }
-                if (HttpServer::HasPendingCommit()) {
-                    LogINF("Committing save...");
-                    HttpServer::ClearPendingCommit();
-                    std::string cerr=SaveMount::Commit();
-                    if (cerr.empty()) LogOK("Saved"); else LogERR("Commit: "+cerr);
-                }
                 // Tab switch
-                if (kDown&HidNpadButton_L||kDown&HidNpadButton_ZL){
+                if (kDown&(HidNpadButton_L|HidNpadButton_ZL)){
                     gOnSwitchMode=OnSwitchMode::Mii; gOnSwitchMsg=""; break;
                 }
-                if (kDown&HidNpadButton_R||kDown&HidNpadButton_ZR){
+                if (kDown&(HidNpadButton_R|HidNpadButton_ZR)){
                     gOnSwitchMode=OnSwitchMode::UGC; gOnSwitchMsg=""; break;
                 }
                 if (kDown&HidNpadButton_B){
@@ -1035,8 +1171,11 @@ int main(int,char**) {
 
     FreePreview();
     HttpServer::Stop();
+    BackupService::Cleanup();
     SaveMount::Unmount();
     Updater::Cleanup();
+    for (auto tex : gAvatarTextures) if (tex) SDL_DestroyTexture(tex);
+    gAvatarTextures.clear();
     FontQuit();
     nifmExit();
     socketExit();

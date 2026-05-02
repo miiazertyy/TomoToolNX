@@ -33,8 +33,10 @@ static void BuildLuts() {
                                      : std::pow((s + 0.055) / 1.055, 2.4);
         s_srgbToLinear[i] = (uint8_t)std::clamp((int)std::round(lin * 255.0), 0, 255);
 
-        double sg = (lin <= 0.0031308) ? lin * 12.92
-                                       : 1.055 * std::pow(lin, 1.0 / 2.4) - 0.055;
+        // i represents a linear value (0–255 → 0.0–1.0), convert to sRGB
+        double linVal = i / 255.0;
+        double sg = (linVal <= 0.0031308) ? linVal * 12.92
+                                           : 1.055 * std::pow(linVal, 1.0 / 2.4) - 0.055;
         s_linearToSrgb[i] = (uint8_t)std::clamp((int)std::round(sg * 255.0), 0, 255);
     }
     s_lutsBuilt = true;
@@ -548,13 +550,18 @@ static void ThresholdAlpha(std::vector<uint8_t>& rgba, uint8_t threshold=128) {
 }
 
 static RgbaImage ResizeNearest(const RgbaImage& src, int dw, int dh) {
-    RgbaImage dst(dw, dh);
-    for (int y=0;y<dh;y++) {
-        int sy = y * src.height / dh;
-        for (int x=0;x<dw;x++) {
-            int sx = x * src.width / dw;
-            memcpy(dst.pixels.data()+(y*dw+x)*4,
-                   src.pixels.data()+(sy*src.width+sx)*4, 4);
+    RgbaImage dst(dw, dh); // zero-initialized = fully transparent
+    float scale = std::min((float)dw / src.width, (float)dh / src.height);
+    int scaledW = (int)(src.width  * scale);
+    int scaledH = (int)(src.height * scale);
+    int offX = (dw - scaledW) / 2;
+    int offY = (dh - scaledH) / 2;
+    for (int y = 0; y < scaledH; y++) {
+        int sy = y * src.height / scaledH;
+        for (int x = 0; x < scaledW; x++) {
+            int sx = x * src.width / scaledW;
+            memcpy(dst.pixels.data() + ((offY + y) * dw + (offX + x)) * 4,
+                   src.pixels.data() + (sy * src.width + sx) * 4, 4);
         }
     }
     return dst;

@@ -33,4 +33,12 @@ std::string ExportMii(int slot, const std::string& destPath);
 // Returns empty string on success, error message on failure.
 std::string ImportMii(int slot, const std::string& ltdPath);
 
+// Load all UGC slot names from Player.sav into an internal cache.
+// Call this after mounting the save / after each UGC scan.
+void LoadUgcNames();
+
+// Return the user-visible name for a UGC stem (e.g. "UgcFood003").
+// Returns empty string if the slot is unnamed or the save is unreadable.
+std::string GetUgcName(const std::string& stem);
+
 } // namespace MiiManager

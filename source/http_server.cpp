@@ -105,6 +105,10 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
 .btn-primary{border-color:#3a5a3a;color:var(--ok)}
 .btn-primary:hover:not(:disabled){border-color:var(--ok);color:var(--ok)}
+.btn-gold{border-color:var(--accent);color:var(--accent)}
+.btn-gold:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.btn-cyan{border-color:var(--accent2);color:var(--accent2)}
+.btn-cyan:hover:not(:disabled){border-color:var(--accent2);color:var(--accent2)}
 .status{font-size:11px;padding:4px 10px;border-radius:2px;flex:1;min-width:0;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .status.ok{color:var(--ok)}.status.err{color:var(--err)}.status.info{color:var(--muted)}
 /* Mii panel */
@@ -126,6 +130,10 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .dialog-btns{display:flex;gap:10px;justify-content:center}
 .spinner{display:none;width:28px;height:28px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 14px}
 @keyframes spin{to{transform:rotate(360deg)}}
+.drop-overlay{display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.78);border:3px dashed var(--accent);box-sizing:border-box;align-items:center;justify-content:center;flex-direction:column;gap:10px;pointer-events:none}
+.drop-overlay.active{display:flex}
+.drop-ol-title{color:var(--accent);font-size:16px;letter-spacing:.1em}
+.drop-ol-sub{color:var(--muted);font-size:12px;letter-spacing:.06em}
 </style>
 </head>
 <body>
@@ -150,8 +158,8 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
     <div id="list"></div>
   </div>
   <div class="toolbar">
-    <button class="btn btn-primary" id="btn-import" disabled onclick="doImport()">import</button>
-    <button class="btn" id="btn-export" disabled onclick="doExport()">export</button>
+    <button class="btn btn-cyan" id="btn-import" disabled onclick="doImport()">import</button>
+    <button class="btn btn-gold" id="btn-export" disabled onclick="doExport()">export</button>
     <button class="btn" onclick="loadList()">refresh</button>
     <div class="status info" id="status"></div>
   </div>
@@ -165,7 +173,7 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
   </div>
   <div class="toolbar">
     <button class="btn btn-primary" id="btn-mii-import" disabled onclick="doMiiImport(selectedMii&&selectedMii.slot)">import .ltd</button>
-    <button class="btn" id="btn-mii-export" disabled onclick="doMiiExport(selectedMii&&selectedMii.slot)">export .ltd</button>
+    <button class="btn btn-gold" id="btn-mii-export" disabled onclick="doMiiExport(selectedMii&&selectedMii.slot)">export .ltd</button>
     <button class="btn" onclick="loadMiis()">refresh</button>
     <div class="status info" id="mii-status"></div>
   </div>
@@ -182,6 +190,10 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
       <button class="btn" onclick="modalClose()">cancel</button>
     </div>
   </div>
+</div>
+<div class="drop-overlay" id="drop-overlay">
+  <div class="drop-ol-title">drop to import</div>
+  <div class="drop-ol-sub" id="drop-ol-sub"></div>
 </div>
 <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="fileChosen()">
 <input type="file" id="mii-file-input" accept=".ltd" style="display:none" onchange="miiFileChosen()">
@@ -309,6 +321,30 @@ function modalYes(){}
 
 loadList();
 
+// ── Drag & Drop ───────────────────────────────────────────────────────────────
+let _dragN=0;
+document.addEventListener('dragenter',e=>{
+  if(!e.dataTransfer.types.includes('Files'))return;
+  if(++_dragN===1)_showDrop();
+  e.preventDefault();
+});
+document.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='copy';});
+document.addEventListener('dragleave',e=>{if(--_dragN<=0){_dragN=0;_hideDrop();}});
+document.addEventListener('drop',e=>{
+  e.preventDefault();_dragN=0;_hideDrop();
+  const f=e.dataTransfer.files[0];
+  if(!f||!['image/png','image/jpeg','image/webp'].includes(f.type))return;
+  if(!document.getElementById('panel-ugc').classList.contains('active'))return;
+  if(!selected){setStatus('select a texture first','err');return;}
+  pendingFile=f;uploadFile();
+});
+function _showDrop(){
+  if(!document.getElementById('panel-ugc').classList.contains('active'))return;
+  document.getElementById('drop-ol-sub').textContent=selected?selected.stem:'select a texture first';
+  document.getElementById('drop-overlay').classList.add('active');
+}
+function _hideDrop(){document.getElementById('drop-overlay').classList.remove('active');}
+
 // ── QR Code ───────────────────────────────────────────────────────────────────
 
 </script>
@@ -379,7 +415,7 @@ static void HandlePreview(int fd,const std::string& query){
     SrvLog("WebUI: preview "+stem);
     auto entries=UgcScanner::Scan(s_ugcPath);const UgcTextureEntry* found=nullptr;for(auto& e:entries)if(e.stem==stem){found=&e;break;}
     if(!found){Send404(fd);return;}
-    RgbaImage img;std::string err=TextureProcessor::DecodeFile(found->ugctexPath,img,true);if(!err.empty()){Send500(fd,err);return;}
+    RgbaImage img;std::string err=TextureProcessor::DecodeFile(found->ugctexPath,img,false);if(!err.empty()){Send500(fd,err);return;}
     auto png=EncodePng(img);if(png.empty()){Send500(fd,"PNG encode failed");return;}
     Send200Bin(fd,"image/png",png);
 }
@@ -388,7 +424,7 @@ static void HandleExport(int fd,const std::string& query){
     SrvLog("WebUI: export "+stem);
     auto entries=UgcScanner::Scan(s_ugcPath);const UgcTextureEntry* found=nullptr;for(auto& e:entries)if(e.stem==stem){found=&e;break;}
     if(!found){Send404(fd);return;}
-    RgbaImage img;std::string err=TextureProcessor::DecodeFile(found->ugctexPath,img,true);if(!err.empty()){Send500(fd,err);return;}
+    RgbaImage img;std::string err=TextureProcessor::DecodeFile(found->ugctexPath,img,false);if(!err.empty()){Send500(fd,err);return;}
     auto png=EncodePng(img);if(png.empty()){Send500(fd,"PNG encode failed");return;}
     Send200Bin(fd,"image/png",png,"attachment; filename=\""+stem+".png\"");
 }

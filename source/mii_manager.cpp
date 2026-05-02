@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <map>
 #include <sys/stat.h>
 
 // ─── File I/O helpers ─────────────────────────────────────────────────────────
@@ -223,7 +224,7 @@ std::vector<MiiSlot> ListMiis() {
 
 std::string ExportMii(int slot, const std::string& destPath) {
     if (slot < 1 || slot > MII_MAX_SLOTS)
-        return "Invalid slot (must be 1-70)";
+        return "Invalid slot (must be 1-" + std::to_string(MII_MAX_SLOTS) + ")";
 
     std::vector<uint8_t> miisav, playersav;
     if (!ReadFile(SAVE_MII_SAV,    miisav))    return "Cannot read Mii.sav";
@@ -294,7 +295,7 @@ std::string ExportMii(int slot, const std::string& destPath) {
 
     if (hasFacepaint) {
         char fpFile[8];
-        snprintf(fpFile, sizeof(fpFile), facepaintID < 10 ? "00%d" : "0%d", facepaintID);
+        snprintf(fpFile, sizeof(fpFile), "%03d", facepaintID);
         std::string canvasPath = std::string(SAVE_UGC_DIR) + "/UgcFacePaint" + fpFile + ".canvas.zs";
         std::string ugctexPath = std::string(SAVE_UGC_DIR) + "/UgcFacePaint" + fpFile + ".ugctex.zs";
         if (ReadFile(canvasPath, canvastex)) ltdData[0] = 1;
@@ -330,7 +331,7 @@ std::string ExportMii(int slot, const std::string& destPath) {
 
 std::string ImportMii(int slot, const std::string& ltdPath) {
     if (slot < 1 || slot > MII_MAX_SLOTS)
-        return "Invalid slot (must be 1-70)";
+        return "Invalid slot (must be 1-" + std::to_string(MII_MAX_SLOTS) + ")";
 
     // Read .ltd
     std::vector<uint8_t> mii;
@@ -399,9 +400,9 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
     canvasStart += 4;
     ugctexStart += 4;
 
-    // Detect facepaint (ltdData[0] or ltdData[1] set, or canvas/ugctex non-empty)
+    // Detect facepaint — both canvas and ugctex must be present
     int facepaint = 0;
-    if (mii[1] == 1 || mii[2] == 1) {
+    if (mii[1] == 1 && mii[2] == 1) {
         facepaint = 1;
         if (mii.size() > 47) mii[47] = 1;
     }
@@ -434,22 +435,25 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
         }
     }
 
+    // Read existing facepaint ID for this slot (0xFF = none)
+    int facepaintID = -1;
+    if (miiOffset2 >= 0 && miiOffset2 + 4*s < (int)miisav.size()) {
+        uint8_t raw = miisav[miiOffset2 + 4*s];
+        if (raw != 0xFF) facepaintID = raw;
+    }
+
     // Facepaint handling
     if (facepaint) {
-        // Find or assign a facepaint ID
-        int facepaintID = -1;
-        if (miiOffset2 >= 0 && miiOffset2 + 4*s < (int)miisav.size())
-            facepaintID = miisav[miiOffset2 + 4*s];
-        if (facepaintID == 0xFF || facepaintID < 0) {
-            // Assign next available ID
-            std::vector<bool> used(70, false);
-            for (int x = 0; x < 70; x++) {
+        // Assign next available ID if this slot had no facepaint
+        if (facepaintID < 0) {
+            std::vector<bool> used(MII_MAX_SLOTS, false);
+            for (int x = 0; x < MII_MAX_SLOTS; x++) {
                 if (miiOffset2 >= 0 && miiOffset2 + 4*x < (int)miisav.size()) {
                     uint8_t id = miisav[miiOffset2 + 4*x];
-                    if (id != 0xFF && id < 70) used[id] = true;
+                    if (id != 0xFF && id < MII_MAX_SLOTS) used[id] = true;
                 }
             }
-            for (int id = 0; id < 70; id++) {
+            for (int id = 0; id < MII_MAX_SLOTS; id++) {
                 if (!used[id]) { facepaintID = id; break; }
             }
         }
@@ -482,20 +486,43 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
 
         // Write facepaint texture files
         char fpFile[8];
-        snprintf(fpFile, sizeof(fpFile), facepaintID < 10 ? "00%d" : "0%d", facepaintID);
+        snprintf(fpFile, sizeof(fpFile), "%03d", facepaintID);
         MkdirP(SAVE_UGC_DIR);
         std::string canvasPath = std::string(SAVE_UGC_DIR) + "/UgcFacePaint" + fpFile + ".canvas.zs";
         std::string ugctexPath = std::string(SAVE_UGC_DIR) + "/UgcFacePaint" + fpFile + ".ugctex.zs";
 
-        // Canvas: from canvasStart to ugctexStart-4
         if (canvasStart < ugctexStart - 4) {
             std::vector<uint8_t> canvas(mii.begin()+canvasStart, mii.begin()+ugctexStart-4);
             WriteFile(canvasPath, canvas);
         }
-        // Ugctex: from ugctexStart to end
         if (ugctexStart < (int)mii.size()) {
             std::vector<uint8_t> ugctexData(mii.begin()+ugctexStart, mii.end());
             WriteFile(ugctexPath, ugctexData);
+        }
+    } else {
+        // New Mii has no facepaint — clear old facepaint data if slot previously had one
+        if (facepaintID >= 0) {
+            if (miiOffset2 >= 0 && miiOffset2 + 4*s + 4 <= (int)miisav.size()) {
+                miisav[miiOffset2 + 4*s]   = 0xFF;
+                miisav[miiOffset2 + 4*s+1] = 0xFF;
+                miisav[miiOffset2 + 4*s+2] = 0xFF;
+                miisav[miiOffset2 + 4*s+3] = 0xFF;
+            }
+            static const uint8_t CLR1[4] = {0x00,0x00,0x00,0x00};
+            static const uint8_t CLR2[4] = {0x09,0xDE,0xEE,0xB6};
+            static const uint8_t CLR3[4] = {0xA5,0x8A,0xFF,0xAF};
+            static const uint8_t CLR4[4] = {0x00,0x00,0x00,0x00};
+            static const uint8_t CLR5[4] = {0x00,0x00,0x00,0x00};
+            if (fpOff[0] + facepaintID*4 + 4 <= (int)playersav.size())
+                memcpy(playersav.data() + fpOff[0] + facepaintID*4, CLR1, 4);
+            if (fpOff[1] + facepaintID*4 + 4 <= (int)playersav.size())
+                memcpy(playersav.data() + fpOff[1] + facepaintID*4, CLR2, 4);
+            if (fpOff[2] + facepaintID*4 + 4 <= (int)playersav.size())
+                memcpy(playersav.data() + fpOff[2] + facepaintID*4, CLR3, 4);
+            if (fpOff[3] + facepaintID*4 + 4 <= (int)playersav.size())
+                memcpy(playersav.data() + fpOff[3] + facepaintID*4, CLR4, 4);
+            if (fpOff[4] + facepaintID*4 + 4 <= (int)playersav.size())
+                memcpy(playersav.data() + fpOff[4] + facepaintID*4, CLR5, 4);
         }
     }
 
@@ -504,6 +531,53 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
     if (!WriteFile(SAVE_PLAYER_SAV, playersav)) return "Failed to write Player.sav";
 
     return ""; // success
+}
+
+// ─── UGC name cache ───────────────────────────────────────────────────────────
+
+static const struct { const char* prefix; const char* hashHex; int maxSlots; } UGC_KIND_DATA[] = {
+    {"Food",      "408494F5", 99},
+    {"Cloth",     "40710642", 299},
+    {"Goods",     "2F793EB1", 99},
+    {"Interior",  "3DE2C5DD", 99},
+    {"Exterior",  "27C875D6", 99},
+    {"MapObject", "56F99338", 99},
+    {"MapFloor",  "918875A9", 99},
+};
+static const int UGC_KIND_COUNT = 7;
+
+static std::map<std::string, std::string> s_ugcNames; // "UgcFood003" → UTF-8 name
+
+void LoadUgcNames() {
+    s_ugcNames.clear();
+
+    std::vector<uint8_t> playersav;
+    if (!ReadFile(SAVE_PLAYER_SAV, playersav)) return;
+
+    for (int k = 0; k < UGC_KIND_COUNT; k++) {
+        const auto& ki = UGC_KIND_DATA[k];
+        int offset = OffsetLocator(playersav, ki.hashHex);
+        if (offset < 0) continue;
+
+        // Payload layout: 4-byte array header, then maxSlots * 128 bytes (UTF-16LE name each)
+        int base = offset + 4;
+        for (int i = 0; i < ki.maxSlots; i++) {
+            int nameOff = base + i * 128;
+            if (nameOff + 128 > (int)playersav.size()) break;
+
+            std::string name = Utf16leToUtf8(playersav.data() + nameOff, 128);
+            if (name.empty()) continue;
+
+            char stem[32];
+            snprintf(stem, sizeof(stem), "Ugc%s%03d", ki.prefix, i);
+            s_ugcNames[stem] = name;
+        }
+    }
+}
+
+std::string GetUgcName(const std::string& stem) {
+    auto it = s_ugcNames.find(stem);
+    return (it != s_ugcNames.end()) ? it->second : "";
 }
 
 } // namespace MiiManager

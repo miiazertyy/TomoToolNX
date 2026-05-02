@@ -74,6 +74,7 @@ static int CountFiles(const std::string& path) {
 // ─── Async backup state ───────────────────────────────────────────────────────
 
 static Thread  s_thread;
+static bool    s_threadActive = false;
 static Mutex   s_mutex;
 static float   s_progress  = 0.0f;
 static bool    s_done      = false;
@@ -137,6 +138,14 @@ void StartFullBackup(const std::string& saveMountRoot) {
     s_saveRoot = saveMountRoot;
     threadCreate(&s_thread, BackupThreadFunc, nullptr, nullptr, 256*1024, 0x2C, -2);
     threadStart(&s_thread);
+    s_threadActive = true;
+}
+
+void Cleanup() {
+    if (!s_threadActive) return;
+    threadWaitForExit(&s_thread);
+    threadClose(&s_thread);
+    s_threadActive = false;
 }
 
 float BackupProgress() {
