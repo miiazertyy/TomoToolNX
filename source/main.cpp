@@ -178,6 +178,8 @@ static bool gBrowseForMii    = false;
 static std::string gBrowseCurPath;
 static std::string gBrowsePngPath = "/switch/TomoToolNX";
 static std::string gBrowseLtdPath = "/switch/TomoToolNX";
+static bool        gBrowseForExportDir = false;
+static std::string gExportPath = "/switch/TomoToolNX/Exports";
 static std::vector<BrowseEntry> gBrowseEntries;
 static int gBrowseSel    = 0;
 static int gBrowseScroll = 0;
@@ -422,6 +424,7 @@ static void DrawUserPick() {
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
     SDL_RenderClear(gRen);
     DrawHeader("");
+    DrawTextC("select user", SCREEN_W/2, 44, COL_DIM, Font::Md);
 
     int n = (int)gUsers.size();
     if (n == 0) { DrawFooter("+  quit"); SDL_RenderPresent(gRen); return; }
@@ -441,12 +444,6 @@ static void DrawUserPick() {
     int totalW = MAX_VIS*CARD_W + (MAX_VIS-1)*GAP;
     int startX = (SCREEN_W - totalW) / 2;
     int startY = 68 + (SCREEN_H - 36 - 68 - CARD_H) / 2;
-
-    {
-        TTF_Font* fmd = GetFont(Font::Md); int tw=0, th=0;
-        if (fmd) TTF_SizeUTF8(fmd, "select user", &tw, &th);
-        DrawTextC("select user", SCREEN_W/2, startY - th/2 - 14, COL_DIM, Font::Md);
-    }
 
     for (int i = 0; i < MAX_VIS; i++) {
         int idx = scroll + i;
@@ -486,6 +483,7 @@ static void DrawBackupPrompt() {
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
     SDL_RenderClear(gRen);
     DrawHeader("");
+    DrawTextC("previous backup found", SCREEN_W/2, 44, COL_DIM, Font::Md);
 
     const int cw  = 300;
     const int ch  = 148;
@@ -493,12 +491,6 @@ static void DrawBackupPrompt() {
     const int cx  = SCREEN_W/2 - (3*cw + 2*gap)/2;
     const int cy  = SCREEN_H/2 - ch/2 + 10;
     int x1=cx, x2=cx+cw+gap, x3=cx+(cw+gap)*2;
-
-    {
-        TTF_Font* fmd = GetFont(Font::Md); int tw=0, th=0;
-        if (fmd) TTF_SizeUTF8(fmd, "previous backup found", &tw, &th);
-        DrawTextC("previous backup found", SCREEN_W/2, cy - th/2 - 14, COL_DIM, Font::Md);
-    }
 
     FillRect(x1,cy,cw,ch,COL_PANEL); DrawRect(x1,cy,cw,ch,COL_RED);
     DrawTextC("[A]",                x1+cw/2, cy+36,  COL_RED,    Font::Lg);
@@ -547,16 +539,47 @@ static const int LIST_PAD_TOP=6; // padding between box top and first item
 static const int PREVIEW_X=400, PREVIEW_Y=LIST_Y, PREVIEW_W=868, PREVIEW_H=LIST_H;
 static const int VISIBLE = LIST_H/ITEM_H;
 
+static const char* CONFIG_PATH = "/switch/TomoToolNX/config.ini";
+
+static void LoadConfig() {
+    FILE* f = fopen(CONFIG_PATH, "r");
+    if (!f) return;
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        std::string s(line);
+        auto eq = s.find('=');
+        if (eq == std::string::npos) continue;
+        std::string key = s.substr(0, eq);
+        std::string val = s.substr(eq + 1);
+        while (!val.empty() && (val.back()=='\n'||val.back()=='\r'||val.back()==' '))
+            val.pop_back();
+        if (key == "export_path") gExportPath = val;
+    }
+    fclose(f);
+}
+
+static void SaveConfig() {
+    FILE* f = fopen(CONFIG_PATH, "w");
+    if (!f) return;
+    fprintf(f, "export_path=%s\n", gExportPath.c_str());
+    fclose(f);
+}
+
 static void DrawFileBrowser() {
     FillRect(40,36,SCREEN_W-80,SCREEN_H-66,COL_PANEL);
     DrawRect(40,36,SCREEN_W-80,SCREEN_H-66,COL_BORDER);
-    DrawTextC(gBrowseForMii ? "select .ltd" : "select PNG", SCREEN_W/2, 52, COL_DIM, Font::Md);
+    if (gBrowseForExportDir)
+        DrawTextC("select export folder", SCREEN_W/2, 52, COL_GOLD, Font::Md);
+    else
+        DrawTextC(gBrowseForMii ? "select .ltd" : "select PNG", SCREEN_W/2, 52, COL_DIM, Font::Md);
     DrawTextC(gBrowseCurPath, SCREEN_W/2, 72, COL_DIM);
+    if (gBrowseForExportDir)
+        DrawTextC("current: "+gExportPath, SCREEN_W/2, 90, COL_DIM);
     if (gBrowseEntries.empty()) {
         DrawTextC("empty folder", SCREEN_W/2, SCREEN_H/2, COL_DIM);
     } else {
-        int py=88, ph=26;
-        int pvis=(SCREEN_H-148)/ph;
+        int py = gBrowseForExportDir ? 106 : 88, ph=26;
+        int pvis=(SCREEN_H-(gBrowseForExportDir?166:148))/ph;
         TTF_Font* f=GetFont(Font::Sm); int fh=0,fw=0;
         if(f) TTF_SizeUTF8(f,"A",&fw,&fh);
         for (int i=0;i<pvis;i++){
@@ -571,7 +594,10 @@ static void DrawFileBrowser() {
             DrawText(label, 60, py+i*ph+(ph-2-fh)/2, isSel?COL_TEXT:COL_DIM);
         }
     }
-    DrawFooter("Up/Down  navigate    A  open / select    B  back    X  cancel");
+    if (gBrowseForExportDir)
+        DrawFooter("Up/Down  navigate    A  open folder    Y  set as export folder    X  cancel    B  back");
+    else
+        DrawFooter("Up/Down  navigate    A  open / select    B  back    X  cancel");
 }
 
 static void DrawOnSwitch() {
@@ -634,8 +660,10 @@ static void DrawOnSwitch() {
         else
             DrawTextC(gPreviewStem, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+14, COL_TEXT);
         {
+            // Reserve space at the bottom for the import/export buttons
+            const int kBtnH=46, kBtnGap=8, kBtnSlot=kBtnH+kBtnGap+4; // 58px total
             int imgY = PREVIEW_Y + 28;
-            int imgH = PREVIEW_H - 28;
+            int imgH = PREVIEW_H - 28 - kBtnSlot;
             if (gPreviewTex) {
                 int tw,th; SDL_QueryTexture(gPreviewTex,nullptr,nullptr,&tw,&th);
                 float scale=std::min((float)PREVIEW_W/tw,(float)imgH/th);
@@ -643,12 +671,23 @@ static void DrawOnSwitch() {
                 SDL_Rect dst{PREVIEW_X+(PREVIEW_W-dw)/2, imgY+(imgH-dh)/2, dw, dh};
                 SDL_RenderCopy(gRen,gPreviewTex,nullptr,&dst);
                 DrawTextC(std::to_string(tw)+"x"+std::to_string(th),
-                          PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H-16, COL_DIM);
+                          PREVIEW_X+PREVIEW_W/2, imgY+imgH-8, COL_DIM);
             } else {
                 DrawTextC("no preview", PREVIEW_X+PREVIEW_W/2, imgY+imgH/2, COL_BORDER);
             }
+            if (!gEntries.empty()) {
+                int cx   = PREVIEW_X + PREVIEW_W/2;
+                int btnY = imgY + imgH + kBtnGap;
+                const int btnW=220, btnGap=24;
+                FillRect(cx-btnW-btnGap/2, btnY, btnW, kBtnH, COL_SEL);
+                DrawRect(cx-btnW-btnGap/2, btnY, btnW, kBtnH, COL_ACCENT);
+                DrawTextC("A   import PNG", cx-btnW-btnGap/2+btnW/2, btnY+kBtnH/2, COL_ACCENT, Font::Md);
+                FillRect(cx+btnGap/2, btnY, btnW, kBtnH, COL_PANEL);
+                DrawRect(cx+btnGap/2, btnY, btnW, kBtnH, COL_GOLD);
+                DrawTextC("Y   export PNG", cx+btnGap/2+btnW/2, btnY+kBtnH/2, COL_GOLD, Font::Md);
+            }
         }
-        DrawFooter("Up/Down  navigate    A  import PNG    Y  export PNG    L/R  switch tab    B  back");
+        DrawFooter("Up/Down  navigate    -  export folder    L/R  switch tab    B  back");
     }
 
     // ── Mii tab ───────────────────────────────────────────────────────────────
@@ -703,7 +742,7 @@ static void DrawOnSwitch() {
         }
         if (!gOnSwitchMsg.empty())
             DrawTextC(gOnSwitchMsg, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H/2+110, gOnSwitchMsgCol);
-        DrawFooter("Up/Down  navigate    A  import .ltd    Y  export .ltd    L/R  switch tab    B  back");
+        DrawFooter("Up/Down  navigate    A  import .ltd    Y  export .ltd    -  export folder    L/R  switch tab    B  back");
     }
 
     // ── WebUI tab ─────────────────────────────────────────────────────────────
@@ -813,6 +852,172 @@ static void DrawError() {
     SDL_RenderPresent(gRen);
 }
 
+// ─── Touch input ──────────────────────────────────────────────────────────────
+
+static struct {
+    bool         active   = false;
+    bool         dragging = false;
+    float        startX   = 0.f, startY = 0.f;
+    float        accumX   = 0.f, accumY = 0.f;
+    SDL_FingerID fid      = 0;
+} s_touch;
+
+static void ApplyTouchScroll(float ddx, float ddy) {
+    if (gScreen == Screen::UserPick) {
+        s_touch.accumX += ddx;
+        while (s_touch.accumX >=  100.f && gUserSel > 0)
+            { s_touch.accumX -= 100.f; gUserSel--; }
+        while (s_touch.accumX <= -100.f && gUserSel < (int)gUsers.size()-1)
+            { s_touch.accumX += 100.f; gUserSel++; }
+        return;
+    }
+    if (gScreen != Screen::OnSwitch) return;
+
+    if (gShowFileBrowser) {
+        int itemTop = gBrowseForExportDir ? 106 : 88;
+        if (s_touch.startY < itemTop || s_touch.startY >= SCREEN_H-30) return;
+        const int ph   = 26;
+        const int pvis = (SCREEN_H - (gBrowseForExportDir ? 166 : 148)) / ph;
+        s_touch.accumY += ddy;
+        while (s_touch.accumY >=  ph) { s_touch.accumY -= ph; gBrowseScroll = std::max(0, gBrowseScroll-1); }
+        while (s_touch.accumY <= -ph) { s_touch.accumY += ph; gBrowseScroll = std::min(gBrowseScroll+1, std::max(0,(int)gBrowseEntries.size()-pvis)); }
+        return;
+    }
+
+    if (gOnSwitchMode == OnSwitchMode::UGC && !gEntries.empty()) {
+        if (s_touch.startX < LIST_X || s_touch.startX >= LIST_X+LIST_W) return;
+        if (s_touch.startY < LIST_Y || s_touch.startY >= LIST_Y+LIST_H) return;
+        s_touch.accumY += ddy;
+        while (s_touch.accumY >=  ITEM_H) { s_touch.accumY -= ITEM_H; gEntryScroll = std::max(0, gEntryScroll-1); }
+        while (s_touch.accumY <= -ITEM_H) { s_touch.accumY += ITEM_H; gEntryScroll = std::min(gEntryScroll+1, std::max(0,(int)gEntries.size()-VISIBLE)); }
+    }
+    else if (gOnSwitchMode == OnSwitchMode::Mii && !gMiis.empty()) {
+        if (s_touch.startX < LIST_X || s_touch.startX >= LIST_X+LIST_W) return;
+        if (s_touch.startY < LIST_Y || s_touch.startY >= LIST_Y+LIST_H) return;
+        s_touch.accumY += ddy;
+        while (s_touch.accumY >=  ITEM_H) { s_touch.accumY -= ITEM_H; gMiiScroll = std::max(0, gMiiScroll-1); }
+        while (s_touch.accumY <= -ITEM_H) { s_touch.accumY += ITEM_H; gMiiScroll = std::min(gMiiScroll+1, std::max(0,(int)gMiis.size()-VISIBLE)); }
+    }
+}
+
+static void ProcessTouch(int tx, int ty, u64& kDown) {
+    auto hit = [&](int x, int y, int w, int h) -> bool {
+        return tx>=x && tx<x+w && ty>=y && ty<y+h;
+    };
+
+    if (gScreen == Screen::UserPick) {
+        int n = (int)gUsers.size();
+        if (n == 0) return;
+        const int GAP     = 24;
+        const int MAX_VIS = std::min(n, 5);
+        const int CARD_W  = std::min(220, (SCREEN_W - 120 - (MAX_VIS-1)*GAP) / MAX_VIS);
+        const int CARD_H  = (CARD_W - 30) + 66;
+        int scroll = 0;
+        if (n > MAX_VIS) { scroll = gUserSel - MAX_VIS/2; scroll = std::max(0, std::min(scroll, n-MAX_VIS)); }
+        int startX = (SCREEN_W - (MAX_VIS*CARD_W + (MAX_VIS-1)*GAP)) / 2;
+        int startY = 68 + (SCREEN_H - 36 - 68 - CARD_H) / 2;
+        for (int i = 0; i < MAX_VIS; i++) {
+            int idx = scroll + i;
+            if (idx >= n) break;
+            if (hit(startX + i*(CARD_W+GAP), startY, CARD_W, CARD_H)) {
+                gUserSel = idx;
+                kDown |= HidNpadButton_A;
+                break;
+            }
+        }
+        return;
+    }
+
+    if (gScreen == Screen::BackupPrompt) {
+        const int cw=300, ch=148, gap=20;
+        const int bx = SCREEN_W/2 - (3*cw + 2*gap)/2;
+        const int by = SCREEN_H/2 - ch/2 + 10;
+        if      (hit(bx,            by, cw, ch)) kDown |= HidNpadButton_A;
+        else if (hit(bx+cw+gap,     by, cw, ch)) kDown |= HidNpadButton_B;
+        else if (hit(bx+(cw+gap)*2, by, cw, ch)) kDown |= HidNpadButton_X;
+        return;
+    }
+
+    if (gScreen != Screen::OnSwitch) return;
+
+    if (gShowFileBrowser) {
+        int itemTop = gBrowseForExportDir ? 106 : 88;
+        // Tap header area (above items) to cancel
+        if (ty >= 36 && ty < itemTop) { kDown |= HidNpadButton_X; return; }
+        // Tap footer to go up one directory level
+        if (ty >= SCREEN_H-30) { kDown |= HidNpadButton_B; return; }
+        // Tap an item to select and activate it
+        int ph = 26;
+        int pvis = (SCREEN_H - (gBrowseForExportDir ? 166 : 148)) / ph;
+        for (int i = 0; i < pvis; i++) {
+            int idx = gBrowseScroll + i;
+            if (idx >= (int)gBrowseEntries.size()) break;
+            if (hit(52, itemTop + i*ph, SCREEN_W-104, ph)) {
+                gBrowseSel = idx;
+                kDown |= HidNpadButton_A;
+                break;
+            }
+        }
+        return;
+    }
+
+    // Tab bar — jump directly to the tapped tab
+    {
+        const int tw=180, gap=4, tabY=14, tabH=42;
+        const int tabX0 = SCREEN_W/2 - (tw*3+gap*2)/2;
+        if (hit(tabX0,           tabY, tw, tabH)) {
+            gOnSwitchMode = OnSwitchMode::UGC;   gOnSwitchMsg = "";
+        } else if (hit(tabX0+tw+gap,     tabY, tw, tabH)) {
+            if (gMiis.empty()) gMiis = MiiManager::ListMiis();
+            gOnSwitchMode = OnSwitchMode::Mii;   gOnSwitchMsg = "";
+        } else if (hit(tabX0+(tw+gap)*2, tabY, tw, tabH)) {
+            gOnSwitchMode = OnSwitchMode::WebUI; gOnSwitchMsg = "";
+        }
+    }
+
+    if (gOnSwitchMode == OnSwitchMode::UGC) {
+        // List items — tap to select, loads preview
+        for (int i = 0; i < VISIBLE; i++) {
+            int idx = gEntryScroll + i;
+            if (idx >= (int)gEntries.size()) break;
+            if (hit(LIST_X, LIST_Y+LIST_PAD_TOP+i*ITEM_H, LIST_W, ITEM_H)) {
+                if (gEntrySel != idx) { gEntrySel = idx; LoadPreview(gEntries[idx]); }
+                break;
+            }
+        }
+        // Import / Export buttons (coordinates must match the draw code)
+        if (!gEntries.empty()) {
+            const int kBtnH=46, kBtnGap=8, kBtnSlot=kBtnH+kBtnGap+4;
+            int imgY = PREVIEW_Y + 28;
+            int imgH = PREVIEW_H - 28 - kBtnSlot;
+            int cx   = PREVIEW_X + PREVIEW_W/2;
+            int btnY = imgY + imgH + kBtnGap;
+            const int btnW=220, btnGap=24;
+            if (hit(cx-btnW-btnGap/2, btnY, btnW, kBtnH)) kDown |= HidNpadButton_A;
+            if (hit(cx+btnGap/2,      btnY, btnW, kBtnH)) kDown |= HidNpadButton_Y;
+        }
+    }
+    else if (gOnSwitchMode == OnSwitchMode::Mii) {
+        // List items — tap to select
+        for (int i = 0; i < VISIBLE; i++) {
+            int idx = gMiiScroll + i;
+            if (idx >= (int)gMiis.size()) break;
+            if (hit(LIST_X, LIST_Y+LIST_PAD_TOP+i*ITEM_H, LIST_W, ITEM_H)) {
+                gMiiSel = idx;
+                break;
+            }
+        }
+        // Import / Export styled buttons (coordinates match the drawn buttons)
+        if (!gMiis.empty()) {
+            int cx = PREVIEW_X + PREVIEW_W/2;
+            int cy = PREVIEW_Y + PREVIEW_H/2;
+            const int btnW=220, btnH=46, btnGap=24;
+            if (hit(cx-btnW-btnGap/2, cy+30, btnW, btnH)) kDown |= HidNpadButton_A;
+            if (hit(cx+btnGap/2,      cy+30, btnW, btnH)) kDown |= HidNpadButton_Y;
+        }
+    }
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 int main(int,char**) {
@@ -835,6 +1040,8 @@ int main(int,char**) {
     rename("/switch/TomoToolNX/exports", "/switch/TomoToolNX/__exports_tmp__");
     rename("/switch/TomoToolNX/__exports_tmp__", "/switch/TomoToolNX/Exports");
     mkdir("/switch/TomoToolNX/Exports", 0777);
+    LoadConfig();
+    mkdir(gExportPath.c_str(), 0777);
 
     // Auto-check for updates only if WiFi is active — no prompt
     {
@@ -872,6 +1079,34 @@ int main(int,char**) {
         padUpdate(&gPad);
         u64 kDown=padGetButtonsDown(&gPad);
         u64 kHeld=padGetButtons(&gPad);
+        {
+            SDL_Event ev;
+            while (SDL_PollEvent(&ev)) {
+                if (ev.type == SDL_FINGERDOWN && !s_touch.active) {
+                    s_touch = { true, false,
+                                ev.tfinger.x*SCREEN_W, ev.tfinger.y*SCREEN_H,
+                                0.f, 0.f, ev.tfinger.fingerId };
+                }
+                else if (ev.type == SDL_FINGERMOTION && s_touch.active
+                         && ev.tfinger.fingerId == s_touch.fid) {
+                    float cx = ev.tfinger.x * SCREEN_W;
+                    float cy = ev.tfinger.y * SCREEN_H;
+                    float d2 = (cx-s_touch.startX)*(cx-s_touch.startX)
+                             + (cy-s_touch.startY)*(cy-s_touch.startY);
+                    if (!s_touch.dragging && d2 > 144.f) // 12 px radius
+                        s_touch.dragging = true;
+                    if (s_touch.dragging)
+                        ApplyTouchScroll(ev.tfinger.dx * SCREEN_W,
+                                         ev.tfinger.dy * SCREEN_H);
+                }
+                else if (ev.type == SDL_FINGERUP && s_touch.active
+                         && ev.tfinger.fingerId == s_touch.fid) {
+                    if (!s_touch.dragging)
+                        ProcessTouch((int)s_touch.startX, (int)s_touch.startY, kDown);
+                    s_touch.active = false;
+                }
+            }
+        }
         u64 kNav =NavRepeat(kDown,kHeld);
 
         if (kDown&HidNpadButton_Plus) break;
@@ -1024,7 +1259,7 @@ int main(int,char**) {
                             newPath=gBrowseCurPath+"/"+entry.name;
                         }
                         BrowseRefresh(newPath);
-                    } else {
+                    } else if (!gBrowseForExportDir) {
                         std::string fullPath=gBrowseCurPath+"/"+entry.name;
                         if (gBrowseForMii) gBrowseLtdPath=gBrowseCurPath;
                         else gBrowsePngPath=gBrowseCurPath;
@@ -1037,10 +1272,24 @@ int main(int,char**) {
                     size_t pos=gBrowseCurPath.rfind('/');
                     BrowseRefresh((pos==0)?"/":gBrowseCurPath.substr(0,pos));
                 }
+                if (kDown&HidNpadButton_Y && gBrowseForExportDir) {
+                    gExportPath = gBrowseCurPath;
+                    mkdir(gExportPath.c_str(), 0777);
+                    SaveConfig();
+                    gShowFileBrowser = false;
+                    gOnSwitchMsg = "Export folder set to: "+gExportPath;
+                    gOnSwitchMsgCol = COL_GREEN;
+                }
                 if (kDown&HidNpadButton_X) {
-                    if (gBrowseForMii) gBrowseLtdPath=gBrowseCurPath;
-                    else gBrowsePngPath=gBrowseCurPath;
-                    gShowFileBrowser=false;
+                    if (gBrowseForExportDir) {
+                        gShowFileBrowser = false;
+                    } else if (gBrowseForMii) {
+                        gBrowseLtdPath=gBrowseCurPath;
+                        gShowFileBrowser=false;
+                    } else {
+                        gBrowsePngPath=gBrowseCurPath;
+                        gShowFileBrowser=false;
+                    }
                 }
             } else if (gOnSwitchMode == OnSwitchMode::UGC) {
                 // Tab switch
@@ -1076,6 +1325,14 @@ int main(int,char**) {
                     gEntryScroll=std::max(0,(int)gEntries.size()-VISIBLE);
                     LoadPreview(gEntries[gEntrySel]);
                 }
+                if (kDown&HidNpadButton_Minus){
+                    gBrowseForExportDir=true; gBrowseForMii=false;
+                    struct stat _st; std::string _sp=gExportPath;
+                    if (stat(_sp.c_str(),&_st)!=0||!S_ISDIR(_st.st_mode)){
+                        size_t _p=_sp.rfind('/'); _sp=(_p&&_p!=std::string::npos)?_sp.substr(0,_p):"/";
+                    }
+                    BrowseRefresh(_sp); gShowFileBrowser=true;
+                }
                 if (kDown&HidNpadButton_A){
                     gBrowseForMii=false;
                     BrowseRefresh(gBrowsePngPath);
@@ -1088,13 +1345,13 @@ int main(int,char**) {
                     std::string err=TextureProcessor::DecodeFile(e.ugctexPath,img,true);
                     if (!err.empty()){gOnSwitchMsg=err;gOnSwitchMsgCol=COL_RED;LogERR("Export failed: "+err);}
                     else {
-                        std::string outPath="/switch/TomoToolNX/Exports/"+e.stem+".png";
+                        std::string outPath=gExportPath+"/"+e.stem+".png";
                         SDL_Surface* surf=SDL_CreateRGBSurfaceWithFormatFrom(
                             img.pixels.data(),img.width,img.height,32,img.width*4,
                             SDL_PIXELFORMAT_RGBA32);
                         if(surf){IMG_SavePNG(surf,outPath.c_str());SDL_FreeSurface(surf);
-                            gOnSwitchMsg="Exported: "+e.stem+".png";gOnSwitchMsgCol=COL_GREEN;
-                            LogOK("Exported: "+e.stem+".png");}
+                            gOnSwitchMsg="Exported to: "+outPath;gOnSwitchMsgCol=COL_GREEN;
+                            LogOK("Exported to: "+outPath);}
                     }
                 }
                 if (kDown&HidNpadButton_B){
@@ -1131,6 +1388,14 @@ int main(int,char**) {
                     gMiiSel=(int)gMiis.size()-1;
                     gMiiScroll=std::max(0,(int)gMiis.size()-VISIBLE);
                 }
+                if (kDown&HidNpadButton_Minus){
+                    gBrowseForExportDir=true; gBrowseForMii=false;
+                    struct stat _st; std::string _sp=gExportPath;
+                    if (stat(_sp.c_str(),&_st)!=0||!S_ISDIR(_st.st_mode)){
+                        size_t _p=_sp.rfind('/'); _sp=(_p&&_p!=std::string::npos)?_sp.substr(0,_p):"/";
+                    }
+                    BrowseRefresh(_sp); gShowFileBrowser=true;
+                }
                 if (kDown&HidNpadButton_A && !gMiis.empty()){
                     gBrowseForMii=true;
                     BrowseRefresh(gBrowseLtdPath);
@@ -1144,11 +1409,11 @@ int main(int,char**) {
                            c=='"'||c=='<'||c=='>'||c=='|'||(uint8_t)c>127)
                             c='_';
                     }
-                    std::string outPath="/switch/TomoToolNX/Exports/"+fname;
+                    std::string outPath=gExportPath+"/"+fname;
                     LogINF("Exporting Mii slot "+std::to_string(slot)+"...");
                     std::string err=MiiManager::ExportMii(slot,outPath);
                     if(!err.empty()){gOnSwitchMsg=err;gOnSwitchMsgCol=COL_RED;LogERR("Mii export failed: "+err);}
-                    else{gOnSwitchMsg="Exported: "+fname;gOnSwitchMsgCol=COL_GREEN;LogOK("Mii exported: "+fname);}
+                    else{gOnSwitchMsg="Exported to: "+outPath;gOnSwitchMsgCol=COL_GREEN;LogOK("Exported to: "+outPath);}
                 }
                 if (kDown&HidNpadButton_B){
                     FreePreview(); HttpServer::Stop(); gLog.clear();
