@@ -422,7 +422,6 @@ static void DrawUserPick() {
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
     SDL_RenderClear(gRen);
     DrawHeader("");
-    DrawTextC("select user", SCREEN_W/2, 44, COL_DIM, Font::Md);
 
     int n = (int)gUsers.size();
     if (n == 0) { DrawFooter("+  quit"); SDL_RenderPresent(gRen); return; }
@@ -442,6 +441,12 @@ static void DrawUserPick() {
     int totalW = MAX_VIS*CARD_W + (MAX_VIS-1)*GAP;
     int startX = (SCREEN_W - totalW) / 2;
     int startY = 68 + (SCREEN_H - 36 - 68 - CARD_H) / 2;
+
+    {
+        TTF_Font* fmd = GetFont(Font::Md); int tw=0, th=0;
+        if (fmd) TTF_SizeUTF8(fmd, "select user", &tw, &th);
+        DrawTextC("select user", SCREEN_W/2, startY - th/2 - 14, COL_DIM, Font::Md);
+    }
 
     for (int i = 0; i < MAX_VIS; i++) {
         int idx = scroll + i;
@@ -481,7 +486,6 @@ static void DrawBackupPrompt() {
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
     SDL_RenderClear(gRen);
     DrawHeader("");
-    DrawTextC("previous backup found", SCREEN_W/2, 44, COL_DIM, Font::Md);
 
     const int cw  = 300;
     const int ch  = 148;
@@ -489,6 +493,12 @@ static void DrawBackupPrompt() {
     const int cx  = SCREEN_W/2 - (3*cw + 2*gap)/2;
     const int cy  = SCREEN_H/2 - ch/2 + 10;
     int x1=cx, x2=cx+cw+gap, x3=cx+(cw+gap)*2;
+
+    {
+        TTF_Font* fmd = GetFont(Font::Md); int tw=0, th=0;
+        if (fmd) TTF_SizeUTF8(fmd, "previous backup found", &tw, &th);
+        DrawTextC("previous backup found", SCREEN_W/2, cy - th/2 - 14, COL_DIM, Font::Md);
+    }
 
     FillRect(x1,cy,cw,ch,COL_PANEL); DrawRect(x1,cy,cw,ch,COL_RED);
     DrawTextC("[A]",                x1+cw/2, cy+36,  COL_RED,    Font::Lg);
