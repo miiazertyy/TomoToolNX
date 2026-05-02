@@ -134,6 +134,25 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .drop-overlay.active{display:flex}
 .drop-ol-title{color:var(--accent);font-size:16px;letter-spacing:.1em}
 .drop-ol-sub{color:var(--muted);font-size:12px;letter-spacing:.06em}
+/* ── Save editor ── */
+.save-sub-tabs{display:flex;gap:6px;padding:8px 0 4px}
+.save-sub-tab{background:var(--panel);border:1px solid var(--border);color:var(--dim);padding:5px 18px;border-radius:4px;cursor:pointer;font-size:.85rem;transition:all .15s}
+.save-sub-tab.active{border-color:var(--gold);color:var(--gold)}
+.save-sub-panel{padding:0}
+.save-mii-layout{display:flex;gap:12px;flex-wrap:wrap}
+.mii-slot-list{display:flex;flex-direction:column;gap:4px;min-width:160px;max-width:200px;max-height:520px;overflow-y:auto;flex-shrink:0}
+.mii-slot-btn{background:var(--panel2);border:1px solid var(--border);color:var(--dim);padding:6px 10px;border-radius:3px;cursor:pointer;text-align:left;font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:all .12s}
+.mii-slot-btn.active{border-color:var(--gold);color:var(--text)}
+.save-fields-wrap{flex:1;min-width:0}
+.save-table{width:100%;border-collapse:collapse;font-size:.85rem}
+.save-table tr:nth-child(even){background:var(--panel)}
+.save-table td{padding:6px 8px;vertical-align:middle}
+.save-label{color:var(--dim);white-space:nowrap;width:140px}
+.save-label small{font-size:.72rem;opacity:.7;margin-left:4px}
+.save-val{width:100%}
+.save-input{background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:3px;width:100%;box-sizing:border-box;font-size:.85rem}
+.save-input:focus{outline:none;border-color:var(--gold)}
+@media(max-width:600px){.save-mii-layout{flex-direction:column}.mii-slot-list{max-width:100%;flex-direction:row;flex-wrap:wrap}.save-label{width:110px}}
 </style>
 </head>
 <body>
@@ -144,6 +163,7 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 <div class="tabs">
   <button class="tab active" onclick="switchTab('ugc',this)">textures</button>
   <button class="tab" onclick="switchTab('mii',this)">miis</button>
+  <button class="tab" onclick="switchTab('save',this)">save editor</button>
 </div>
 
 <!-- UGC Panel -->
@@ -176,6 +196,37 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
     <button class="btn btn-gold" id="btn-mii-export" disabled onclick="doMiiExport(selectedMii&&selectedMii.slot)">export .ltd</button>
     <button class="btn" onclick="loadMiis()">refresh</button>
     <div class="status info" id="mii-status"></div>
+  </div>
+</div>
+
+<!-- Save Editor Panel -->
+<div class="panel" id="panel-save">
+  <div class="save-sub-tabs">
+    <button class="save-sub-tab active" onclick="saveSubTab('player',this)">player</button>
+    <button class="save-sub-tab" onclick="saveSubTab('mii',this)">miis</button>
+  </div>
+
+  <!-- Player sub-panel -->
+  <div class="save-sub-panel" id="save-sub-panel-player">
+    <div class="toolbar">
+      <button class="btn btn-primary" onclick="loadSave('player')">load Player.sav</button>
+      <button class="btn btn-gold" id="save-apply-player" disabled onclick="applySave('player')">apply to Switch</button>
+      <div class="status info" id="save-status-player"></div>
+    </div>
+    <div id="save-fields-player" class="save-fields-wrap"></div>
+  </div>
+
+  <!-- Mii sub-panel -->
+  <div class="save-sub-panel" id="save-sub-panel-mii" style="display:none">
+    <div class="toolbar">
+      <button class="btn btn-primary" onclick="loadSave('mii')">load Mii.sav</button>
+      <button class="btn btn-gold" id="save-apply-mii" disabled onclick="applySave('mii')">apply to Switch</button>
+      <div class="status info" id="save-status-mii"></div>
+    </div>
+    <div class="save-mii-layout">
+      <div id="mii-slots" class="mii-slot-list"></div>
+      <div id="save-fields-mii" class="save-fields-wrap"></div>
+    </div>
   </div>
 </div>
 
@@ -346,6 +397,241 @@ function _showDrop(){
 function _hideDrop(){document.getElementById('drop-overlay').classList.remove('active');}
 
 // ── QR Code ───────────────────────────────────────────────────────────────────
+
+// ── Save Editor ───────────────────────────────────────────────────────────────
+
+// Murmur3 x86 32-bit (seed 0)
+function murmur3(str){
+  const b=new TextEncoder().encode(str),len=b.length,nb=len>>2;
+  let h=0;const c1=0xcc9e2d51|0,c2=0x1b873593|0;
+  for(let i=0;i<nb;i++){
+    let k=(b[i*4]|(b[i*4+1]<<8)|(b[i*4+2]<<16)|(b[i*4+3]<<24))|0;
+    k=Math.imul(k,c1);k=(k<<15)|(k>>>17);k=Math.imul(k,c2);
+    h^=k;h=(h<<13)|(h>>>19);h=(Math.imul(h,5)+0xe6546b64)|0;
+  }
+  let k=0;const t=nb*4;
+  switch(len&3){case 3:k^=b[t+2]<<16;case 2:k^=b[t+1]<<8;case 1:k^=b[t];k=Math.imul(k,c1);k=(k<<15)|(k>>>17);k=Math.imul(k,c2);h^=k;}
+  h^=len;h^=h>>>16;h=Math.imul(h,0x85ebca6b);h^=h>>>13;h=Math.imul(h,0xc2b2ae35);h^=h>>>16;
+  return h>>>0;
+}
+const H=murmur3;
+const INLINE_T=new Set([0,2,4,6,20]);
+
+// ── SAV parse ────────────────────────────────────────────────────────────────
+function heapFixed(t){if(t===22||t===24||t===8)return 8;if(t===10)return 12;if(t===12)return 16;if(t===14)return 32;if(t===16)return 64;if(t===26)return 32;if(t===28)return 64;if(t===30)return 128;return 0;}
+function readPayload(bytes,dv,off,t){
+  if(t===32)return null;
+  const f=heapFixed(t);if(f)return bytes.slice(off,off+f);
+  const count=dv.getUint32(off,true);let sz;
+  if(t===18)sz=4+count;
+  else if(t===1){const bs=Math.max(4,Math.ceil(count/8));sz=4+((bs+3)&~3);}
+  else if(t===3||t===5||t===7||t===21)sz=4+count*4;
+  else if(t===23||t===25||t===9)sz=4+count*8;
+  else if(t===11)sz=4+count*12;
+  else if(t===13)sz=4+count*16;
+  else if(t===15)sz=4+count*32;
+  else if(t===17)sz=4+count*64;
+  else if(t===27)sz=4+count*32;
+  else if(t===29)sz=4+count*64;
+  else if(t===31)sz=4+count*128;
+  else if(t===19){let p=off+4;for(let i=0;i<count;i++){const s=dv.getUint32(p,true);p+=4+s;}return bytes.slice(off,p);}
+  else return null;
+  return sz?bytes.slice(off,off+sz):null;
+}
+function parseSav(buf){
+  const dv=new DataView(buf instanceof ArrayBuffer?buf:buf.buffer);
+  if(dv.byteLength<0x20)throw new Error('File too small');
+  if(dv.getUint8(0)!==4||dv.getUint8(1)!==3||dv.getUint8(2)!==2||dv.getUint8(3)!==1)throw new Error('Not a .sav file');
+  const version=dv.getUint32(4,true),saveDataOff=dv.getUint32(8,true);
+  const bytes=new Uint8Array(dv.buffer,dv.byteOffset,dv.byteLength);
+  const entries=[];let pos=0x20,curType=0;
+  while(pos<saveDataOff){
+    const hash=dv.getUint32(pos,true);pos+=4;const slot=dv.getUint32(pos,true);pos+=4;
+    if(hash===0){curType=slot;continue;}
+    const e={hash,type:curType};
+    if(INLINE_T.has(curType))e.inlineRaw=slot;else e.payload=readPayload(bytes,dv,slot,curType);
+    entries.push(e);
+  }
+  return{version,entries};
+}
+
+// ── SAV write ────────────────────────────────────────────────────────────────
+function writeSav(sav){
+  const N=33,byS=Array.from({length:N},()=>[]);
+  for(const e of sav.entries)if(e.type>=0&&e.type<N)byS[e.type].push(e);
+  let rc=N;for(const s of byS)rc+=s.length;
+  const sdo=0x20+rc*8;
+  const off=new Map();let hp=sdo;
+  for(const sec of byS)for(const e of sec){if(INLINE_T.has(e.type))continue;if(e.type===32&&!e.payload){off.set(e,0);continue;}off.set(e,hp);hp+=e.payload.byteLength;}
+  const out=new Uint8Array(hp),dv=new DataView(out.buffer);
+  out[0]=4;out[1]=3;out[2]=2;out[3]=1;dv.setUint32(4,sav.version,true);dv.setUint32(8,sdo,true);
+  let p=0x20;
+  for(let t=0;t<N;t++){dv.setUint32(p,0,true);p+=4;dv.setUint32(p,t,true);p+=4;
+    for(const e of byS[t]){dv.setUint32(p,e.hash>>>0,true);p+=4;
+      if(INLINE_T.has(e.type))dv.setUint32(p,(e.inlineRaw??0)>>>0,true);else dv.setUint32(p,off.get(e)>>>0,true);p+=4;}}
+  for(const sec of byS)for(const e of sec){if(INLINE_T.has(e.type)||!e.payload)continue;out.set(e.payload,off.get(e));}
+  return out;
+}
+
+// ── Field accessors ──────────────────────────────────────────────────────────
+function findE(entries,hash){return entries.find(e=>e.hash===hash)||null;}
+function wstr(buf,maxC){const u=new Uint16Array(buf.buffer.slice(buf.byteOffset,buf.byteOffset+maxC*2));let s='';for(const c of u){if(!c)break;s+=String.fromCharCode(c);}return s;}
+function setWstr(str,buf,maxC){buf.fill(0,0,maxC*2);for(let i=0;i<str.length&&i<maxC-1;i++){const c=str.charCodeAt(i);buf[i*2]=c&0xFF;buf[i*2+1]=(c>>8)&0xFF;}}
+function getWStr32(entries,hash){const e=findE(entries,hash);if(!e||e.type!==28||!e.payload||e.payload.length<64)return'';return wstr(e.payload,32);}
+function setWStr32(entries,hash,val){const e=findE(entries,hash);if(!e||e.type!==28)return;if(!e.payload||e.payload.length<64)e.payload=new Uint8Array(64);setWstr(val,e.payload,32);}
+function getWStr32At(entries,hash,idx){const e=findE(entries,hash);if(!e||e.type!==29||!e.payload||e.payload.length<4)return'';const cnt=new DataView(e.payload.buffer,e.payload.byteOffset,4).getUint32(0,true);if(idx<0||idx>=cnt)return'';const off=4+idx*64;if(off+64>e.payload.length)return'';return wstr(e.payload.subarray(off),32);}
+function setWStr32At(entries,hash,idx,val){const e=findE(entries,hash);if(!e||e.type!==29||!e.payload||e.payload.length<4)return;const cnt=new DataView(e.payload.buffer,e.payload.byteOffset,4).getUint32(0,true);if(idx<0||idx>=cnt)return;const off=4+idx*64;if(off+64>e.payload.length)return;setWstr(val,e.payload.subarray(off),32);}
+function arrDV(e){return new DataView(e.payload.buffer,e.payload.byteOffset,e.payload.byteLength);}
+function getIntAt(entries,hash,idx){const e=findE(entries,hash);if(!e||e.type!==3||!e.payload||e.payload.length<4)return 0;const dv=arrDV(e),c=dv.getUint32(0,true);return(idx>=0&&idx<c)?dv.getInt32(4+idx*4,true):0;}
+function setIntAt(entries,hash,idx,val){const e=findE(entries,hash);if(!e||e.type!==3||!e.payload||e.payload.length<4)return;const dv=arrDV(e),c=dv.getUint32(0,true);if(idx>=0&&idx<c)dv.setInt32(4+idx*4,val,true);}
+function getUIntAt(entries,hash,idx){const e=findE(entries,hash);if(!e||e.type!==21||!e.payload||e.payload.length<4)return 0;const dv=arrDV(e),c=dv.getUint32(0,true);return(idx>=0&&idx<c)?dv.getUint32(4+idx*4,true):0;}
+function setUIntAt(entries,hash,idx,val){const e=findE(entries,hash);if(!e||e.type!==21||!e.payload||e.payload.length<4)return;const dv=arrDV(e),c=dv.getUint32(0,true);if(idx>=0&&idx<c)dv.setUint32(4+idx*4,val>>>0,true);}
+function getEnumAt(entries,hash,idx){const e=findE(entries,hash);if(!e||e.type!==7||!e.payload||e.payload.length<4)return 0;const dv=arrDV(e),c=dv.getUint32(0,true);return(idx>=0&&idx<c)?dv.getUint32(4+idx*4,true):0;}
+function setEnumAt(entries,hash,idx,val){const e=findE(entries,hash);if(!e||e.type!==7||!e.payload||e.payload.length<4)return;const dv=arrDV(e),c=dv.getUint32(0,true);if(idx>=0&&idx<c)dv.setUint32(4+idx*4,val>>>0,true);}
+function getUInt(entries,hash){const e=findE(entries,hash);return(e&&e.type===20)?e.inlineRaw>>>0:0;}
+function setUInt(entries,hash,val){const e=findE(entries,hash);if(e&&e.type===20)e.inlineRaw=val>>>0;}
+
+// ── Field definitions ────────────────────────────────────────────────────────
+const PLAYER_FIELDS=[
+  {label:'Name',           hash:H('Player.Name'),        kind:'wstr32',  hint:''},
+  {label:'Island Name',    hash:H('Player.IslandName'),  kind:'wstr32',  hint:''},
+  {label:'How To Call',    hash:H('Player.HowToCallName'),kind:'wstr32', hint:'pronunciation'},
+  {label:'Island Pronunc.',hash:H('Player.HowToCallIslandName'),kind:'wstr32',hint:''},
+  {label:'Money',          hash:H('Player.Money'),       kind:'uint',    min:0},
+  {label:'Currency',       hash:H('Player.Currency'),    kind:'uint',    min:0},
+  {label:'Boot Count',     hash:H('Player.BootNum'),     kind:'uint',    min:0, hint:'play count'},
+];
+const MII_FIELDS=[
+  {label:'Name',          hash:H('Mii.Name.Name'),                       kind:'wstr32a'},
+  {label:'Level',         hash:H('Mii.MiiMisc.SatisfyInfo.Level'),       kind:'int',  dispOff:1, min:0},
+  {label:'Level Meter',   hash:H('Mii.MiiMisc.SatisfyInfo.Meter'),      kind:'int',  min:0,max:100},
+  {label:'Money',         hash:H('Mii.Belongings.Money'),                kind:'uint', min:0},
+  {label:'Birthday Day',  hash:H('Mii.MiiMisc.BirthdayInfo.Day'),       kind:'int',  min:1,max:31},
+  {label:'Birthday Month',hash:H('Mii.MiiMisc.BirthdayInfo.Month'),     kind:'int',  min:1,max:12},
+  {label:'Birth Year',    hash:H('Mii.MiiMisc.BirthdayInfo.Year'),      kind:'int'},
+  {label:'Direct Age',    hash:H('Mii.MiiMisc.BirthdayInfo.DirectAge'), kind:'int',  min:0},
+  {label:'Activeness',    hash:H('Mii.CharacterParam.Activeness'),       kind:'int'},
+  {label:'Audacity',      hash:H('Mii.CharacterParam.Audaciousness'),    kind:'int'},
+  {label:'Commonsense',   hash:H('Mii.CharacterParam.Commonsense'),      kind:'int'},
+  {label:'Gaiety',        hash:H('Mii.CharacterParam.Gaiety'),           kind:'int'},
+  {label:'Sociability',   hash:H('Mii.CharacterParam.Sociability'),      kind:'int'},
+  {label:'Bond Meter',    hash:H('Mii.MiiMisc.BondInfo.Meter'),         kind:'int',  min:0,max:100},
+  {label:'Mood (enum)',   hash:H('Mii.Feeling.Type'),                    kind:'enum', min:0},
+  {label:'Fullness',      hash:H('Mii.MiiMisc.EatInfo.EatFullness'),    kind:'int',  min:0,max:100},
+];
+
+// ── State ────────────────────────────────────────────────────────────────────
+let savPlayer=null, savMii=null, savMiiSlot=0;
+
+// ── Load / apply ─────────────────────────────────────────────────────────────
+async function loadSave(which){
+  setSaveStatus(which,'loading...','info');
+  try{
+    const r=await fetch('/api/save/download?file='+which);
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const buf=await r.arrayBuffer();
+    const sav=parseSav(buf);
+    if(which==='player'){savPlayer=sav;renderPlayerFields();}
+    else{savMii=sav;renderMiiSlots();renderMiiFields();}
+    document.getElementById('save-apply-'+which).disabled=false;
+    setSaveStatus(which,'loaded','ok');
+  }catch(e){setSaveStatus(which,'error: '+e.message,'err');}
+}
+async function applySave(which){
+  const sav=which==='player'?savPlayer:savMii;
+  if(!sav)return;
+  setSaveStatus(which,'applying...','info');
+  try{
+    const bytes=writeSav(sav);
+    const r=await fetch('/api/save/upload?file='+which,{method:'POST',body:bytes,headers:{'Content-Type':'application/octet-stream'}});
+    const d=await r.json();
+    if(d.ok)setSaveStatus(which,'saved to Switch','ok');else setSaveStatus(which,'error: '+d.error,'err');
+  }catch(e){setSaveStatus(which,'error: '+e.message,'err');}
+}
+
+// ── Player fields ─────────────────────────────────────────────────────────────
+function renderPlayerFields(){
+  if(!savPlayer)return;
+  const e=savPlayer.entries;
+  let html='<table class="save-table"><tbody>';
+  for(const f of PLAYER_FIELDS){
+    let val=f.kind==='wstr32'?getWStr32(e,f.hash):getUInt(e,f.hash);
+    html+=`<tr><td class="save-label">${f.label}${f.hint?` <small>${f.hint}</small>`:''}</td><td class="save-val">`;
+    if(f.kind==='wstr32')html+=`<input type="text" class="save-input" data-h="${f.hash}" data-k="wstr32" value="${esc(String(val))}" maxlength="32">`;
+    else html+=`<input type="number" class="save-input" data-h="${f.hash}" data-k="uint" value="${val}"${f.min!=null?' min='+f.min:''}>`;
+    html+='</td></tr>';
+  }
+  html+='</tbody></table>';
+  const c=document.getElementById('save-fields-player');c.innerHTML=html;
+  c.querySelectorAll('.save-input').forEach(i=>i.addEventListener('change',onPlayerChange));
+}
+function onPlayerChange(ev){
+  if(!savPlayer)return;
+  const i=ev.target,h=parseInt(i.dataset.h),k=i.dataset.k;
+  if(k==='wstr32')setWStr32(savPlayer.entries,h,i.value);
+  else if(k==='uint')setUInt(savPlayer.entries,h,parseInt(i.value)||0);
+}
+
+// ── Mii slot list ─────────────────────────────────────────────────────────────
+function renderMiiSlots(){
+  if(!savMii)return;
+  const nh=H('Mii.Name.Name');
+  const ne=findE(savMii.entries,nh);
+  if(!ne||!ne.payload||ne.payload.length<4)return;
+  const cnt=new DataView(ne.payload.buffer,ne.payload.byteOffset,4).getUint32(0,true);
+  const c=document.getElementById('mii-slots');let html='';
+  for(let i=0;i<cnt;i++){
+    const name=getWStr32At(savMii.entries,nh,i);
+    if(!name)continue;
+    html+=`<button class="mii-slot-btn${i===savMiiSlot?' active':''}" onclick="selMiiSlot(${i})">${esc(name)}</button>`;
+  }
+  c.innerHTML=html;
+}
+function selMiiSlot(idx){
+  savMiiSlot=idx;
+  document.querySelectorAll('.mii-slot-btn').forEach((b,i)=>b.classList.toggle('active',i===idx));
+  renderMiiFields();
+}
+
+// ── Mii fields ────────────────────────────────────────────────────────────────
+function renderMiiFields(){
+  if(!savMii)return;
+  const e=savMii.entries,idx=savMiiSlot;
+  let html='<table class="save-table"><tbody>';
+  for(const f of MII_FIELDS){
+    let val;
+    if(f.kind==='wstr32a')val=getWStr32At(e,f.hash,idx);
+    else if(f.kind==='int'){val=getIntAt(e,f.hash,idx);if(f.dispOff)val+=f.dispOff;}
+    else if(f.kind==='uint')val=getUIntAt(e,f.hash,idx);
+    else if(f.kind==='enum')val=getEnumAt(e,f.hash,idx);
+    else val=0;
+    html+=`<tr><td class="save-label">${f.label}</td><td class="save-val">`;
+    if(f.kind==='wstr32a')html+=`<input type="text" class="save-input" data-h="${f.hash}" data-k="wstr32a" value="${esc(String(val))}" maxlength="32">`;
+    else html+=`<input type="number" class="save-input" data-h="${f.hash}" data-k="${f.kind}" value="${val}"${f.min!=null?' min='+f.min:''}${f.max!=null?' max='+f.max:''}${f.dispOff?' data-doff='+f.dispOff:''}>`;
+    html+='</td></tr>';
+  }
+  html+='</tbody></table>';
+  const c=document.getElementById('save-fields-mii');c.innerHTML=html;
+  c.querySelectorAll('.save-input').forEach(i=>i.addEventListener('change',onMiiChange));
+}
+function onMiiChange(ev){
+  if(!savMii)return;
+  const i=ev.target,h=parseInt(i.dataset.h),k=i.dataset.k,do_=parseInt(i.dataset.doff)||0,idx=savMiiSlot;
+  if(k==='wstr32a')setWStr32At(savMii.entries,h,idx,i.value);
+  else if(k==='int')setIntAt(savMii.entries,h,idx,(parseInt(i.value)||0)-do_);
+  else if(k==='uint')setUIntAt(savMii.entries,h,idx,parseInt(i.value)>>>0);
+  else if(k==='enum')setEnumAt(savMii.entries,h,idx,parseInt(i.value)>>>0);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function setSaveStatus(w,msg,cls){const el=document.getElementById('save-status-'+w);if(el){el.textContent=msg;el.className='status '+cls;}}
+function saveSubTab(name,btn){
+  document.querySelectorAll('.save-sub-tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.save-sub-panel').forEach(p=>p.style.display='none');
+  btn.classList.add('active');
+  document.getElementById('save-sub-panel-'+name).style.display='';
+}
 
 </script>
 </body>
@@ -556,6 +842,49 @@ static void HandleMiiImport(int fd,const Request& req){
     Send200(fd,"application/json","{\"ok\":true}");
 }
 
+// GET /api/save/download?file=player|mii  — serve raw .sav bytes
+static void HandleSaveDownload(int fd, const std::string& query) {
+    std::string which = GetQueryParam(query, "file");
+    const char* path = nullptr;
+    const char* fname = nullptr;
+    if      (which=="player") { path=SAVE_PLAYER_SAV; fname="Player.sav"; }
+    else if (which=="mii")    { path=SAVE_MII_SAV;    fname="Mii.sav";    }
+    else { Send404(fd); return; }
+
+    std::vector<uint8_t> data;
+    FILE* f = fopen(path, "rb");
+    if (!f) { Send500(fd, std::string("Cannot open ")+path); return; }
+    fseek(f,0,SEEK_END); size_t sz=(size_t)ftell(f); fseek(f,0,SEEK_SET);
+    data.resize(sz); fread(data.data(),1,sz,f); fclose(f);
+
+    std::string disp = std::string("attachment; filename=\"") + fname + "\"";
+    Send200Bin(fd,"application/octet-stream",data,disp);
+    SrvLog("Save download: "+which+" ("+std::to_string(sz)+" bytes)");
+}
+
+// POST /api/save/upload?file=player|mii  — receive modified .sav and commit
+static void HandleSaveUpload(int fd, const Request& req) {
+    std::string which = GetQueryParam(req.query, "file");
+    const char* path = nullptr;
+    if      (which=="player") path=SAVE_PLAYER_SAV;
+    else if (which=="mii")    path=SAVE_MII_SAV;
+    else { Send500(fd,"Invalid file"); return; }
+
+    if (req.body.size() < 0x20) { Send500(fd,"File too small"); return; }
+    if ((uint8_t)req.body[0]!=0x04||(uint8_t)req.body[1]!=0x03||
+        (uint8_t)req.body[2]!=0x02||(uint8_t)req.body[3]!=0x01) {
+        Send500(fd,"Bad magic: not a .sav file"); return;
+    }
+
+    FILE* f = fopen(path, "wb");
+    if (!f) { Send500(fd,"Cannot write save"); return; }
+    fwrite(req.body.data(),1,req.body.size(),f); fclose(f);
+
+    mutexLock(&s_mutex); s_pendingCommit=true; mutexUnlock(&s_mutex);
+    SrvLog("Save upload OK: "+which+" ("+std::to_string(req.body.size())+" bytes)");
+    Send200(fd,"application/json","{\"ok\":true}");
+}
+
 static void HandleConnection(int fd){
     Request req;if(!ReadRequest(fd,req)){close(fd);return;}
     if(req.method=="GET"&&req.path=="/"){SrvLog("WebUI: page loaded");Send200(fd,"text/html; charset=utf-8",std::string(HTML_UI));}
@@ -563,9 +892,11 @@ static void HandleConnection(int fd){
     else if(req.method=="GET"&&req.path=="/api/preview")HandlePreview(fd,req.query);
     else if(req.method=="GET"&&req.path=="/api/export")HandleExport(fd,req.query);
     else if(req.method=="POST"&&req.path=="/api/import")HandleImport(fd,req);
-    else if(req.method=="GET"  &&req.path=="/api/mii/list")  HandleMiiList(fd);
-    else if(req.method=="GET"  &&req.path=="/api/mii/export") HandleMiiExport(fd,req.query);
-    else if(req.method=="POST" &&req.path=="/api/mii/import") HandleMiiImport(fd,req);
+    else if(req.method=="GET"  &&req.path=="/api/mii/list")       HandleMiiList(fd);
+    else if(req.method=="GET"  &&req.path=="/api/mii/export")      HandleMiiExport(fd,req.query);
+    else if(req.method=="POST" &&req.path=="/api/mii/import")      HandleMiiImport(fd,req);
+    else if(req.method=="GET"  &&req.path=="/api/save/download")   HandleSaveDownload(fd,req.query);
+    else if(req.method=="POST" &&req.path=="/api/save/upload")     HandleSaveUpload(fd,req);
     else Send404(fd);
     close(fd);
 }
