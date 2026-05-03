@@ -142,7 +142,7 @@ static int DrawTextBox(const std::string& text, int cx, int y, SDL_Color textCol
 
 // ─── Screens ──────────────────────────────────────────────────────────────────
 
-enum class Screen { UpdateCheck, UpdateAvailable, Downloading, UserPick, BackupPrompt, BackingUp, Mounting, OnSwitch, Error };
+enum class Screen { UpdateCheck, UpdateAvailable, Downloading, UserPick, BackupPrompt, BackingUp, Mounting, OnSwitch, SaveFeedback, Error };
 
 static Screen      gScreen  = Screen::UpdateCheck;
 static std::string gError;
@@ -167,7 +167,7 @@ static void LogERR(const std::string& m){Log(m,COL_RED);}
 // ─── On-Switch editor state ───────────────────────────────────────────────────
 
 enum class OnSwitchMode { UGC, Mii, Player, MiiStats, WebUI };
-static OnSwitchMode gOnSwitchMode = OnSwitchMode::UGC;
+static OnSwitchMode gOnSwitchMode = OnSwitchMode::WebUI;
 
 static std::vector<UgcTextureEntry> gEntries;
 static int          gEntrySel    = 0;
@@ -262,6 +262,11 @@ static bool gBtnTouchActive = false; // set by TAdjust (touch), cleared after us
 // Back-prompt state
 static bool gShowBackPrompt  = false;
 static bool gBackPromptIsMii = false;
+static bool gQuitApp         = false;
+
+// Save-feedback state (brief "Saved!" screen after B or + save)
+static int  gSaveFeedbackFrames = 0;
+static bool gSaveFeedbackQuit   = false;
 
 // ─── Player field table ───────────────────────────────────────────────────────
 struct SaveFieldDef {
@@ -302,14 +307,14 @@ static const MiiStatsDef MII_STATS_FIELDS[] = {
     {"Bday Month",  "Mii.MiiMisc.BirthdayInfo.Month",     false,false,false, 0,  1, 12, "Birthday month (1-12)."},
     {"Birth Year",  "Mii.MiiMisc.BirthdayInfo.Year",      false,false,false, 0, -1, -1, "Year of birth."},
     {"Direct Age",  "Mii.MiiMisc.BirthdayInfo.DirectAge", false,false,false, 0, -1, -1, "Age override. -1 means auto (from birthday)."},
-    {"Activeness",  "Mii.CharacterParam.Activeness",       false,false,false, 0, -1, -1, "How active and energetic the Mii is."},
-    {"Audacity",    "Mii.CharacterParam.Audaciousness",    false,false,false, 0, -1, -1, "How bold and daring the Mii is."},
-    {"Commonsense", "Mii.CharacterParam.Commonsense",      false,false,false, 0, -1, -1, "How wise and sensible the Mii is."},
-    {"Gaiety",      "Mii.CharacterParam.Gaiety",           false,false,false, 0, -1, -1, "How cheerful and upbeat the Mii is."},
-    {"Sociability", "Mii.CharacterParam.Sociability",      false,false,false, 0, -1, -1, "How sociable and outgoing the Mii is."},
+    {"Activeness",  "Mii.CharacterParam.Activeness",       false,false,false, 0,  1, 10, "How active and energetic the Mii is (1-10)."},
+    {"Audacity",    "Mii.CharacterParam.Audaciousness",    false,false,false, 0,  1, 10, "How bold and daring the Mii is (1-10)."},
+    {"Commonsense", "Mii.CharacterParam.Commonsense",      false,false,false, 0,  1, 10, "How wise and sensible the Mii is (1-10)."},
+    {"Gaiety",      "Mii.CharacterParam.Gaiety",           false,false,false, 0,  1, 10, "How cheerful and upbeat the Mii is (1-10)."},
+    {"Sociability", "Mii.CharacterParam.Sociability",      false,false,false, 0,  1, 10, "How sociable and outgoing the Mii is (1-10)."},
     {"Bond Meter",  "Mii.MiiMisc.BondInfo.Meter",         false,false,false, 0,  0,100, "Strength of the bond with the player (0-100)."},
     {"Mood",        "Mii.Feeling.Type",                    false,false,true,  0,  0, -1, "Current emotional state."},
-    {"Fullness",    "Mii.MiiMisc.EatInfo.EatFullness",     false,false,false, 0,  0,100, "How well-fed the Mii is (0-100)."},
+    {"Fullness",    "Mii.MiiMisc.EatInfo.EatFullness",     false,false,false, 0,  0, -1, "How well-fed the Mii is. Can exceed 100 with certain items."},
 };
 static const int MII_STATS_FIELD_COUNT = 16;
 
@@ -1142,7 +1147,7 @@ static void DrawOnSwitch() {
             DrawText("Inactive", rightX+(rightW-lw)/2-20+lw, cy2, COL_RED);
         }
 
-        DrawFooter("L/R  switch tab    B  back    +  quit");
+        DrawFooter("L/R  switch tab    X  restart server    B  back    +  quit");
     }
 
     SDL_RenderPresent(gRen);
@@ -1291,7 +1296,7 @@ static void DrawPlayer() {
     if (!gPlayerMsg.empty())
         DrawTextC(gPlayerMsg, cx, SE_TOP_Y+16, gPlayerMsgCol);
 
-    DrawFooter("Up/Down  select field    A  adjust    X  undo    B  back");
+    DrawFooter("Up/Down  select field    A  adjust    X  undo    B  save and go back    +  discard");
     SDL_RenderPresent(gRen);
 }
 
@@ -1468,6 +1473,7 @@ static void DrawMiiStats() {
                         SDL_Color fill = isSel ? COL_ACCENT : COL_PANEL2;
                         SDL_Color text = isSel ? SDL_Color{10,10,10,255} : COL_TEXT;
                         SDL_Color border = isSel ? COL_GOLD : COL_BORDER;
+                        HitAdd(nx_[i]-nW/2, ny_[i]-nH/2, nW, nH, TSelMiiStatsMii, i);
                         FillRect(nx_[i]-nW/2, ny_[i]-nH/2, nW, nH, fill);
                         DrawRect (nx_[i]-nW/2, ny_[i]-nH/2, nW, nH, border);
                         DrawTextC(name.empty()?"?":name, nx_[i], ny_[i], text, Font::Sm);
@@ -1601,9 +1607,9 @@ static void DrawMiiStats() {
     }
 
     DrawFooter(gMiiStatsSocialView
-        ? (gSocialExpanded ? "Y  focus view    ZL/ZR  prev/next mii    X  focus    B  back"
-                           : "Y  stats/social    ZL/ZR  prev/next mii    X  global graph    B  back")
-        : "Y  stats/social    ZL/ZR  prev/next mii    Up/Down  field    A  edit    B  back");
+        ? (gSocialExpanded ? "Y  stats/social    ZL/ZR  prev/next mii    X  focus view    B  save and go back    +  discard"
+                           : "Y  stats/social    ZL/ZR  prev/next mii    X  global graph    B  save and go back    +  discard")
+        : "Y  stats/social    ZL/ZR  prev/next mii    Up/Down  field    X  undo    B  save and go back    +  discard");
     SDL_RenderPresent(gRen);
 }
 
@@ -1644,7 +1650,9 @@ static void TAckBackYes(int) {
     gPlayerSavDirty=false; gMiiSavDirty=false;
     memset(gPlayerUndoValid, 0, sizeof(gPlayerUndoValid));
     memset(gMiiUndoValid,    0, sizeof(gMiiUndoValid));
-    gScreen=Screen::UserPick; SaveMount::Unmount();
+    SaveMount::Unmount();
+    gSaveFeedbackFrames=90; gSaveFeedbackQuit=true;
+    gScreen=Screen::SaveFeedback;
 }
 static void TAckBackNo(int) {
     gShowBackPrompt = false;
@@ -1654,7 +1662,8 @@ static void TAckBackNo(int) {
     gPlayerSavDirty=false; gMiiSavDirty=false;
     memset(gPlayerUndoValid, 0, sizeof(gPlayerUndoValid));
     memset(gMiiUndoValid,    0, sizeof(gMiiUndoValid));
-    gScreen=Screen::UserPick; SaveMount::Unmount();
+    SaveMount::Unmount();
+    gQuitApp = true;
 }
 static void DrawBackPrompt() {
     HitClear();
@@ -1949,7 +1958,12 @@ int main(int,char**) {
                 }
             }
         }
-        if (kDown&HidNpadButton_Plus) break;
+        if (gQuitApp) break;
+
+        // + quits globally, but let Player/MiiStats tabs intercept it first for dirty check
+        bool plusOwned = gScreen == Screen::OnSwitch &&
+                         (gOnSwitchMode == OnSwitchMode::Player || gOnSwitchMode == OnSwitchMode::MiiStats);
+        if ((kDown&HidNpadButton_Plus) && !plusOwned) break;
 
         kDown |= gSimKDown;
         gSimKDown = 0;
@@ -2079,6 +2093,11 @@ int main(int,char**) {
                 HttpServer::ClearPendingCommit();
                 std::string cerr=SaveMount::Commit();
                 if (cerr.empty()) LogOK("Saved"); else LogERR("Commit: "+cerr);
+            }
+            if (HttpServer::HasPendingMiiRefresh()) {
+                HttpServer::ClearPendingMiiRefresh();
+                gMiis = MiiManager::ListMiis();
+                LogOK("Mii list updated");
             }
             // Warning modal takes priority over all other input
             if (gShowSaveWarning) {
@@ -2400,15 +2419,26 @@ int main(int,char**) {
                     // X = undo
                     if (!fd.isStr && (kDown&HidNpadButton_X)) TUndoPlayer(0);
                 }
-                // B = back (prompt if dirty)
+                // B = save and go back
                 if (kDown&HidNpadButton_B) {
-                    if (gPlayerSavDirty) { gBackPromptIsMii=false; gShowBackPrompt=true; }
-                    else { FreePreview(); HttpServer::Stop(); gLog.clear();
-                           gEntries.clear(); gMiis.clear();
-                           gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
-                           gPlayerSavDirty=false; gMiiSavDirty=false;
-                           gScreen=Screen::UserPick; SaveMount::Unmount(); }
+                    bool wasDirty = gPlayerSavDirty;
+                    if (wasDirty) {
+                        std::string err = SaveEditor::Save(SAVE_PLAYER_SAV, gPlayerSav);
+                        if (!err.empty()) { gPlayerMsg="save error: "+err; goto player_b_done; }
+                        SaveMount::Commit(); gPlayerSavDirty=false;
+                    }
+                    FreePreview(); HttpServer::Stop(); gLog.clear();
+                    gEntries.clear(); gMiis.clear();
+                    gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
+                    gPlayerSavDirty=false; gMiiSavDirty=false;
+                    SaveMount::Unmount();
+                    if (wasDirty) { gSaveFeedbackFrames=90; gSaveFeedbackQuit=false; gScreen=Screen::SaveFeedback; }
+                    else { gScreen=Screen::UserPick; }
+                    player_b_done:;
                 }
+                // Plus = discard prompt (only if dirty)
+                if (kDown&HidNpadButton_Plus && gPlayerSavDirty)
+                    { gBackPromptIsMii=false; gShowBackPrompt=true; }
 
             } else if (gOnSwitchMode == OnSwitchMode::MiiStats) {
                 // Lazy-load
@@ -2532,18 +2562,37 @@ int main(int,char**) {
                         if (nv != cur) { SaveEditor::SetWStr32At(gMiiSav, h, miiIdx, nv); gMiiSavDirty=true; }
                         gMiiStatsMsg=""; gMiiStatsMsgCol=COL_TEXT;
                     }
+                    // X = undo
+                    if (!fd.isStr && (kDown&HidNpadButton_X)) TUndoMii(0);
                 }
-                // B = back (prompt if dirty)
+                // B = save and go back
                 if (kDown&HidNpadButton_B) {
-                    if (gMiiSavDirty) { gBackPromptIsMii=true; gShowBackPrompt=true; }
-                    else { FreePreview(); HttpServer::Stop(); gLog.clear();
-                           gEntries.clear(); gMiis.clear();
-                           gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
-                           gPlayerSavDirty=false; gMiiSavDirty=false;
-                           gScreen=Screen::UserPick; SaveMount::Unmount(); }
+                    bool wasDirty = gMiiSavDirty;
+                    if (wasDirty) {
+                        std::string err = SaveEditor::Save(SAVE_MII_SAV, gMiiSav);
+                        if (!err.empty()) { gMiiStatsMsg="save error: "+err; goto miistats_b_done; }
+                        SaveMount::Commit(); gMiiSavDirty=false;
+                    }
+                    FreePreview(); HttpServer::Stop(); gLog.clear();
+                    gEntries.clear(); gMiis.clear();
+                    gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
+                    gPlayerSavDirty=false; gMiiSavDirty=false;
+                    SaveMount::Unmount();
+                    if (wasDirty) { gSaveFeedbackFrames=90; gSaveFeedbackQuit=false; gScreen=Screen::SaveFeedback; }
+                    else { gScreen=Screen::UserPick; }
+                    miistats_b_done:;
                 }
+                // Plus = discard prompt (only if dirty)
+                if (kDown&HidNpadButton_Plus && gMiiSavDirty)
+                    { gBackPromptIsMii=true; gShowBackPrompt=true; }
 
             } else { // WebUI tab
+                // X = restart HTTP server
+                if (kDown&HidNpadButton_X) {
+                    HttpServer::Stop();
+                    HttpServer::Start(HTTP_PORT, SAVE_UGC_PATH);
+                    LogOK("WebUI restarted");
+                }
                 // Tab switch
                 if (kDown&(HidNpadButton_L|HidNpadButton_ZL)){
                     if (!gSaveWarningAcked) {
@@ -2600,6 +2649,19 @@ int main(int,char**) {
             }
             break;
 
+
+        case Screen::SaveFeedback: {
+            SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
+            SDL_RenderClear(gRen);
+            DrawTextC("Saved!", SCREEN_W/2, SCREEN_H/2 - 20, COL_GREEN, Font::Lg);
+            DrawTextC("Changes saved successfully.", SCREEN_W/2, SCREEN_H/2 + 28, COL_DIM, Font::Md);
+            SDL_RenderPresent(gRen);
+            if (--gSaveFeedbackFrames <= 0) {
+                if (gSaveFeedbackQuit) gQuitApp = true;
+                else gScreen = Screen::UserPick;
+            }
+            continue;
+        }
 
         case Screen::Error:
             DrawError();

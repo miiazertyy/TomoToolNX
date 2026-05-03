@@ -34,7 +34,8 @@ static bool FileExists(const std::string& p){struct stat st;return stat(p.c_str(
 
 static Thread      s_thread;
 static bool        s_running       = false;
-static bool        s_pendingCommit = false;
+static bool        s_pendingCommit    = false;
+static bool        s_pendingMiiRefresh = false;
 static int         s_port          = 8080;
 static std::string s_ugcPath;
 static Mutex       s_mutex;
@@ -168,6 +169,7 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 <header>
   <h1>TomoToolNX <span>tomodachi life editor</span></h1>
   <span id="hdr-count"></span>
+  <button class="btn" style="margin-left:auto;font-size:.75rem;padding:4px 10px" onclick="restartServer()">restart server</button>
 </header>
 <div class="tabs">
   <button class="tab active" onclick="switchTab('ugc',this)">textures</button>
@@ -376,6 +378,7 @@ async function uploadMiiFile(file){
   pendingMiiSlot=null;
 }
 function setMiiStatus(msg,cls){const el=document.getElementById('mii-status');el.textContent=msg;el.className='status '+cls;}
+function restartServer(){alert('Press X on the console to restart the server.');}
 
 // ── Modal ──────────────────────────────────────────────────────────────────────
 function showSpinner(msg){
@@ -910,7 +913,7 @@ static void HandleMiiImport(int fd,const Request& req){
     if(!err.empty()){SrvLog("Mii import failed: "+err,true);Send500(fd,err);return;}
 
     SrvLog("Mii import slot "+std::to_string(slot)+" OK");
-    mutexLock(&s_mutex);s_pendingCommit=true;mutexUnlock(&s_mutex);
+    mutexLock(&s_mutex);s_pendingCommit=true;s_pendingMiiRefresh=true;mutexUnlock(&s_mutex);
     Send200(fd,"application/json","{\"ok\":true}");
 }
 
@@ -1087,6 +1090,8 @@ void Stop(){if(!s_running)return;s_running=false;threadWaitForExit(&s_thread);th
 bool IsRunning(){return s_running;}
 bool HasPendingCommit(){mutexLock(&s_mutex);bool v=s_pendingCommit;mutexUnlock(&s_mutex);return v;}
 void ClearPendingCommit(){mutexLock(&s_mutex);s_pendingCommit=false;mutexUnlock(&s_mutex);}
+bool HasPendingMiiRefresh(){mutexLock(&s_mutex);bool v=s_pendingMiiRefresh;mutexUnlock(&s_mutex);return v;}
+void ClearPendingMiiRefresh(){mutexLock(&s_mutex);s_pendingMiiRefresh=false;mutexUnlock(&s_mutex);}
 bool HasPendingImport(){mutexLock(&s_importMutex);bool v=(s_importState==ImportState::Queued);mutexUnlock(&s_importMutex);return v;}
 ImportJob TakePendingImport(){mutexLock(&s_importMutex);ImportJob job=s_importJob;s_importState=ImportState::InProgress;mutexUnlock(&s_importMutex);return job;}
 void FinishImport(const std::string& result){mutexLock(&s_importMutex);s_importResult=result;s_importState=ImportState::Done;mutexUnlock(&s_importMutex);}

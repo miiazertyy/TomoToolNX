@@ -32,6 +32,10 @@ uint64_t LastConnectTick();
 bool HasPendingCommit();
 void ClearPendingCommit();
 
+// Set after a WebUI Mii import so the main thread can refresh gMiis.
+bool HasPendingMiiRefresh();
+void ClearPendingMiiRefresh();
+
 // ── Import job (queued by server thread, executed by main thread) ───────────
 // The server thread must NOT call IMG_Load — it's not thread-safe on Atmosphere.
 // Instead it writes the upload to a temp file and queues an ImportJob.
