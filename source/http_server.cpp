@@ -7,6 +7,7 @@
 #include "texture_processor.h"
 #include "backup.h"
 #include "mii_manager.h"
+#include "save_editor.h"
 
 #include <switch.h>
 #include <sys/socket.h>
@@ -58,6 +59,7 @@ static Mutex                 s_importMutex;
 static ImportState           s_importState  = ImportState::Idle;
 static HttpServer::ImportJob s_importJob;
 static std::string           s_importResult;
+static u64                   s_lastConnectTick = 0;
 
 static const char* HTML_UI = R"HTML(<!DOCTYPE html>
 <html lang="en">
@@ -134,6 +136,13 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .drop-overlay.active{display:flex}
 .drop-ol-title{color:var(--accent);font-size:16px;letter-spacing:.1em}
 .drop-ol-sub{color:var(--muted);font-size:12px;letter-spacing:.06em}
+/* Social graph overlay */
+.social-overlay{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:100;display:none;flex-direction:column;align-items:center;justify-content:center}
+.social-overlay.active{display:flex}
+.social-header{color:var(--gold);font-size:.85rem;letter-spacing:.12em;margin-bottom:8px}
+#social-canvas{background:#0a0a0a;border:1px solid var(--border);border-radius:4px;touch-action:none}
+.social-close{margin-top:10px;font-size:.8rem;color:var(--muted);cursor:pointer}
+.social-close:hover{color:var(--text)}
 /* ── Save editor ── */
 .save-sub-tabs{display:flex;gap:6px;padding:8px 0 4px}
 .save-sub-tab{background:var(--panel);border:1px solid var(--border);color:var(--dim);padding:5px 18px;border-radius:4px;cursor:pointer;font-size:.85rem;transition:all .15s}
@@ -194,9 +203,17 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
   <div class="toolbar">
     <button class="btn btn-primary" id="btn-mii-import" disabled onclick="doMiiImport(selectedMii&&selectedMii.slot)">import .ltd</button>
     <button class="btn btn-gold" id="btn-mii-export" disabled onclick="doMiiExport(selectedMii&&selectedMii.slot)">export .ltd</button>
+    <button class="btn" id="btn-mii-social" disabled onclick="openSocialGraph(selectedMii&&selectedMii.slot)" style="border-color:var(--accent);color:var(--accent)">social graph</button>
     <button class="btn" onclick="loadMiis()">refresh</button>
     <div class="status info" id="mii-status"></div>
   </div>
+</div>
+
+<!-- Social graph overlay -->
+<div class="social-overlay" id="social-overlay" onclick="closeSocialGraph()">
+  <div class="social-header" id="social-title">social graph</div>
+  <canvas id="social-canvas" width="720" height="520" onclick="event.stopPropagation()"></canvas>
+  <div class="social-close">click outside to close</div>
 </div>
 
 <!-- Save Editor Panel -->
@@ -325,6 +342,7 @@ function selectMii(m){
   document.querySelectorAll('#mii-list .entry').forEach((el,i)=>el.classList.toggle('active',miiEntries[i].slot===m.slot));
   document.getElementById('btn-mii-import').disabled=false;
   document.getElementById('btn-mii-export').disabled=false;
+  document.getElementById('btn-mii-social').disabled=false;
   setMiiStatus(m.name+(m.hasFacepaint?' · facepaint':''),'info');
 }
 function doMiiExport(slot){
@@ -633,6 +651,60 @@ function saveSubTab(name,btn){
   document.getElementById('save-sub-panel-'+name).style.display='';
 }
 
+// ── Social graph ──────────────────────────────────────────────────────────────
+async function openSocialGraph(slot) {
+  if (!slot) return;
+  const d = await (await fetch('/api/mii/social?slot='+slot)).json();
+  document.getElementById('social-title').textContent = (d.center.name||'?') + '  —  social graph';
+  document.getElementById('social-overlay').classList.add('active');
+  drawSocialCanvas(d);
+}
+function closeSocialGraph() {
+  document.getElementById('social-overlay').classList.remove('active');
+}
+function drawSocialCanvas(d) {
+  const cv = document.getElementById('social-canvas');
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0,0,W,H);
+  const edges = d.edges || [];
+  if (!edges.length) {
+    ctx.fillStyle='#666'; ctx.font='14px monospace'; ctx.textAlign='center';
+    ctx.fillText('no relationships', W/2, H/2); return;
+  }
+  const cx=W/2, cy=H/2;
+  const R = Math.min(W/2, H/2) - 80;
+  const n = edges.length;
+  // draw lines
+  edges.forEach((e,i)=>{
+    const a = -Math.PI/2 + 2*Math.PI*i/n;
+    const nx = cx + R*Math.cos(a), ny = cy + R*Math.sin(a);
+    ctx.strokeStyle = e.color+'cc'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(nx,ny); ctx.stroke();
+    // edge label
+    const lx=(cx+nx)/2, ly=(cy+ny)/2;
+    ctx.fillStyle=e.color; ctx.font='10px monospace'; ctx.textAlign='center';
+    ctx.fillText(e.outType, lx, ly-6);
+    ctx.fillStyle='#888'; ctx.fillText(e.outMeter, lx, ly+8);
+  });
+  // satellite nodes
+  edges.forEach((e,i)=>{
+    const a = -Math.PI/2 + 2*Math.PI*i/n;
+    const nx = cx + R*Math.cos(a), ny = cy + R*Math.sin(a);
+    const nw = n>10?68:82, nh = n>10?22:30;
+    ctx.fillStyle='#181818'; ctx.strokeStyle=e.color; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.roundRect(nx-nw/2,ny-nh/2,nw,nh,4); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#ddd'; ctx.font='11px monospace'; ctx.textAlign='center';
+    ctx.fillText(e.name||'?', nx, ny+4);
+  });
+  // center node
+  const cw=110, ch=38;
+  ctx.fillStyle='#c8a032'; ctx.strokeStyle='#fff'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.roundRect(cx-cw/2,cy-ch/2,cw,ch,5); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='#111'; ctx.font='bold 12px monospace'; ctx.textAlign='center';
+  ctx.fillText(d.center.name||'?', cx, cy+4);
+}
+
 </script>
 </body>
 </html>
@@ -842,6 +914,87 @@ static void HandleMiiImport(int fd,const Request& req){
     Send200(fd,"application/json","{\"ok\":true}");
 }
 
+// GET /api/mii/social?slot=N  — return relationship graph JSON for one mii slot
+static void HandleMiiSocial(int fd, const std::string& query) {
+    std::string slotStr = GetQueryParam(query, "slot");
+    if (slotStr.empty()) { Send500(fd, "Missing slot"); return; }
+    int slot = atoi(slotStr.c_str()) - 1; // convert 1-based slot to 0-based index
+
+    SaveEditor::SavFile sav;
+    std::string err;
+    if (!SaveEditor::Load(SAVE_MII_SAV, sav, err)) { Send500(fd, "Cannot load Mii.sav: " + err); return; }
+
+    static const uint32_t H_ID_A  = 0xf7420afbu;
+    static const uint32_t H_ID_B  = 0x4071f71cu;
+    static const uint32_t H_BASE  = 0x8b41897eu;
+    static const uint32_t H_METER = 0x42c2fc2fu;
+    static const uint32_t H_NAME  = 0x2499bfdau;
+
+    auto relColor = [](uint32_t h) -> const char* {
+        if (h==0xba939a42u) return "#64C878";
+        if (h==0xc2d067a7u) return "#FF96B4";
+        if (h==0xb7ce0c18u) return "#FF6464";
+        if (h==0x354a0515u) return "#64AAFF";
+        if (h==0x7783d4c3u) return "#A050A0";
+        if (h==0xfe59f825u) return "#A03C3C";
+        if (h==0xdcfc7603u||h==0xe193c5a2u) return "#DC9650";
+        if (h==0x1918f808u||h==0x3b1d200au) return "#DCC850";
+        if (h==0x2fd9785bu||h==0x7e3cd550u) return "#C8AA78";
+        if (h==0x804172f3u) return "#A0A0A0";
+        return "#646464";
+    };
+    auto relName = [](uint32_t h) -> const char* {
+        if (h==0xba939a42u) return "Friend";
+        if (h==0xc2d067a7u) return "Couple";
+        if (h==0xb7ce0c18u) return "Lovers";
+        if (h==0x354a0515u) return "Knows";
+        if (h==0x7783d4c3u) return "Ex";
+        if (h==0xfe59f825u) return "Divorced";
+        if (h==0xdcfc7603u) return "Parent";
+        if (h==0xe193c5a2u) return "Child";
+        if (h==0x1918f808u) return "Sibling";
+        if (h==0x3b1d200au) return "Sibling";
+        if (h==0x2fd9785bu) return "Grandparent";
+        if (h==0x7e3cd550u) return "Grandchild";
+        if (h==0x804172f3u) return "Relative";
+        return "?";
+    };
+    auto jsonStr = [](const std::string& s) -> std::string {
+        std::string r; r.reserve(s.size()+2); r+='"';
+        for (char c : s) { if(c=='"')r+="\\\""; else if(c=='\\')r+="\\\\"; else r+=c; }
+        r+='"'; return r;
+    };
+
+    std::string centerName = SaveEditor::GetWStr32At(sav, H_NAME, slot);
+    int pairCount = SaveEditor::ArraySize(sav, H_ID_A);
+
+    std::string json = "{\"center\":{\"slot\":"+std::to_string(slot+1)+",\"name\":"+jsonStr(centerName)+"},\"edges\":[";
+    bool first = true;
+    for (int i = 0; i < pairCount; i++) {
+        int a = SaveEditor::GetIntAt(sav, H_ID_A, i);
+        int b = SaveEditor::GetIntAt(sav, H_ID_B, i);
+        if (a < 0 || b < 0) continue;
+        if (a != slot && b != slot) continue;
+        bool selfA = (a == slot);
+        int other = selfA ? b : a;
+        uint32_t outT = SaveEditor::GetEnumAt(sav, H_BASE, selfA ? i*2 : i*2+1);
+        int32_t  outM = SaveEditor::GetIntAt(sav, H_METER, selfA ? i*2 : i*2+1);
+        uint32_t inT  = SaveEditor::GetEnumAt(sav, H_BASE, selfA ? i*2+1 : i*2);
+        int32_t  inM  = SaveEditor::GetIntAt(sav, H_METER, selfA ? i*2+1 : i*2);
+        std::string oName = SaveEditor::GetWStr32At(sav, H_NAME, other);
+        if (!first) json += ","; first = false;
+        json += "{\"slot\":"+std::to_string(other+1)+
+                ",\"name\":"+jsonStr(oName)+
+                ",\"outType\":\""+relName(outT)+"\""+
+                ",\"outMeter\":"+std::to_string(outM)+
+                ",\"inType\":\""+relName(inT)+"\""+
+                ",\"inMeter\":"+std::to_string(inM)+
+                ",\"color\":\""+relColor(outT)+"\"}";
+    }
+    json += "]}";
+    Send200(fd, "application/json", json);
+}
+
 // GET /api/save/download?file=player|mii  — serve raw .sav bytes
 static void HandleSaveDownload(int fd, const std::string& query) {
     std::string which = GetQueryParam(query, "file");
@@ -886,6 +1039,7 @@ static void HandleSaveUpload(int fd, const Request& req) {
 }
 
 static void HandleConnection(int fd){
+    mutexLock(&s_mutex); s_lastConnectTick = armGetSystemTick(); mutexUnlock(&s_mutex);
     Request req;if(!ReadRequest(fd,req)){close(fd);return;}
     if(req.method=="GET"&&req.path=="/"){SrvLog("WebUI: page loaded");Send200(fd,"text/html; charset=utf-8",std::string(HTML_UI));}
     else if(req.method=="GET"&&req.path=="/api/list")HandleList(fd);
@@ -895,6 +1049,7 @@ static void HandleConnection(int fd){
     else if(req.method=="GET"  &&req.path=="/api/mii/list")       HandleMiiList(fd);
     else if(req.method=="GET"  &&req.path=="/api/mii/export")      HandleMiiExport(fd,req.query);
     else if(req.method=="POST" &&req.path=="/api/mii/import")      HandleMiiImport(fd,req);
+    else if(req.method=="GET"  &&req.path=="/api/mii/social")     HandleMiiSocial(fd,req.query);
     else if(req.method=="GET"  &&req.path=="/api/save/download")   HandleSaveDownload(fd,req.query);
     else if(req.method=="POST" &&req.path=="/api/save/upload")     HandleSaveUpload(fd,req);
     else Send404(fd);
@@ -936,4 +1091,5 @@ bool HasPendingImport(){mutexLock(&s_importMutex);bool v=(s_importState==ImportS
 ImportJob TakePendingImport(){mutexLock(&s_importMutex);ImportJob job=s_importJob;s_importState=ImportState::InProgress;mutexUnlock(&s_importMutex);return job;}
 void FinishImport(const std::string& result){mutexLock(&s_importMutex);s_importResult=result;s_importState=ImportState::Done;mutexUnlock(&s_importMutex);}
 void DrainLog(std::vector<LogEntry>& out){mutexLock(&s_logMutex);while(s_logRead<s_logWrite)out.push_back(s_logRing[s_logRead++%LOG_RING_SIZE]);mutexUnlock(&s_logMutex);}
+uint64_t LastConnectTick(){mutexLock(&s_mutex);u64 t=s_lastConnectTick;mutexUnlock(&s_mutex);return t;}
 } // namespace HttpServer

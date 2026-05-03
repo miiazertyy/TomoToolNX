@@ -24,6 +24,9 @@ void Stop();
 // Returns true if running
 bool IsRunning();
 
+// Returns armGetSystemTick() of the last accepted client connection; 0 if none.
+uint64_t LastConnectTick();
+
 // Called from main loop to process any pending save commits
 // (import writes to save:/ then we need to commit)
 bool HasPendingCommit();

@@ -245,6 +245,18 @@ void SetInt(SavFile& s, uint32_t h, int32_t v) {
 void SetUInt(SavFile& s, uint32_t h, uint32_t v) {
     auto* e = FindMut(s,h); if (e && e->type==DT_UInt) e->inlineRaw = v;
 }
+uint32_t GetEnum(const SavFile& s, uint32_t h, uint32_t def) {
+    auto* e = Find(s,h); if (!e || e->type!=DT_Enum) return def;
+    return e->inlineRaw;
+}
+void SetEnum(SavFile& s, uint32_t h, uint32_t v) {
+    auto* e = FindMut(s,h); if (e && e->type==DT_Enum) e->inlineRaw = v;
+}
+int ArraySize(const SavFile& s, uint32_t h) {
+    auto* e = Find(s,h);
+    if (!e || e->payload.size() < 4) return 0;
+    return (int)R32(e->payload.data());
+}
 
 // ── Array helpers ─────────────────────────────────────────────────────────────
 static bool ArrayRead(const Entry* e, DataType expected, int idx, uint32_t& out) {

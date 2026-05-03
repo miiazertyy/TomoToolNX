@@ -617,7 +617,7 @@ std::string ImportPng(const ImportOptions& opts) {
         RgbaImage ci = (src.width!=cW||src.height!=cH) ? ResizeNearest(src,cW,cH) : src;
         auto rgba = ci.pixels;
         ThresholdAlpha(rgba); // prevent holes from semi-transparent edges
-        if (!opts.noSrgb) ConvertSrgbToLinear(rgba);
+        ConvertSrgbToLinear(rgba);
         auto sw = SwizzleBlockLinear(rgba, cW, cH, 4, DefaultBlockHeight);
         auto comp = ZstdCompress(sw);
         if (!WriteFile(opts.destStem + ".canvas.zs", comp, err)) return err;
@@ -629,7 +629,7 @@ std::string ImportPng(const ImportOptions& opts) {
         RgbaImage ui = (src.width!=uW||src.height!=uH) ? ResizeNearest(src,uW,uH) : src;
         auto rgba = ui.pixels;
         ThresholdAlpha(rgba); // BC1 can't handle semi-transparent pixels
-        if (!opts.noSrgb) ConvertSrgbToLinear(rgba);
+        ConvertSrgbToLinear(rgba);
 
         std::vector<uint8_t> blocks = (layout.Format == TextureFormat::Bc3)
             ? Bc3Encode(rgba, uW, uH)
@@ -647,7 +647,7 @@ std::string ImportPng(const ImportOptions& opts) {
         const int tW=256, tH=256;
         RgbaImage ti = (src.width!=tW||src.height!=tH) ? ResizeNearest(src,tW,tH) : src;
         auto rgba = ti.pixels;
-        if (!opts.noSrgb) ConvertSrgbToLinear(rgba);
+        ConvertSrgbToLinear(rgba);
         auto blocks = Bc3Encode(rgba, tW, tH);
         auto sw     = SwizzleBlockLinear(blocks, tW/4, tH/4, 16, ThumbBlockHeight);
         auto comp   = ZstdCompress(sw);

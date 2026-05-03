@@ -56,8 +56,10 @@ uint32_t Hash(const char* name);
 // ── Scalar inline accessors (Bool/Int/UInt/Float/Enum) ───────────────────────
 int32_t  GetInt  (const SavFile& s, uint32_t h, int32_t  def = 0);
 uint32_t GetUInt (const SavFile& s, uint32_t h, uint32_t def = 0);
+uint32_t GetEnum (const SavFile& s, uint32_t h, uint32_t def = 0);
 void     SetInt  (SavFile& s, uint32_t h, int32_t  v);
 void     SetUInt (SavFile& s, uint32_t h, uint32_t v);
+void     SetEnum (SavFile& s, uint32_t h, uint32_t v);
 
 // ── Array element accessors (heap types) ─────────────────────────────────────
 int32_t  GetIntAt  (const SavFile& s, uint32_t h, int idx, int32_t  def = 0);
@@ -66,6 +68,7 @@ uint32_t GetEnumAt (const SavFile& s, uint32_t h, int idx, uint32_t def = 0);
 void     SetIntAt  (SavFile& s, uint32_t h, int idx, int32_t  v);
 void     SetUIntAt (SavFile& s, uint32_t h, int idx, uint32_t v);
 void     SetEnumAt (SavFile& s, uint32_t h, int idx, uint32_t v);
+int      ArraySize (const SavFile& s, uint32_t h);  // element count of any array entry
 
 // ── Wide-string accessors (UTF-8 ↔ UTF-16LE in payload) ──────────────────────
 // Scalar WStr32 (DataType 28, 64-byte payload)
