@@ -6,7 +6,7 @@ Based on [LivinTheDreamToolkit](https://gamebanana.com/tools/22435) by the UGC e
 Mii sharing based on [ShareMii](https://github.com/Star-F0rce/ShareMii) by Star-F0rce.
 
 <img src="https://i.imgur.com/FO7lZ3o.png" width="600">
-<img src="https://i.imgur.com/KRxI1qw.png" width="600">
+<img src="https://i.imgur.com/upNJWY0.png" width="600">
 <img src="https://i.imgur.com/aHBKPVO.png" width="600">
 And more!
 
