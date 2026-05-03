@@ -2221,6 +2221,7 @@ int main(int,char**) {
                     std::string err=TextureProcessor::DecodeFile(e.ugctexPath,img,true);
                     if (!err.empty()){gOnSwitchMsg=err;gOnSwitchMsgCol=COL_RED;LogERR("Export failed: "+err);}
                     else {
+                        TextureProcessor::ConvertLinearToSrgb(img.pixels);
                         std::string outPath=gExportPath+"/"+e.stem+".png";
                         SDL_Surface* surf=SDL_CreateRGBSurfaceWithFormatFrom(
                             img.pixels.data(),img.width,img.height,32,img.width*4,

@@ -777,6 +777,7 @@ static void HandlePreview(int fd,const std::string& query){
     auto entries=UgcScanner::Scan(s_ugcPath);const UgcTextureEntry* found=nullptr;for(auto& e:entries)if(e.stem==stem){found=&e;break;}
     if(!found){Send404(fd);return;}
     RgbaImage img;std::string err=TextureProcessor::DecodeFile(found->ugctexPath,img,false);if(!err.empty()){Send500(fd,err);return;}
+    TextureProcessor::ConvertLinearToSrgb(img.pixels);
     auto png=EncodePng(img);if(png.empty()){Send500(fd,"PNG encode failed");return;}
     Send200Bin(fd,"image/png",png);
 }
@@ -786,6 +787,7 @@ static void HandleExport(int fd,const std::string& query){
     auto entries=UgcScanner::Scan(s_ugcPath);const UgcTextureEntry* found=nullptr;for(auto& e:entries)if(e.stem==stem){found=&e;break;}
     if(!found){Send404(fd);return;}
     RgbaImage img;std::string err=TextureProcessor::DecodeFile(found->ugctexPath,img,false);if(!err.empty()){Send500(fd,err);return;}
+    TextureProcessor::ConvertLinearToSrgb(img.pixels);
     auto png=EncodePng(img);if(png.empty()){Send500(fd,"PNG encode failed");return;}
     Send200Bin(fd,"image/png",png,"attachment; filename=\""+stem+".png\"");
 }
