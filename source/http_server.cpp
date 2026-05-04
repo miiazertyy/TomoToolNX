@@ -158,7 +158,7 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .save-label{color:var(--dim);white-space:nowrap;width:140px}
 .save-label small{font-size:.72rem;opacity:.7;margin-left:4px}
 .save-val{width:100%}
-.save-input{background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:3px;width:100%;box-sizing:border-box;font-size:.85rem}
+.save-input{background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:3px;width:100%;box-sizing:border-box;font-size:.85rem;font-family:inherit;line-height:1.4}
 .save-input:focus{outline:none;border-color:var(--gold)}
 @media(max-width:600px){.save-mii-layout{flex-direction:column}.mii-slot-list{max-width:100%;flex-direction:row;flex-wrap:wrap}.save-label{width:110px}}
 </style>
@@ -170,9 +170,8 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 </header>
 <div class="tabs">
   <button class="tab active" onclick="switchTab('ugc',this)">textures</button>
-  <button class="tab" onclick="switchTab('mii',this)">miis</button>
+  <button class="tab" onclick="switchTab('miistats',this)">mii</button>
   <button class="tab" onclick="switchTab('player',this)">player</button>
-  <button class="tab" onclick="switchTab('miistats',this)">mii stats</button>
 </div>
 
 <!-- one-time tips -->
@@ -194,21 +193,6 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
     <button class="btn btn-gold" id="btn-export" disabled onclick="doExport()">export</button>
     <button class="btn" onclick="loadList()">refresh</button>
     <div class="status info" id="status"></div>
-  </div>
-</div>
-
-<!-- Mii Panel -->
-<div class="panel" id="panel-mii">
-  <div class="list-wrap">
-    <div class="list-label">miis <span id="mii-count"></span></div>
-    <div id="mii-list"></div>
-  </div>
-  <div class="toolbar">
-    <button class="btn btn-primary" id="btn-mii-import" disabled onclick="doMiiImport(selectedMii&&selectedMii.slot)">import .ltd</button>
-    <button class="btn btn-gold" id="btn-mii-export" disabled onclick="doMiiExport(selectedMii&&selectedMii.slot)">export .ltd</button>
-    <button class="btn" id="btn-mii-social" disabled onclick="openSocialGraph(selectedMii&&selectedMii.slot)" style="border-color:var(--accent);color:var(--accent)">social graph</button>
-    <button class="btn" onclick="loadMiis()">refresh</button>
-    <div class="status info" id="mii-status"></div>
   </div>
 </div>
 
@@ -235,6 +219,11 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
     <button class="btn btn-primary" onclick="loadSave('mii')">load Mii.sav</button>
     <button class="btn btn-gold" id="save-apply-mii" disabled onclick="applySave('mii')">apply to Switch</button>
     <div class="status info" id="save-status-mii"></div>
+  </div>
+  <div class="toolbar" style="margin-top:4px">
+    <button class="btn btn-primary" id="btn-mii-import" onclick="doMiiImport(savMiiSlot+1)">import .ltd</button>
+    <button class="btn btn-gold" id="btn-mii-export" onclick="doMiiExport(savMiiSlot+1)">export .ltd</button>
+    <div class="status info" id="mii-io-status"></div>
   </div>
   <div class="save-mii-layout">
     <div id="mii-slots" class="mii-slot-list"></div>
@@ -268,7 +257,6 @@ function switchTab(name, btn) {
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   btn.classList.add('active');
   document.getElementById('panel-'+name).classList.add('active');
-  if(name==='mii' && miiEntries.length===0) loadMiis();
   if(name==='player'||name==='miistats') initSaveWarn();
 }
 
@@ -317,32 +305,12 @@ async function uploadFile(){
 function setStatus(msg,cls){const el=document.getElementById('status');el.textContent=msg;el.className='status '+cls;}
 
 // ── Miis ───────────────────────────────────────────────────────────────────────
-let miiEntries=[], selectedMii=null, pendingMiiSlot=null;
+let miiEntries=[], pendingMiiSlot=null;
 async function loadMiis(){
-  setMiiStatus('loading...','info');
   const d=await(await fetch('/api/mii/list')).json();
   miiEntries=d.miis||[];
-  const l=document.getElementById('mii-list');l.innerHTML='';
-  miiEntries.forEach(m=>{
-    const div=document.createElement('div');
-    div.className='entry'+(selectedMii&&selectedMii.slot===m.slot?' active':'');
-    div.innerHTML='<span class="entry-name">'+m.name+'</span>'+(m.hasFacepaint?'<span class="mii-badge">paint</span>':'');
-    div.onclick=()=>selectMii(m);
-    l.appendChild(div);
-  });
-  document.getElementById('mii-count').textContent='('+miiEntries.length+')';
-  setMiiStatus('','info');
-}
-function selectMii(m){
-  selectedMii=m;
-  document.querySelectorAll('#mii-list .entry').forEach((el,i)=>el.classList.toggle('active',miiEntries[i].slot===m.slot));
-  document.getElementById('btn-mii-import').disabled=false;
-  document.getElementById('btn-mii-export').disabled=false;
-  document.getElementById('btn-mii-social').disabled=false;
-  setMiiStatus(m.name+(m.hasFacepaint?' · facepaint':''),'info');
 }
 function doMiiExport(slot){
-  if(!slot&&selectedMii)slot=selectedMii.slot;
   if(!slot)return;
   const a=document.createElement('a');
   a.href='/api/mii/export?slot='+slot;
@@ -351,7 +319,6 @@ function doMiiExport(slot){
   setMiiStatus('exported slot '+slot,'ok');
 }
 function doMiiImport(slot){
-  if(!slot&&selectedMii)slot=selectedMii.slot;
   if(!slot)return;
   pendingMiiSlot=slot;
   document.getElementById('mii-file-input').click();
@@ -367,11 +334,11 @@ async function uploadMiiFile(file){
   const fd=new FormData();fd.append('file',file);fd.append('slot',String(pendingMiiSlot));
   const d=await(await fetch('/api/mii/import',{method:'POST',body:fd})).json();
   modalClose();
-  if(d.ok){setMiiStatus('imported into slot '+pendingMiiSlot,'ok');await loadMiis();const fresh=miiEntries.find(m=>m.slot===pendingMiiSlot);if(fresh)selectMii(fresh);}
+  if(d.ok){setMiiStatus('imported into slot '+pendingMiiSlot,'ok');}
   else setMiiStatus('failed: '+d.error,'err');
   pendingMiiSlot=null;
 }
-function setMiiStatus(msg,cls){const el=document.getElementById('mii-status');el.textContent=msg;el.className='status '+cls;}
+function setMiiStatus(msg,cls){const el=document.getElementById('mii-io-status');if(!el)return;el.textContent=msg;el.className='status '+cls;}
 function restartServer(){alert('Press X on the console to restart the server.');}
 function initSaveWarn(){if(!localStorage.getItem('saveWarnSeen'))document.getElementById('save-warn').style.display='block';}
 function dismissSaveWarn(){document.getElementById('save-warn').style.display='none';localStorage.setItem('saveWarnSeen','1');}

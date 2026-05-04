@@ -282,8 +282,6 @@ static bool gBtnTouchActive = false; // set by TAdjust (touch), cleared after us
 static bool gShowBackPrompt       = false;
 static bool gBackPromptIsMii      = false;
 static bool gBackPromptToUserPick = false; // true = save/discard→UserPick; false = save/discard→quit app
-static bool gBackPromptTabSwitch  = false; // true = save/discard→switch tab (overrides ToUserPick)
-static OnSwitchMode gBackPromptTargetMode = OnSwitchMode::Player;
 static bool gQuitApp              = false;
 
 // Save-feedback state (brief "Saved!" screen after B or + save)
@@ -752,15 +750,15 @@ static void BrowseRefresh(const std::string& path) {
 
 static void DoMiiImport(const std::string& ltdPath) {
     if (gMiis.empty()) return;
-    int slot = gMiis[gMiiSel].slot;
+    int slot = gMiis[gMiiStatsMiiSel].slot;
     LogINF("Importing Mii slot "+std::to_string(slot)+"...");
     std::string err = MiiManager::ImportMii(slot, ltdPath);
-    if (!err.empty()) { gOnSwitchMsg=err; gOnSwitchMsgCol=COL_RED; LogERR("Mii import failed: "+err); return; }
+    if (!err.empty()) { gMiiStatsMsg=err; gMiiStatsMsgCol=COL_RED; LogERR("Mii import failed: "+err); return; }
     std::string cerr = SaveMount::Commit();
-    if (!cerr.empty()) { gOnSwitchMsg="Commit: "+cerr; gOnSwitchMsgCol=COL_RED; LogERR("Commit failed: "+cerr); return; }
+    if (!cerr.empty()) { gMiiStatsMsg="Commit: "+cerr; gMiiStatsMsgCol=COL_RED; LogERR("Commit failed: "+cerr); return; }
     gMiis = MiiManager::ListMiis();
-    if (gMiiSel >= (int)gMiis.size()) gMiiSel=(int)gMiis.size()-1;
-    gOnSwitchMsg="Mii imported successfully"; gOnSwitchMsgCol=COL_GREEN;
+    if (gMiiStatsMiiSel >= (int)gMiis.size()) gMiiStatsMiiSel=(int)gMiis.size()-1;
+    gMiiStatsMsg="Mii imported successfully"; gMiiStatsMsgCol=COL_GREEN;
     LogOK("Mii import OK: slot "+std::to_string(slot));
 }
 
@@ -1089,23 +1087,21 @@ static void DrawOnSwitch() {
     std::string subtitle;
     switch(gOnSwitchMode){
         case OnSwitchMode::UGC:      subtitle="textures"; break;
-        case OnSwitchMode::Mii:      subtitle="miis"; break;
         case OnSwitchMode::Player:   subtitle="player"; break;
-        case OnSwitchMode::MiiStats: subtitle="mii stats"; break;
+        case OnSwitchMode::MiiStats: subtitle="mii"; break;
         default:                     subtitle="webui"; break;
     }
     DrawHeader(subtitle);
 
-    // Tab bar — 5 tabs at 140px each
+    // Tab bar — 4 tabs at 140px each
     {
         int tw=140, th=22, gap=4;
-        int totalW=tw*5+gap*4, tx=SCREEN_W/2-totalW/2, ty=28;
+        int totalW=tw*4+gap*3, tx=SCREEN_W/2-totalW/2, ty=28;
         struct { const char* label; OnSwitchMode mode; } tabs[]={
             {"webui",    OnSwitchMode::WebUI},
             {"textures", OnSwitchMode::UGC},
-            {"miis",     OnSwitchMode::Mii},
+            {"mii",      OnSwitchMode::MiiStats},
             {"player",   OnSwitchMode::Player},
-            {"mii stats",OnSwitchMode::MiiStats},
         };
         for (auto& t : tabs) {
             bool sel = gOnSwitchMode==t.mode;
@@ -1179,62 +1175,6 @@ static void DrawOnSwitch() {
             }
         }
         DrawFooter("Up/Down  select    A  import PNG    Y  export PNG    -  export dir    L/R  tab    B/+  back");
-    }
-
-    // ── Mii tab ───────────────────────────────────────────────────────────────
-    else if (gOnSwitchMode == OnSwitchMode::Mii) {
-        FillRect(LIST_X-4,LIST_Y,LIST_W+8,LIST_H+4,COL_PANEL);
-        DrawRect(LIST_X-4,LIST_Y,LIST_W+8,LIST_H+4,COL_BORDER);
-        for (int i=0;i<VISIBLE;i++){
-            int idx=gMiiScroll+i;
-            if (idx>=(int)gMiis.size()) break;
-            bool sel=(idx==gMiiSel);
-            HitAdd(LIST_X,LIST_Y+LIST_PAD_TOP+i*ITEM_H,LIST_W,ITEM_H-1, TSelMii, idx);
-            FillRect(LIST_X,LIST_Y+LIST_PAD_TOP+i*ITEM_H,LIST_W,ITEM_H-1, sel?COL_SEL:COL_BG);
-            if(sel) DrawRect(LIST_X,LIST_Y+LIST_PAD_TOP+i*ITEM_H,LIST_W,ITEM_H-1,COL_GOLD);
-            std::string label=gMiis[idx].name;
-            if(gMiis[idx].hasFacepaint) label+=" *";
-            { TTF_Font* f=GetFont(Font::Sm); int fw=0,fh=0; if(f)TTF_SizeUTF8(f,label.c_str(),&fw,&fh);
-                    DrawText(label, LIST_X+6, LIST_Y+LIST_PAD_TOP+i*ITEM_H+(ITEM_H-fh)/2, sel?COL_TEXT:COL_DIM); }
-        }
-        if ((int)gMiis.size()>VISIBLE){
-            int barH=LIST_H*VISIBLE/gMiis.size();
-            int barY=LIST_Y+LIST_H*gMiiScroll/gMiis.size();
-            FillRect(LIST_X+LIST_W+2,barY,4,barH,COL_BORDER);
-        }
-        FillRect(PREVIEW_X,PREVIEW_Y,PREVIEW_W,PREVIEW_H,{8,8,8,255});
-        DrawRect(PREVIEW_X,PREVIEW_Y,PREVIEW_W,PREVIEW_H,COL_BORDER);
-        if (!gMiis.empty()) {
-            const auto& m=gMiis[gMiiSel];
-            int cx = PREVIEW_X+PREVIEW_W/2;
-            int cy = PREVIEW_Y+PREVIEW_H/2;
-
-            // Name — large, centered vertically in upper half
-            DrawTextC(m.name, cx, PREVIEW_Y+PREVIEW_H/4, COL_TEXT, Font::Lg);
-
-            // Slot + facepaint badge below name
-            std::string meta = "slot "+std::to_string(m.slot);
-            if (m.hasFacepaint) meta += "   ·   has facepaint";
-            DrawTextC(meta, cx, PREVIEW_Y+PREVIEW_H/4+44, COL_DIM);
-
-            // Divider
-            FillRect(PREVIEW_X+40, cy-1, PREVIEW_W-80, 1, COL_BORDER);
-
-            // Import / Export buttons — styled boxes in lower half
-            int btnW=220, btnH=46, gap=24;
-            int btn1X=cx-btnW-gap/2, btn2X=cx+gap/2, btnY=cy+30;
-
-            FillRect(btn1X,btnY,btnW,btnH,COL_SEL);
-            DrawRect(btn1X,btnY,btnW,btnH,COL_ACCENT);
-            DrawTextC("A   import .ltd", btn1X+btnW/2, btnY+btnH/2, COL_ACCENT, Font::Md);
-
-            FillRect(btn2X,btnY,btnW,btnH,COL_PANEL);
-            DrawRect(btn2X,btnY,btnW,btnH,COL_GOLD);
-            DrawTextC("Y   export .ltd", btn2X+btnW/2, btnY+btnH/2, COL_GOLD, Font::Md);
-        }
-        if (!gOnSwitchMsg.empty())
-            DrawTextC(gOnSwitchMsg, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H/2+110, gOnSwitchMsgCol);
-        DrawFooter("Up/Down  select    A  import .ltd    Y  export .ltd    -  export dir    L/R  tab    B/+  back");
     }
 
     // ── WebUI tab ─────────────────────────────────────────────────────────────
@@ -1352,10 +1292,10 @@ static void DrawPlayer() {
     // Tab bar (same as DrawOnSwitch)
     {
         int tw=140, th=22, gap=4;
-        int totalW=tw*5+gap*4, tx=SCREEN_W/2-totalW/2, ty=28;
+        int totalW=tw*4+gap*3, tx=SCREEN_W/2-totalW/2, ty=28;
         struct { const char* label; OnSwitchMode mode; } tabs[]={
             {"webui",OnSwitchMode::WebUI},{"textures",OnSwitchMode::UGC},
-            {"miis",OnSwitchMode::Mii},{"player",OnSwitchMode::Player},{"mii stats",OnSwitchMode::MiiStats}};
+            {"mii",OnSwitchMode::MiiStats},{"player",OnSwitchMode::Player}};
         for (auto& t : tabs) {
             bool sel=gOnSwitchMode==t.mode;
             HitAdd(tx,ty,tw,th,TSetMode,(int)t.mode);
@@ -1442,7 +1382,7 @@ static void DrawPlayer() {
     const auto& fd = PLAYER_FIELDS[gPlayerFieldSel];
     uint32_t ph = PFHash(fd);
     int cx = SE_DETAIL_X + SE_DETAIL_W/2;
-    int midY = SE_TOP_Y + (SCREEN_H-SE_TOP_Y-32)/2;
+    int midY = SE_TOP_Y + (SCREEN_H-SE_TOP_Y-32)/2 + 44;
 
     DrawTextC(fd.label, cx, midY-102, COL_DIM, Font::Md);
     DrawTextC(fd.desc,  cx, midY-76,  COL_DIM, Font::Sm);
@@ -1593,10 +1533,10 @@ static void DrawMiiStats() {
     // Tab bar
     {
         int tw=140, th=22, gap=4;
-        int totalW=tw*5+gap*4, tx=SCREEN_W/2-totalW/2, ty=28;
+        int totalW=tw*4+gap*3, tx=SCREEN_W/2-totalW/2, ty=28;
         struct { const char* label; OnSwitchMode mode; } tabs[]={
             {"webui",OnSwitchMode::WebUI},{"textures",OnSwitchMode::UGC},
-            {"miis",OnSwitchMode::Mii},{"player",OnSwitchMode::Player},{"mii stats",OnSwitchMode::MiiStats}};
+            {"mii",OnSwitchMode::MiiStats},{"player",OnSwitchMode::Player}};
         for (auto& t : tabs) {
             bool sel=gOnSwitchMode==t.mode;
             HitAdd(tx,ty,tw,th,TSetMode,(int)t.mode);
@@ -1946,16 +1886,16 @@ static void DrawMiiStats() {
             int cx2 = editX + editW/2;
             // Slot header
             DrawTextC("Slot " + std::to_string(gMiiWordsSlotSel+1) + " / 12",
-                      cx2, panelTop+14, COL_DIM, Font::Sm);
+                      cx2, panelTop+16, COL_DIM, Font::Sm);
             // Kind section
             SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
-            SDL_RenderDrawLine(gRen, editX+12, panelTop+30, editX+editW-12, panelTop+30);
-            DrawTextC("Kind", cx2, panelTop+46, COL_DIM, Font::Sm);
+            SDL_RenderDrawLine(gRen, editX+12, panelTop+32, editX+editW-12, panelTop+32);
+            DrawTextC("Kind", cx2, panelTop+50, COL_DIM, Font::Sm);
             DrawTextC(isFilled?(kindLbl?kindLbl:"?"):"—",
-                      cx2, panelTop+76, isFilled?COL_TEXT:COL_DIM, Font::Lg);
+                      cx2, panelTop+84, isFilled?COL_TEXT:COL_DIM, Font::Lg);
             {
-                int bW=108,bH=28,bGap=14;
-                int bxL=cx2-bGap/2-bW, bxR=cx2+bGap/2, bY=panelTop+112;
+                int bW=108,bH=38,bGap=14;
+                int bxL=cx2-bGap/2-bW, bxR=cx2+bGap/2, bY=panelTop+122;
                 HitAdd(bxL,bY,bW,bH,TSimBtn,(int)HidNpadButton_Left);
                 FillRect(bxL,bY,bW,bH,COL_PANEL); DrawRect(bxL,bY,bW,bH,COL_BORDER);
                 DrawTextC("<",bxL+bW/2,bY+bH/2,COL_DIM,Font::Md);
@@ -1965,24 +1905,24 @@ static void DrawMiiStats() {
             }
             // Text section
             SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
-            SDL_RenderDrawLine(gRen, editX+12, panelTop+154, editX+editW-12, panelTop+154);
-            DrawTextC("Word Text", cx2, panelTop+166, COL_DIM, Font::Sm);
+            SDL_RenderDrawLine(gRen, editX+12, panelTop+182, editX+editW-12, panelTop+182);
+            DrawTextC("Word Text", cx2, panelTop+200, COL_DIM, Font::Sm);
             std::string dispTxt = curText.empty() ? "(none)" : curText;
-            DrawTextC(dispTxt, cx2, panelTop+192, (isFilled&&!curText.empty())?COL_TEXT:COL_DIM, Font::Md);
+            DrawTextC(dispTxt, cx2, panelTop+232, (isFilled&&!curText.empty())?COL_TEXT:COL_DIM, Font::Md);
             {
-                int bW=240,bH=34,bX=cx2-bW/2,bY=panelTop+218;
+                int bW=240,bH=42,bX=cx2-bW/2,bY=panelTop+262;
                 HitAdd(bX,bY,bW,bH,TSimBtn,(int)HidNpadButton_A);
                 FillRect(bX,bY,bW,bH,COL_SEL); DrawRect(bX,bY,bW,bH,COL_ACCENT);
                 DrawTextC("A  Edit Text",cx2,bY+bH/2,COL_ACCENT,Font::Sm);
             }
             // Pronunciation section
             SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
-            SDL_RenderDrawLine(gRen, editX+12, panelTop+266, editX+editW-12, panelTop+266);
-            DrawTextC("Pronunciation  (optional)", cx2, panelTop+280, COL_DIM, Font::Sm);
+            SDL_RenderDrawLine(gRen, editX+12, panelTop+334, editX+editW-12, panelTop+334);
+            DrawTextC("Pronunciation  (optional)", cx2, panelTop+352, COL_DIM, Font::Sm);
             std::string dispHow = curHow.empty() ? "(same as text)" : curHow;
-            DrawTextC(dispHow, cx2, panelTop+302, !curHow.empty()?COL_TEXT:COL_DIM, Font::Sm);
+            DrawTextC(dispHow, cx2, panelTop+384, !curHow.empty()?COL_TEXT:COL_DIM, Font::Sm);
             {
-                int bW=240,bH=34,bX=cx2-bW/2,bY=panelTop+322;
+                int bW=240,bH=42,bX=cx2-bW/2,bY=panelTop+410;
                 HitAdd(bX,bY,bW,bH,TSimBtn,(int)HidNpadButton_X);
                 FillRect(bX,bY,bW,bH,COL_SEL); DrawRect(bX,bY,bW,bH,COL_ACCENT);
                 DrawTextC("X  Edit Pronunciation",cx2,bY+bH/2,COL_ACCENT,Font::Sm);
@@ -1990,14 +1930,14 @@ static void DrawMiiStats() {
             // Undo button
             {
                 bool canUndo = gWordUndo.valid;
-                int ubW=120,ubH=34,ubX=cx2-ubW/2,ubY=panelTop+370;
+                int ubW=120,ubH=44,ubX=cx2-ubW/2,ubY=panelTop+490;
                 HitAdd(ubX,ubY,ubW,ubH,TUndoWords,0);
                 FillRect(ubX,ubY,ubW,ubH,COL_PANEL);
                 DrawRect(ubX,ubY,ubW,ubH,canUndo?COL_GOLD:COL_BORDER);
                 DrawTextC("-  Undo",cx2,ubY+ubH/2,canUndo?COL_GOLD:COL_DIM,Font::Md);
             }
             if (!gMiiStatsMsg.empty())
-                DrawTextC(gMiiStatsMsg, cx2, panelTop+418, gMiiStatsMsgCol);
+                DrawTextC(gMiiStatsMsg, cx2, panelTop+554, gMiiStatsMsgCol);
         } else if (gMiiStatsSubTab == MiiStatsSubTab::Relations) {
             // ── Relations editor ─────────────────────────────────────────────────
             static const uint32_t H_BASE_RP  = 0x8b41897eu;
@@ -2019,17 +1959,17 @@ static void DrawMiiStats() {
                                          : SaveEditor::GetIntAt(gMiiSav, H_IDA_RP, gMiiRelPairIdx);
                 std::string oName = SaveEditor::GetWStr32At(gMiiSav, H_MNAME_RP, other < 0 ? 0 : other);
                 // Header: other Mii name
-                DrawTextC(oName.empty()?"(unknown)":oName, cx2, panelTop+14, COL_TEXT, Font::Md);
+                DrawTextC(oName.empty()?"(unknown)":oName, cx2, panelTop+18, COL_TEXT, Font::Md);
                 SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
-                SDL_RenderDrawLine(gRen, editX+12, panelTop+34, editX+editW-12, panelTop+34);
+                SDL_RenderDrawLine(gRen, editX+12, panelTop+42, editX+editW-12, panelTop+42);
                 // Your relationship type
-                DrawTextC("Your type", cx2, panelTop+48, COL_DIM, Font::Sm);
+                DrawTextC("Your type", cx2, panelTop+62, COL_DIM, Font::Sm);
                 SDL_Color myTC = RelTypeColor(myType);
                 const char* myTN = RelTypeName(myType);
-                DrawTextC(myTN?myTN:"?", cx2, panelTop+74, myTC, Font::Lg);
+                DrawTextC(myTN?myTN:"?", cx2, panelTop+102, myTC, Font::Lg);
                 {
-                    int bW=108,bH=28,bGap=14;
-                    int bxL=cx2-bGap/2-bW, bxR=cx2+bGap/2, bY=panelTop+112;
+                    int bW=130,bH=40,bGap=14;
+                    int bxL=cx2-bGap/2-bW, bxR=cx2+bGap/2, bY=panelTop+144;
                     HitAdd(bxL,bY,bW,bH,TSimBtn,(int)HidNpadButton_Left);
                     FillRect(bxL,bY,bW,bH,COL_PANEL); DrawRect(bxL,bY,bW,bH,COL_BORDER);
                     DrawTextC("< Type",bxL+bW/2,bY+bH/2,COL_DIM);
@@ -2039,22 +1979,22 @@ static void DrawMiiStats() {
                 }
                 // Their type (auto-counterpart, read-only display)
                 SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
-                SDL_RenderDrawLine(gRen, editX+12, panelTop+148, editX+editW-12, panelTop+148);
-                DrawTextC("Their type  (auto)", cx2, panelTop+160, COL_DIM, Font::Sm);
+                SDL_RenderDrawLine(gRen, editX+12, panelTop+222, editX+editW-12, panelTop+222);
+                DrawTextC("Their type  (auto)", cx2, panelTop+244, COL_DIM, Font::Sm);
                 SDL_Color otTC = RelTypeColor(otType);
                 const char* otTN = RelTypeName(otType);
-                DrawTextC(otTN?otTN:"?", cx2, panelTop+180, otTC, Font::Sm);
+                DrawTextC(otTN?otTN:"?", cx2, panelTop+282, otTC, Font::Md);
                 // Meter
                 SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
-                SDL_RenderDrawLine(gRen, editX+12, panelTop+206, editX+editW-12, panelTop+206);
-                DrawTextC("Meter", cx2, panelTop+220, COL_DIM, Font::Sm);
+                SDL_RenderDrawLine(gRen, editX+12, panelTop+336, editX+editW-12, panelTop+336);
+                DrawTextC("Meter", cx2, panelTop+358, COL_DIM, Font::Sm);
                 std::string mStr = fixed ? "100 (fixed)" : std::to_string(myMeter);
-                DrawTextC(mStr, cx2, panelTop+246, fixed?COL_DIM:COL_TEXT, Font::Lg);
+                DrawTextC(mStr, cx2, panelTop+398, fixed?COL_DIM:COL_TEXT, Font::Lg);
                 if (!fixed) {
                     static const int MSTEPS[] = {10, 1};
-                    int bW=62,bH=32,bGap=5;
+                    int bW=76,bH=44,bGap=6;
                     int totalBW = (2*(bW+bGap))*2 + 20;
-                    int bxBase = cx2 - totalBW/2, bY = panelTop+284;
+                    int bxBase = cx2 - totalBW/2, bY = panelTop+442;
                     int bx = bxBase;
                     for (int s : MSTEPS) {
                         HitAdd(bx,bY,bW,bH,TRelMeterAdj,-s);
@@ -2070,31 +2010,30 @@ static void DrawMiiStats() {
                         DrawTextC("+"+std::to_string(s),bx+bW/2,bY+bH/2,COL_GREEN,Font::Sm);
                         bx+=bW+bGap;
                     }
-                    DrawTextC("both directions set together", cx2, panelTop+326, COL_DIM, Font::Sm);
+                    DrawTextC("both directions set together", cx2, panelTop+514, COL_DIM, Font::Sm);
                 }
             }
         } else {
-            // Stats editor (original)
+            // Stats editor
             const auto& fd = MII_STATS_FIELDS[gMiiStatsFieldSel];
             int cx2 = editX + editW/2;
-            int midY2 = panelTop + panelH/2;
 
-            DrawTextC(fd.label, cx2, midY2-90, COL_DIM, Font::Md);
-            DrawTextC(fd.desc, cx2, midY2-62, COL_DIM, Font::Sm);
+            DrawTextC(fd.label, cx2, panelTop+48, COL_DIM, Font::Md);
+            DrawTextC(fd.desc, cx2, panelTop+76, COL_DIM, Font::Sm);
 
             if (fd.isStr) {
                 std::string val = SaveEditor::GetWStr32At(gMiiSav, SaveEditor::Hash(fd.fieldName), miiSlotIdx);
-                DrawTextC(val.empty()?"(empty)":val, cx2, midY2-30, COL_TEXT, Font::Lg);
-                int bw=220, bh=36, bx=cx2-bw/2, by=midY2+10;
+                DrawTextC(val.empty()?"(empty)":val, cx2, panelTop+114, COL_TEXT, Font::Lg);
+                int bw=220, bh=46, bx=cx2-bw/2, by=panelTop+154;
                 HitAdd(bx,by,bw,bh, TMiiStatsKbd, 0);
                 FillRect(bx,by,bw,bh,COL_SEL); DrawRect(bx,by,bw,bh,COL_ACCENT);
                 DrawTextC("A  keyboard", cx2, by+bh/2, COL_ACCENT, Font::Md);
             } else if (fd.isEnum) {
                 uint32_t enumVal = SaveEditor::GetEnumAt(gMiiSav, SaveEditor::Hash(fd.fieldName), miiSlotIdx);
                 const char* lbl = FeelingName(enumVal);
-                DrawTextC(lbl ? lbl : ("?" + std::to_string(enumVal)).c_str(), cx2, midY2-30, COL_TEXT, Font::Lg);
-                const int btnW=140, btnH=36, btnGap=24;
-                int bxL=cx2-btnGap/2-btnW, bxR=cx2+btnGap/2, btnY=midY2+10;
+                DrawTextC(lbl ? lbl : ("?" + std::to_string(enumVal)).c_str(), cx2, panelTop+114, COL_TEXT, Font::Lg);
+                const int btnW=140, btnH=40, btnGap=24;
+                int bxL=cx2-btnGap/2-btnW, bxR=cx2+btnGap/2, btnY=panelTop+154;
                 HitAdd(bxL,btnY,btnW,btnH, TSimBtn, (int)HidNpadButton_Left);
                 FillRect(bxL,btnY,btnW,btnH,COL_PANEL); DrawRect(bxL,btnY,btnW,btnH,COL_BORDER);
                 DrawTextC("< Prev", bxL+btnW/2, btnY+btnH/2, COL_DIM);
@@ -2105,12 +2044,12 @@ static void DrawMiiStats() {
             } else {
                 int32_t rawVal = fd.isUInt ? (int32_t)SaveEditor::GetUIntAt(gMiiSav,SaveEditor::Hash(fd.fieldName),miiSlotIdx)
                                            : SaveEditor::GetIntAt(gMiiSav,SaveEditor::Hash(fd.fieldName),miiSlotIdx);
-                DrawTextC(std::to_string(rawVal + fd.dispOffset), cx2, midY2-30, COL_TEXT, Font::Lg);
+                DrawTextC(std::to_string(rawVal + fd.dispOffset), cx2, panelTop+114, COL_TEXT, Font::Lg);
 
                 static const int STEPS2[]={100,10,1};
-                int bw2=60, bh2=60, gap2=6;
+                int bw2=60, bh2=64, gap2=6;
                 int totalBW2=(3*(bw2+gap2))*2+16;
-                int bx2=cx2-totalBW2/2, by2=midY2+10;
+                int bx2=cx2-totalBW2/2, by2=panelTop+154;
                 int btn2Idx=0;
                 for (int s : STEPS2) {
                     bool focused=(gMiiBtnSel==btn2Idx);
@@ -2133,7 +2072,7 @@ static void DrawMiiStats() {
                 // Undo button
                 {
                     bool canUndo = gMiiUndoValid[gMiiStatsFieldSel];
-                    int ubW=100, ubH=44, ubX=cx2-ubW/2, ubY=by2+bh2+14;
+                    int ubW=100, ubH=44, ubX=cx2-ubW/2, ubY=by2+bh2+20;
                     HitAdd(ubX, ubY, ubW, ubH, TUndoMii, 0);
                     FillRect(ubX, ubY, ubW, ubH, COL_PANEL);
                     DrawRect(ubX, ubY, ubW, ubH, canUndo ? COL_GOLD : COL_BORDER);
@@ -2141,8 +2080,23 @@ static void DrawMiiStats() {
                 }
             }
 
+            // Import / Export .ltd section
+            if (!gMiis.empty() && gMiiStatsMiiSel < (int)gMiis.size()) {
+                SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
+                SDL_RenderDrawLine(gRen, editX+12, panelTop+panelH-148, editX+editW-12, panelTop+panelH-148);
+                DrawTextC("Mii file", cx2, panelTop+panelH-126, COL_DIM, Font::Sm);
+                int ibW=188,ibH=44,ibGap=14;
+                int ibxL=cx2-ibGap/2-ibW, ibxR=cx2+ibGap/2, ibY=panelTop+panelH-106;
+                HitAdd(ibxL,ibY,ibW,ibH,TSimBtn,(int)HidNpadButton_X);
+                FillRect(ibxL,ibY,ibW,ibH,COL_SEL); DrawRect(ibxL,ibY,ibW,ibH,COL_ACCENT);
+                DrawTextC("X  import .ltd",ibxL+ibW/2,ibY+ibH/2,COL_ACCENT,Font::Sm);
+                HitAdd(ibxR,ibY,ibW,ibH,TSimBtn,(int)HidNpadButton_Minus);
+                FillRect(ibxR,ibY,ibW,ibH,COL_PANEL); DrawRect(ibxR,ibY,ibW,ibH,COL_GOLD);
+                DrawTextC("-  export .ltd",ibxR+ibW/2,ibY+ibH/2,COL_GOLD,Font::Sm);
+            }
+
             if (!gMiiStatsMsg.empty())
-                DrawTextC(gMiiStatsMsg, cx2, panelTop+14, gMiiStatsMsgCol);
+                DrawTextC(gMiiStatsMsg, cx2, panelTop+16, gMiiStatsMsgCol);
         }
     }
 
@@ -2154,7 +2108,7 @@ static void DrawMiiStats() {
             ? "ZL/ZR  mii    Up/Down  slot    Left/Right  kind    A  text    X  pronunciation    -  undo    Y  subtab    L/R  tab    B/+  back"
         : gMiiStatsSubTab==MiiStatsSubTab::Relations
             ? "ZL/ZR  mii    Up/Down  relation    Left/Right  type    Y  subtab    L/R  tab    B/+  back"
-        : "ZL/ZR  mii    Up/Down  field    Left/Right  value    X  undo    Y  subtab    L/R  tab    B/+  back");
+        : "ZL/ZR  mii    Up/Down  field    Left/Right  value    X  import    -  export    Y  subtab    L/R  tab    B/+  back");
     SDL_RenderPresent(gRen);
 }
 
@@ -2182,34 +2136,8 @@ static void DrawSaveWarning() {
     SDL_RenderPresent(gRen);
 }
 
-static void SwitchTabAfterPrompt() {
-    gOnSwitchMode = gBackPromptTargetMode;
-    gOnSwitchMsg  = "";
-    if (gBackPromptTargetMode == OnSwitchMode::MiiStats && !gMiiSav.loaded) {
-        std::string err;
-        if (!SaveEditor::Load(SAVE_MII_SAV, gMiiSav, err))
-            gMiiStatsMsg = "Load error: " + err;
-    }
-    if (gBackPromptTargetMode == OnSwitchMode::Player && !gPlayerSav.loaded) {
-        std::string err;
-        if (!SaveEditor::Load(SAVE_PLAYER_SAV, gPlayerSav, err))
-            gPlayerMsg = "Load error: " + err;
-    }
-}
 static void TAckBackYes(int) {
     gShowBackPrompt = false;
-    if (gBackPromptTabSwitch) {
-        if (gBackPromptIsMii && gMiiSavDirty) {
-            std::string err = SaveEditor::Save(SAVE_MII_SAV, gMiiSav);
-            if (err.empty()) { SaveMount::Commit(); gMiiSavDirty=false; }
-        }
-        if (!gBackPromptIsMii && gPlayerSavDirty) {
-            std::string err = SaveEditor::Save(SAVE_PLAYER_SAV, gPlayerSav);
-            if (err.empty()) { SaveMount::Commit(); gPlayerSavDirty=false; }
-        }
-        SwitchTabAfterPrompt();
-        return;
-    }
     if (gBackPromptIsMii && gMiiSavDirty) {
         std::string err = SaveEditor::Save(SAVE_MII_SAV, gMiiSav);
         if (err.empty()) { SaveMount::Commit(); gMiiSavDirty=false; }
@@ -2231,12 +2159,6 @@ static void TAckBackYes(int) {
 }
 static void TAckBackNo(int) {
     gShowBackPrompt = false;
-    if (gBackPromptTabSwitch) {
-        if (gBackPromptIsMii) gMiiSavDirty=false;
-        else gPlayerSavDirty=false;
-        SwitchTabAfterPrompt();
-        return;
-    }
     FreePreview(); HttpServer::Stop(); gLog.clear();
     gEntries.clear(); gMiis.clear();
     gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
@@ -2296,12 +2218,9 @@ static void DrawBackPrompt() {
     DrawTextC("Save changes?", SCREEN_W/2, my+28, COL_GOLD, Font::Lg);
     DrawTextC("Unsaved edits will be lost if you choose No.", SCREEN_W/2, my+70, COL_DIM, Font::Sm);
     const int bW=180, bH=48, gap=30;
-    const char* yesLbl = gBackPromptTabSwitch  ? "A  Save"
-                       : gBackPromptToUserPick ? "A  Save & Back" : "A  Save & Exit";
-    const char* noLbl  = gBackPromptTabSwitch  ? "B  Discard"
-                       : gBackPromptToUserPick ? "B  Discard & Back" : "B  Discard & Exit";
-    const char* footer = gBackPromptTabSwitch  ? "A  save    B  discard"
-                       : gBackPromptToUserPick ? "A  save & back    B  discard & back"
+    const char* yesLbl = gBackPromptToUserPick ? "A  Save & Back" : "A  Save & Exit";
+    const char* noLbl  = gBackPromptToUserPick ? "B  Discard & Back" : "B  Discard & Exit";
+    const char* footer = gBackPromptToUserPick ? "A  save & back    B  discard & back"
                                                : "A  save & exit    B  discard & exit";
     HitAdd(mx+mW/2-bW-gap/2, my+mH-70, bW, bH, TAckBackYes, 0);
     FillRect(mx+mW/2-bW-gap/2, my+mH-70, bW, bH, COL_SEL);
@@ -2400,14 +2319,8 @@ static void ApplyTouchScroll(float ddx, float ddy) {
         while (s_touch.accumY >=  ITEM_H) { s_touch.accumY -= ITEM_H; gEntryScroll = std::max(0, gEntryScroll-1); }
         while (s_touch.accumY <= -ITEM_H) { s_touch.accumY += ITEM_H; gEntryScroll = std::min(gEntryScroll+1, std::max(0,(int)gEntries.size()-VISIBLE)); }
     }
-    else if (gOnSwitchMode == OnSwitchMode::Mii && !gMiis.empty()) {
-        if (s_touch.startX < LIST_X || s_touch.startX >= LIST_X+LIST_W) return;
-        if (s_touch.startY < LIST_Y || s_touch.startY >= LIST_Y+LIST_H) return;
-        s_touch.accumY += ddy;
-        while (s_touch.accumY >=  ITEM_H) { s_touch.accumY -= ITEM_H; gMiiScroll = std::max(0, gMiiScroll-1); }
-        while (s_touch.accumY <= -ITEM_H) { s_touch.accumY += ITEM_H; gMiiScroll = std::min(gMiiScroll+1, std::max(0,(int)gMiis.size()-VISIBLE)); }
-    }
 }
+
 
 static void ProcessTouch(int tx, int ty, u64& kDown) {
     auto hit = [&](int x, int y, int w, int h) -> bool {
@@ -2492,26 +2405,8 @@ static void ProcessTouch(int tx, int ty, u64& kDown) {
             if (hit(cx+btnGap/2,      btnY, btnW, kBtnH)) kDown |= HidNpadButton_Y;
         }
     }
-    else if (gOnSwitchMode == OnSwitchMode::Mii) {
-        // List items — tap to select
-        for (int i = 0; i < VISIBLE; i++) {
-            int idx = gMiiScroll + i;
-            if (idx >= (int)gMiis.size()) break;
-            if (hit(LIST_X, LIST_Y+LIST_PAD_TOP+i*ITEM_H, LIST_W, ITEM_H)) {
-                gMiiSel = idx;
-                break;
-            }
-        }
-        // Import / Export styled buttons (coordinates match the drawn buttons)
-        if (!gMiis.empty()) {
-            int cx = PREVIEW_X + PREVIEW_W/2;
-            int cy = PREVIEW_Y + PREVIEW_H/2;
-            const int btnW=220, btnH=46, btnGap=24;
-            if (hit(cx-btnW-btnGap/2, cy+30, btnW, btnH)) kDown |= HidNpadButton_A;
-            if (hit(cx+btnGap/2,      cy+30, btnW, btnH)) kDown |= HidNpadButton_Y;
-        }
-    }
 }
+
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
@@ -2822,10 +2717,17 @@ int main(int,char**) {
                     }
                 }
             } else if (gOnSwitchMode == OnSwitchMode::UGC) {
-                // Tab switch (cycle: UGC → Mii → Player → MiiStats → WebUI → UGC)
+                // Tab switch (cycle: UGC → MiiStats → Player → WebUI → UGC)
                 if (kDown&(HidNpadButton_R|HidNpadButton_ZR)){
-                    gOnSwitchMode=OnSwitchMode::Mii;
-                    if(gMiis.empty()) gMiis=MiiManager::ListMiis();
+                    if (!gSaveWarningAcked) {
+                        gSaveWarningTarget=OnSwitchMode::MiiStats; gShowSaveWarning=true; gSaveWarningCountdown=120; break;
+                    }
+                    gOnSwitchMode=OnSwitchMode::MiiStats;
+                    if (!gMiiSav.loaded) {
+                        std::string err;
+                        if (!SaveEditor::Load(SAVE_MII_SAV, gMiiSav, err))
+                            gMiiStatsMsg="Load error: "+err;
+                    }
                     gOnSwitchMsg=""; break;
                 }
                 if (kDown&(HidNpadButton_L|HidNpadButton_ZL)){
@@ -2887,90 +2789,15 @@ int main(int,char**) {
                 }
                 if (kDown&(HidNpadButton_B|HidNpadButton_Plus)){
                     bool hasDirty = gPlayerSavDirty || gMiiSavDirty;
-                    bool toUserPick = (kDown&HidNpadButton_B) != 0;
+                    bool toUserPick = (kDown&HidNpadButton_Plus) == 0;
                     if (hasDirty) {
-                        gShowBackPrompt=true; gBackPromptTabSwitch=false;
+                        gShowBackPrompt=true;
                         gBackPromptIsMii=gMiiSavDirty; gBackPromptToUserPick=toUserPick;
                     } else if (toUserPick) {
                         FreePreview(); HttpServer::Stop(); gLog.clear();
                         gEntries.clear(); gMiis.clear();
-                        SaveMount::Unmount(); gScreen=Screen::UserPick;
-                    } else { gQuitApp=true; }
-                }
-            } else if (gOnSwitchMode == OnSwitchMode::Mii) {
-                // Tab switch
-                if (kDown&(HidNpadButton_L|HidNpadButton_ZL)){
-                    gOnSwitchMode=OnSwitchMode::UGC; gOnSwitchMsg=""; break;
-                }
-                if (kDown&(HidNpadButton_R|HidNpadButton_ZR)){
-                    if (!gSaveWarningAcked) {
-                        gSaveWarningTarget=OnSwitchMode::Player; gShowSaveWarning=true; gSaveWarningCountdown=120; break;
-                    }
-                    gOnSwitchMode=OnSwitchMode::Player;
-                    if (!gPlayerSav.loaded) {
-                        std::string err;
-                        if (!SaveEditor::Load(SAVE_PLAYER_SAV, gPlayerSav, err))
-                            gPlayerMsg="Load error: "+err;
-                    }
-                    gOnSwitchMsg=""; break;
-                }
-                if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp)){
-                    if (!gMiis.empty()) {
-                        gMiiSel = (gMiiSel>0) ? gMiiSel-1 : (int)gMiis.size()-1;
-                        if(gMiiSel<gMiiScroll) gMiiScroll=gMiiSel;
-                        if(gMiiSel>=(int)gMiis.size()-1) gMiiScroll=std::max(0,(int)gMiis.size()-VISIBLE);
-                    }
-                }
-                if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown)){
-                    if (!gMiis.empty()) {
-                        gMiiSel = (gMiiSel+1<(int)gMiis.size()) ? gMiiSel+1 : 0;
-                        if(gMiiSel>=gMiiScroll+VISIBLE) gMiiScroll=gMiiSel-VISIBLE+1;
-                        if(gMiiSel==0) gMiiScroll=0;
-                    }
-                }
-                if (kDown&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft) && !gMiis.empty()){
-                    gMiiSel=0; gMiiScroll=0;
-                }
-                if (kDown&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight) && !gMiis.empty()){
-                    gMiiSel=(int)gMiis.size()-1;
-                    gMiiScroll=std::max(0,(int)gMiis.size()-VISIBLE);
-                }
-                if (kDown&HidNpadButton_Minus){
-                    gBrowseForExportDir=true; gBrowseForMii=false;
-                    struct stat _st; std::string _sp=gExportPath;
-                    if (stat(_sp.c_str(),&_st)!=0||!S_ISDIR(_st.st_mode)){
-                        size_t _p=_sp.rfind('/'); _sp=(_p&&_p!=std::string::npos)?_sp.substr(0,_p):"/";
-                    }
-                    BrowseRefresh(_sp); gShowFileBrowser=true;
-                }
-                if (kDown&HidNpadButton_A && !gMiis.empty()){
-                    gBrowseForMii=true; gBrowseForExportDir=false;
-                    BrowseRefresh(gBrowseLtdPath);
-                    gShowFileBrowser=true;
-                }
-                if (kDown&HidNpadButton_Y && !gMiis.empty()){
-                    int slot=gMiis[gMiiSel].slot;
-                    std::string fname=gMiis[gMiiSel].name+"_slot"+std::to_string(slot)+".ltd";
-                    for(auto& c:fname){
-                        if(c==' '||c=='/'||c=='\\'||c==':'||c=='*'||c=='?'||
-                           c=='"'||c=='<'||c=='>'||c=='|'||(uint8_t)c>127)
-                            c='_';
-                    }
-                    std::string outPath=gExportPath+"/"+fname;
-                    LogINF("Exporting Mii slot "+std::to_string(slot)+"...");
-                    std::string err=MiiManager::ExportMii(slot,outPath);
-                    if(!err.empty()){gOnSwitchMsg=err;gOnSwitchMsgCol=COL_RED;LogERR("Mii export failed: "+err);}
-                    else{gOnSwitchMsg="Exported to: "+outPath;gOnSwitchMsgCol=COL_GREEN;LogOK("Exported to: "+outPath);}
-                }
-                if (kDown&(HidNpadButton_B|HidNpadButton_Plus)){
-                    bool hasDirty = gPlayerSavDirty || gMiiSavDirty;
-                    bool toUserPick = (kDown&HidNpadButton_B) != 0;
-                    if (hasDirty) {
-                        gShowBackPrompt=true; gBackPromptTabSwitch=false;
-                        gBackPromptIsMii=gMiiSavDirty; gBackPromptToUserPick=toUserPick;
-                    } else if (toUserPick) {
-                        FreePreview(); HttpServer::Stop(); gLog.clear();
-                        gEntries.clear(); gMiis.clear();
+                        gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
+                        gPlayerSavDirty=false; gMiiSavDirty=false;
                         SaveMount::Unmount(); gScreen=Screen::UserPick;
                     } else { gQuitApp=true; }
                 }
@@ -2981,19 +2808,11 @@ int main(int,char**) {
                     if (!SaveEditor::Load(SAVE_PLAYER_SAV, gPlayerSav, err))
                         gPlayerMsg = "Load error: " + err;
                 }
-                // Tab switch (prompt when dirty)
+                // Tab switch (changes stay in memory; prompt only on back/quit)
                 if (kDown&(HidNpadButton_L|HidNpadButton_ZL)){
-                    if (gPlayerSavDirty) {
-                        gShowBackPrompt=true; gBackPromptIsMii=false;
-                        gBackPromptTabSwitch=true; gBackPromptTargetMode=OnSwitchMode::Mii; break;
-                    }
-                    gOnSwitchMode=OnSwitchMode::Mii; gOnSwitchMsg=""; break;
+                    gOnSwitchMode=OnSwitchMode::UGC; gOnSwitchMsg=""; break;
                 }
                 if (kDown&(HidNpadButton_R|HidNpadButton_ZR)){
-                    if (gPlayerSavDirty) {
-                        gShowBackPrompt=true; gBackPromptIsMii=false;
-                        gBackPromptTabSwitch=true; gBackPromptTargetMode=OnSwitchMode::MiiStats; break;
-                    }
                     gOnSwitchMode=OnSwitchMode::MiiStats;
                     if (!gMiiSav.loaded) {
                         std::string err;
@@ -3157,7 +2976,7 @@ int main(int,char**) {
                 if (kDown&(HidNpadButton_B|HidNpadButton_Plus)) {
                     bool toUserPick = (kDown&HidNpadButton_B) != 0;
                     if (gPlayerSavDirty) {
-                        gShowBackPrompt=true; gBackPromptIsMii=false; gBackPromptTabSwitch=false; gBackPromptToUserPick=toUserPick;
+                        gShowBackPrompt=true; gBackPromptIsMii=false; gBackPromptToUserPick=toUserPick;
                     } else if (toUserPick) {
                         FreePreview(); HttpServer::Stop(); gLog.clear();
                         gEntries.clear(); gMiis.clear();
@@ -3177,20 +2996,18 @@ int main(int,char**) {
                     if (!SaveEditor::Load(SAVE_MII_SAV, gMiiSav, err))
                         gMiiStatsMsg = "Load error: " + err;
                 }
-                // Tab switch (L/R for main tabs — prompt when dirty)
+                // Tab switch (L/R for main tabs — changes stay in memory; prompt only on back/quit)
                 if (kDown&HidNpadButton_L){
-                    if (gMiiSavDirty) {
-                        gShowBackPrompt=true; gBackPromptIsMii=true;
-                        gBackPromptTabSwitch=true; gBackPromptTargetMode=OnSwitchMode::Player; break;
-                    }
-                    gOnSwitchMode=OnSwitchMode::Player; gOnSwitchMsg=""; break;
+                    gOnSwitchMode=OnSwitchMode::UGC; gOnSwitchMsg=""; break;
                 }
                 if (kDown&HidNpadButton_R){
-                    if (gMiiSavDirty) {
-                        gShowBackPrompt=true; gBackPromptIsMii=true;
-                        gBackPromptTabSwitch=true; gBackPromptTargetMode=OnSwitchMode::WebUI; break;
+                    gOnSwitchMode=OnSwitchMode::Player;
+                    if (!gPlayerSav.loaded) {
+                        std::string err;
+                        if (!SaveEditor::Load(SAVE_PLAYER_SAV, gPlayerSav, err))
+                            gPlayerMsg="Load error: "+err;
                     }
-                    gOnSwitchMode=OnSwitchMode::WebUI; gOnSwitchMsg=""; break;
+                    gOnSwitchMsg=""; break;
                 }
                 // Y cycles Stats → Words → Relations → Social → Stats
                 if (kDown&HidNpadButton_Y) { gMiiStatsSubTab=(MiiStatsSubTab)(((int)gMiiStatsSubTab+1)%4); gSocialScroll=0; if(gMiiStatsSubTab!=MiiStatsSubTab::Social) gSocialExpanded=false; }
@@ -3394,14 +3211,34 @@ int main(int,char**) {
                         if (nv != cur) { SaveEditor::SetWStr32At(gMiiSav, h, miiIdx, nv); gMiiSavDirty=true; }
                         gMiiStatsMsg=""; gMiiStatsMsgCol=COL_TEXT;
                     }
-                    // X = undo
-                    if (!fd.isStr && (kDown&HidNpadButton_X)) TUndoMii(0);
+                }
+                // X / Minus = import/export .ltd (Stats sub-tab)
+                if (gMiiStatsSubTab==MiiStatsSubTab::Stats && !gMiis.empty() && gMiiStatsMiiSel<(int)gMiis.size()) {
+                    if (kDown&HidNpadButton_X) {
+                        gBrowseForMii=true; gBrowseForExportDir=false;
+                        BrowseRefresh(gBrowseLtdPath);
+                        gShowFileBrowser=true;
+                    }
+                    if (kDown&HidNpadButton_Minus) {
+                        int slot=gMiis[gMiiStatsMiiSel].slot;
+                        std::string fname=gMiis[gMiiStatsMiiSel].name+"_slot"+std::to_string(slot)+".ltd";
+                        for(auto& c:fname){
+                            if(c==' '||c=='/'||c=='\\'||c==':'||c=='*'||c=='?'||
+                               c=='"'||c=='<'||c=='>'||c=='|'||(uint8_t)c>127)
+                                c='_';
+                        }
+                        std::string outPath=gExportPath+"/"+fname;
+                        LogINF("Exporting Mii slot "+std::to_string(slot)+"...");
+                        std::string err=MiiManager::ExportMii(slot,outPath);
+                        if(!err.empty()){gMiiStatsMsg=err;gMiiStatsMsgCol=COL_RED;LogERR("Mii export failed: "+err);}
+                        else{gMiiStatsMsg="Exported: "+fname;gMiiStatsMsgCol=COL_GREEN;LogOK("Exported to: "+outPath);}
+                    }
                 }
                 // B = back to user pick, Plus = quit app (both prompt when dirty)
                 if (kDown&(HidNpadButton_B|HidNpadButton_Plus)) {
                     bool toUserPick = (kDown&HidNpadButton_B) != 0;
                     if (gMiiSavDirty) {
-                        gShowBackPrompt=true; gBackPromptIsMii=true; gBackPromptTabSwitch=false; gBackPromptToUserPick=toUserPick;
+                        gShowBackPrompt=true; gBackPromptIsMii=true; gBackPromptToUserPick=toUserPick;
                     } else if (toUserPick) {
                         FreePreview(); HttpServer::Stop(); gLog.clear();
                         gEntries.clear(); gMiis.clear();
@@ -3439,9 +3276,9 @@ int main(int,char**) {
                 }
                 if (kDown&(HidNpadButton_B|HidNpadButton_Plus)){
                     bool hasDirty = gPlayerSavDirty || gMiiSavDirty;
-                    bool toUserPick = (kDown&HidNpadButton_B) != 0;
+                    bool toUserPick = (kDown&HidNpadButton_Plus) == 0;
                     if (hasDirty) {
-                        gShowBackPrompt=true; gBackPromptTabSwitch=false;
+                        gShowBackPrompt=true;
                         gBackPromptIsMii=gMiiSavDirty; gBackPromptToUserPick=toUserPick;
                     } else if (toUserPick) {
                         FreePreview(); HttpServer::Stop(); gLog.clear();
