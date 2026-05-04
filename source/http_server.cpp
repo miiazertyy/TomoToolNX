@@ -147,13 +147,9 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .social-close{margin-top:10px;font-size:.8rem;color:var(--muted);cursor:pointer}
 .social-close:hover{color:var(--text)}
 /* ── Save editor ── */
-.save-sub-tabs{display:flex;gap:6px;padding:8px 0 4px}
-.save-sub-tab{background:var(--panel);border:1px solid var(--border);color:var(--dim);padding:5px 18px;border-radius:4px;cursor:pointer;font-size:.85rem;transition:all .15s}
-.save-sub-tab.active{border-color:var(--gold);color:var(--gold)}
-.save-sub-panel{padding:0;flex:1;overflow-y:auto;min-height:0;display:flex;flex-direction:column}
 .save-mii-layout{display:flex;gap:12px;flex-wrap:wrap}
 .mii-slot-list{display:flex;flex-direction:column;gap:4px;min-width:160px;max-width:200px;max-height:520px;overflow-y:auto;flex-shrink:0}
-.mii-slot-btn{background:var(--panel2);border:1px solid var(--border);color:var(--dim);padding:6px 10px;border-radius:3px;cursor:pointer;text-align:left;font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:all .12s}
+.mii-slot-btn{background:var(--panel2);border:1px solid var(--border);color:var(--dim);padding:6px 10px;border-radius:3px;cursor:pointer;text-align:left;font-size:.82rem;font-family:inherit;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:all .12s}
 .mii-slot-btn.active{border-color:var(--gold);color:var(--text)}
 .save-fields-wrap{flex:1;min-width:0;overflow-y:auto}
 .save-table{width:100%;border-collapse:collapse;font-size:.85rem}
@@ -175,7 +171,8 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 <div class="tabs">
   <button class="tab active" onclick="switchTab('ugc',this)">textures</button>
   <button class="tab" onclick="switchTab('mii',this)">miis</button>
-  <button class="tab" onclick="switchTab('save',this)">save editor</button>
+  <button class="tab" onclick="switchTab('player',this)">player</button>
+  <button class="tab" onclick="switchTab('miistats',this)">mii stats</button>
 </div>
 
 <!-- one-time tips -->
@@ -222,34 +219,26 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
   <div class="social-close">click outside to close</div>
 </div>
 
-<!-- Save Editor Panel -->
-<div class="panel" id="panel-save">
-  <div class="save-sub-tabs">
-    <button class="save-sub-tab active" onclick="saveSubTab('player',this)">player</button>
-    <button class="save-sub-tab" onclick="saveSubTab('mii',this)">miis</button>
+<!-- Player Panel -->
+<div class="panel" id="panel-player">
+  <div class="toolbar">
+    <button class="btn btn-primary" onclick="loadSave('player')">load Player.sav</button>
+    <button class="btn btn-gold" id="save-apply-player" disabled onclick="applySave('player')">apply to Switch</button>
+    <div class="status info" id="save-status-player"></div>
   </div>
+  <div id="save-fields-player" class="save-fields-wrap"></div>
+</div>
 
-  <!-- Player sub-panel -->
-  <div class="save-sub-panel" id="save-sub-panel-player">
-    <div class="toolbar">
-      <button class="btn btn-primary" onclick="loadSave('player')">load Player.sav</button>
-      <button class="btn btn-gold" id="save-apply-player" disabled onclick="applySave('player')">apply to Switch</button>
-      <div class="status info" id="save-status-player"></div>
-    </div>
-    <div id="save-fields-player" class="save-fields-wrap"></div>
+<!-- Mii Stats Panel -->
+<div class="panel" id="panel-miistats">
+  <div class="toolbar">
+    <button class="btn btn-primary" onclick="loadSave('mii')">load Mii.sav</button>
+    <button class="btn btn-gold" id="save-apply-mii" disabled onclick="applySave('mii')">apply to Switch</button>
+    <div class="status info" id="save-status-mii"></div>
   </div>
-
-  <!-- Mii sub-panel -->
-  <div class="save-sub-panel" id="save-sub-panel-mii" style="display:none">
-    <div class="toolbar">
-      <button class="btn btn-primary" onclick="loadSave('mii')">load Mii.sav</button>
-      <button class="btn btn-gold" id="save-apply-mii" disabled onclick="applySave('mii')">apply to Switch</button>
-      <div class="status info" id="save-status-mii"></div>
-    </div>
-    <div class="save-mii-layout">
-      <div id="mii-slots" class="mii-slot-list"></div>
-      <div id="save-fields-mii" class="save-fields-wrap"></div>
-    </div>
+  <div class="save-mii-layout">
+    <div id="mii-slots" class="mii-slot-list"></div>
+    <div id="save-fields-mii" class="save-fields-wrap"></div>
   </div>
 </div>
 
@@ -280,7 +269,7 @@ function switchTab(name, btn) {
   btn.classList.add('active');
   document.getElementById('panel-'+name).classList.add('active');
   if(name==='mii' && miiEntries.length===0) loadMiis();
-  if(name==='save') initSaveWarn();
+  if(name==='player'||name==='miistats') initSaveWarn();
 }
 
 // ── UGC ────────────────────────────────────────────────────────────────────────
@@ -654,12 +643,6 @@ function onMiiChange(ev){
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function setSaveStatus(w,msg,cls){const el=document.getElementById('save-status-'+w);if(el){el.textContent=msg;el.className='status '+cls;}}
-function saveSubTab(name,btn){
-  document.querySelectorAll('.save-sub-tab').forEach(t=>t.classList.remove('active'));
-  document.querySelectorAll('.save-sub-panel').forEach(p=>p.style.display='none');
-  btn.classList.add('active');
-  document.getElementById('save-sub-panel-'+name).style.display='';
-}
 
 // ── Social graph ──────────────────────────────────────────────────────────────
 async function openSocialGraph(slot) {
@@ -783,7 +766,7 @@ static void HandlePreview(int fd,const std::string& query){
     SrvLog("WebUI: preview "+stem);
     auto entries=UgcScanner::Scan(s_ugcPath);const UgcTextureEntry* found=nullptr;for(auto& e:entries)if(e.stem==stem){found=&e;break;}
     if(!found){Send404(fd);return;}
-    RgbaImage img;std::string err=TextureProcessor::DecodeFile(found->ugctexPath,img,true);if(!err.empty()){Send500(fd,err);return;}
+    RgbaImage img;std::string err=TextureProcessor::DecodeFile(found->ugctexPath,img,false);if(!err.empty()){Send500(fd,err);return;}
     auto png=EncodePng(img);if(png.empty()){Send500(fd,"PNG encode failed");return;}
     Send200Bin(fd,"image/png",png);
 }
@@ -792,7 +775,7 @@ static void HandleExport(int fd,const std::string& query){
     SrvLog("WebUI: export "+stem);
     auto entries=UgcScanner::Scan(s_ugcPath);const UgcTextureEntry* found=nullptr;for(auto& e:entries)if(e.stem==stem){found=&e;break;}
     if(!found){Send404(fd);return;}
-    RgbaImage img;std::string err=TextureProcessor::DecodeFile(found->ugctexPath,img,true);if(!err.empty()){Send500(fd,err);return;}
+    RgbaImage img;std::string err=TextureProcessor::DecodeFile(found->ugctexPath,img,false);if(!err.empty()){Send500(fd,err);return;}
     auto png=EncodePng(img);if(png.empty()){Send500(fd,"PNG encode failed");return;}
     Send200Bin(fd,"image/png",png,"attachment; filename=\""+stem+".png\"");
 }

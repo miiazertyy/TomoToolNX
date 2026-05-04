@@ -239,6 +239,7 @@ static void TMiiStatsKbd(int);
 static void DrawSaveWarning();
 static void TUndoPlayer(int);
 static void TUndoMii(int);
+static void TUndoWords(int);
 static void DrawBackPrompt();
 static void TAckBackYes(int);
 static void TAckBackNo(int);
@@ -263,15 +264,27 @@ static bool    gPlayerUndoValid[16] = {};
 static int32_t gMiiUndoVal[16]     = {};
 static bool    gMiiUndoValid[16]   = {};
 
+// Words tab undo — snapshot of the whole slot before the first edit
+struct WordSlotUndo {
+    uint32_t kind = 0;
+    std::string text;
+    std::string how;
+    bool valid    = false;
+};
+static WordSlotUndo gWordUndo;
+
 // Button focus (joystick navigation of +/- buttons)
 static int  gPlayerBtnSel   = 3;     // 0-7 for 8 Player numeric buttons
 static int  gMiiBtnSel      = 2;     // 0-5 for 6 MiiStats numeric buttons
 static bool gBtnTouchActive = false; // set by TAdjust (touch), cleared after use
 
 // Back-prompt state
-static bool gShowBackPrompt  = false;
-static bool gBackPromptIsMii = false;
-static bool gQuitApp         = false;
+static bool gShowBackPrompt       = false;
+static bool gBackPromptIsMii      = false;
+static bool gBackPromptToUserPick = false; // true = save/discard→UserPick; false = save/discard→quit app
+static bool gBackPromptTabSwitch  = false; // true = save/discard→switch tab (overrides ToUserPick)
+static OnSwitchMode gBackPromptTargetMode = OnSwitchMode::Player;
+static bool gQuitApp              = false;
 
 // Save-feedback state (brief "Saved!" screen after B or + save)
 static int  gSaveFeedbackFrames = 0;
@@ -293,7 +306,8 @@ struct SaveFieldDef {
     bool isInt;      // Signed int nudge (GetAnyScalar/SetAnyScalar)
     bool isSkinTone; // UInt 0-5 swatch buttons
     bool isIslandSz; // Any-scalar, 4 safe preset buttons (values 1-4)
-    bool isRegion;   // Named region enum cycle (7 values)
+    bool isRegion;   // Named region enum cycle (9 values)
+    bool isLang;     // Named language enum cycle (preset labels)
     bool isRawEnum;  // Raw unsigned nudge (GetAnyScalar/SetAnyScalar)
     int32_t minVal, maxVal; // -1 = unclamped
     const char* desc;
@@ -302,35 +316,50 @@ static uint32_t PFHash(const SaveFieldDef& fd) {
     return fd.rawHash ? fd.rawHash : SaveEditor::Hash(fd.fieldName);
 }
 static const struct { const char* name; const char* label; } REGION_OPTIONS[] = {
-    {"NorthAmerica",  "North America"},
-    {"SouthAmericaN", "S.America (N)"},
-    {"SouthAmericaS", "S.America (S)"},
-    {"Australia",     "Australia/NZ"},
-    {"Asia",          "HK/TW/Korea"},
-    {"OthersN",       "Other (N)"},
-    {"OthersS",       "Other (S)"},
+    {"Japan",          "Japan"},
+    {"Europe",         "Europe"},
+    {"NorthAmerica",   "North America"},
+    {"SouthAmericaN",  "S.America (N)"},
+    {"SouthAmericaS",  "S.America (S)"},
+    {"Australia",      "Australia/NZ"},
+    {"Asia",           "HK/TW/Korea"},
+    {"OthersN",        "Other (N)"},
+    {"OthersS",        "Other (S)"},
 };
-static const int REGION_OPTION_COUNT = 7;
-//                    label           fieldName                              rawHash      Str    UInt   Enum   Int    Skin   Island Region RawEn  min  max  desc
+static const int REGION_OPTION_COUNT = 9;
+static const struct { const char* name; const char* label; } LANG_OPTIONS[] = {
+    {"JPja",  "Japanese"},
+    {"USen",  "English (US)"},
+    {"EUen",  "English (EU)"},
+    {"EUfr",  "French (EU)"},
+    {"EUde",  "German (EU)"},
+    {"EUes",  "Spanish (EU)"},
+    {"EUit",  "Italian (EU)"},
+    {"EUnl",  "Dutch (EU)"},
+    {"CNzh",  "Chinese (Simplified)"},
+    {"KRko",  "Korean"},
+    {"TWzh",  "Chinese (Traditional)"},
+};
+static const int LANG_OPTION_COUNT = 11;
+//                    label           fieldName                              rawHash      Str    UInt   Enum   Int    Skin   Island Region Lang   RawEn  min  max  desc
 static const SaveFieldDef PLAYER_FIELDS[] = {
-    {"Name",          "Player.Name",                           0,           true,  false, false, false, false, false, false, false, 0,   0,   "Your player's display name."},
-    {"Island",        "Player.IslandName",                     0,           true,  false, false, false, false, false, false, false, 0,   0,   "The name of your island."},
-    {"Money",         "Player.Money",                          0,           false, true,  false, false, false, false, false, false, 0,   -1,  "Current coin balance."},
-    {"Currency",      "Player.Currency",                       0,           false, false, true,  false, false, false, false, false, 0,   -1,  "Regional currency symbol shown in-game."},
-    {"Boot Count",    "Player.BootNum",                        0,           false, true,  false, false, false, false, false, false, 0,   -1,  "Number of times the game has been launched."},
-    {"Skin Tone",     "Player.SkinColorIndex",                 0,           false, false, false, false, true,  false, false, false, 0,   5,   "Player hand/skin color (0-5)."},
-    {"Bday Day",      "",                                      0xdb7786bbu, false, false, false, false, false, false, false, true,  1,   31,  "Birthday day of the month (1-31)."},
-    {"Bday Month",    "",                                      0xc754bef3u, false, false, false, false, false, false, false, true,  1,   12,  "Birthday month (1-12)."},
-    {"Bday Year",     "",                                      0x11996629u, false, false, false, true,  false, false, false, false, -1,  -1,  "Birthday year."},
-    {"Island Size",   "",                                      0x870a807cu, false, false, false, false, false, true,  false, false, 1,   4,   "Island size preset. Other values corrupt the save!"},
-    {"Fountain Lv",   "Liberation.FountainLevel",              0,           false, false, false, false, false, false, false, true,  0,   -1,  "Wishing fountain upgrade level."},
-    {"Wishes",        "",                                      0xa32f7e47u, false, false, false, false, false, false, false, true,  0,   -1,  "Number of wishes made."},
-    {"Region",        "Player.Region",                         0,           false, false, false, false, false, false, true,  false, 0,   -1,  "Player region (affects seasons and weather)."},
-    {"Region Code",   "Player.RegionCode",                     0,           false, false, false, false, false, false, false, true,  0,   -1,  "Numeric region code."},
-    {"Name Lang",     "Player.NameRegionLanguageID",           0,           false, false, false, false, false, false, false, true,  0,   -1,  "Language ID for player name pronunciation."},
-    {"Island Lang",   "Player.IslandNameRegionLanguageID",     0,           false, false, false, false, false, false, false, true,  0,   -1,  "Language ID for island name pronunciation."},
+    {"Name",          "Player.Name",                           0,           true,  false, false, false, false, false, false, false, false, 0,   0,   "Your player's display name."},
+    {"Island",        "Player.IslandName",                     0,           true,  false, false, false, false, false, false, false, false, 0,   0,   "The name of your island."},
+    {"Money",         "Player.Money",                          0,           false, true,  false, false, false, false, false, false, false, 0,   -1,  "Current coin balance."},
+    {"Currency",      "Player.Currency",                       0,           false, false, true,  false, false, false, false, false, false, 0,   -1,  "Regional currency symbol shown in-game."},
+    {"Boot Count",    "Player.BootNum",                        0,           false, true,  false, false, false, false, false, false, false, 0,   -1,  "Number of times the game has been launched."},
+    {"Skin Tone",     "Player.SkinColorIndex",                 0,           false, false, false, false, true,  false, false, false, false, 0,   5,   "Player hand/skin color (0-5)."},
+    {"Bday Day",      "",                                      0xdb7786bbu, false, false, false, false, false, false, false, false, true,  1,   31,  "Birthday day of the month (1-31)."},
+    {"Bday Month",    "",                                      0xc754bef3u, false, false, false, false, false, false, false, false, true,  1,   12,  "Birthday month (1-12)."},
+    {"Bday Year",     "",                                      0x11996629u, false, false, false, true,  false, false, false, false, false, -1,  -1,  "Birthday year."},
+    {"Island Size",   "",                                      0x870a807cu, false, false, false, false, false, true,  false, false, false, 1,   4,   "Island size preset. Other values corrupt the save!"},
+    {"Fountain Lv",   "Liberation.FountainLevel",              0,           false, false, false, false, false, false, false, false, true,  0,   -1,  "Wishing fountain upgrade level."},
+    {"Wishes",        "",                                      0xa32f7e47u, false, false, false, false, false, false, false, false, true,  0,   -1,  "Number of wishes made."},
+    {"Region",        "Player.Region",                         0,           false, false, false, false, false, false, true,  false, false, 0,   -1,  "Player region (affects seasons and weather)."},
+    {"Name Lang",     "Player.NameRegionLanguageID",           0,           false, false, false, false, false, false, false, true,  false, 0,   -1,  "Language used for your player name pronunciation."},
+    {"Island Lang",   "Player.IslandNameRegionLanguageID",     0,           false, false, false, false, false, false, false, true,  false, 0,   -1,  "Language used for your island name pronunciation."},
 };
-static const int PLAYER_FIELD_COUNT = 16;
+static const int PLAYER_FIELD_COUNT = 15;
 
 // ─── Mii stats field table ─────────────────────────────────────────────────────
 struct MiiStatsDef {
@@ -438,14 +467,14 @@ static const char* CurrencyName(uint32_t hash) {
 static const struct { uint32_t hash; const char* name; } RELATION_TYPE_NAMES[] = {
     { 0x0784a8dcu, "Other"       }, { 0x7e3d1e46u, "Invalid"     },
     { 0x354a0515u, "Know"        }, { 0xba939a42u, "Friend"      },
-    { 0xc2d067a7u, "Couple"      }, { 0xb7ce0c18u, "Lover"       },
-    { 0x7783d4c3u, "Ex-Lover"    }, { 0xfe59f825u, "Divorce"     },
-    { 0xdcfc7603u, "Parent"      }, { 0xe193c5a2u, "Child"       },
-    { 0x1918f808u, "SiblingOld"  }, { 0x3b1d200au, "SiblingYng"  },
-    { 0x2fd9785bu, "Grandparent" }, { 0x7e3cd550u, "Grandchild"  },
-    { 0x804172f3u, "Relative"    },
+    { 0x535e93a8u, "Ex-Friend"   }, { 0xc2d067a7u, "Couple"      },
+    { 0xb7ce0c18u, "Lover"       }, { 0x7783d4c3u, "Ex-Lover"    },
+    { 0xfe59f825u, "Divorce"     }, { 0xdcfc7603u, "Parent"      },
+    { 0xe193c5a2u, "Child"       }, { 0x1918f808u, "SiblingOld"  },
+    { 0x3b1d200au, "SiblingYng"  }, { 0x2fd9785bu, "Grandparent" },
+    { 0x7e3cd550u, "Grandchild"  }, { 0x804172f3u, "Relative"    },
 };
-static const int RELATION_TYPE_COUNT = 15;
+static const int RELATION_TYPE_COUNT = 16;
 static const char* RelTypeName(uint32_t hash) {
     for (int i = 0; i < RELATION_TYPE_COUNT; i++)
         if (RELATION_TYPE_NAMES[i].hash == hash) return RELATION_TYPE_NAMES[i].name;
@@ -456,6 +485,7 @@ static SDL_Color RelTypeColor(uint32_t hash) {
     if (hash==0xc2d067a7u) return {255,150,180,255}; // Couple
     if (hash==0xb7ce0c18u) return {255,100,100,255}; // Lover
     if (hash==0x354a0515u) return {100,210,120,255}; // Know     → green
+    if (hash==0x535e93a8u) return {160,180, 80,255}; // Ex-Friend → muted yellow-green
     if (hash==0x7783d4c3u) return {160, 80,160,255}; // Ex-Lover
     if (hash==0xfe59f825u) return {160, 60, 60,255}; // Divorce
     if (hash==0xdcfc7603u||hash==0xe193c5a2u) return {220,150, 80,255}; // Parent/Child
@@ -523,6 +553,7 @@ static u64 NavRepeat(u64 kDown, u64 kHeld) {
     static const u64 MASK =
         HidNpadButton_Up    | HidNpadButton_Down  |
         HidNpadButton_Left  | HidNpadButton_Right |
+        HidNpadButton_ZL    | HidNpadButton_ZR    |
         HidNpadButton_StickLUp   | HidNpadButton_StickLDown  |
         HidNpadButton_StickLLeft | HidNpadButton_StickLRight |
         HidNpadButton_StickRUp   | HidNpadButton_StickRDown  |
@@ -575,7 +606,7 @@ static void TSelMiiStatsMii(int idx) {
     if (idx>=0 && idx<(int)gMiis.size()) gMiiStatsMiiSel=idx;
 }
 static void TSelMiiStatsField(int idx) { gMiiStatsFieldSel=idx; }
-static void TSelMiiWordsSlot(int idx)  { gMiiWordsSlotSel=idx; }
+static void TSelMiiWordsSlot(int idx)  { gMiiWordsSlotSel=idx; gWordUndo.valid=false; }
 static void TSelMiiRelation(int idx)   { gMiiRelSel=idx; }
 static void TRelMeterAdj(int delta) {
     if (gMiiRelPairIdx < 0 || !gMiiSav.loaded) return;
@@ -735,17 +766,17 @@ static void DoMiiImport(const std::string& ltdPath) {
 
 static void DoOnSwitchImport(const std::string& pngPath) {
     if (gEntries.empty()) return;
-    const auto& e = gEntries[gEntrySel];
-
-    LogINF("Importing "+e.stem+"...");
+    // Copy all needed fields before gEntries is replaced by the rescan below
+    const std::string stem    = gEntries[gEntrySel].stem;
     TextureProcessor::ImportOptions opts;
     opts.pngPath            = pngPath;
-    opts.destStem           = e.directory()+"/"+e.stem;
-    opts.writeCanvas        = e.hasCanvas();
+    opts.destStem           = gEntries[gEntrySel].directory()+"/"+stem;
+    opts.writeCanvas        = gEntries[gEntrySel].hasCanvas();
     opts.writeThumb         = false;
     opts.noSrgb             = false;
-    opts.originalUgctexPath = e.ugctexPath;
+    opts.originalUgctexPath = gEntries[gEntrySel].ugctexPath;
 
+    LogINF("Importing "+stem+"...");
     std::string err = TextureProcessor::ImportPng(opts);
     if (!err.empty()) {
         gOnSwitchMsg=err; gOnSwitchMsgCol=COL_RED;
@@ -756,13 +787,13 @@ static void DoOnSwitchImport(const std::string& pngPath) {
         gOnSwitchMsg="Commit: "+cerr; gOnSwitchMsgCol=COL_RED;
         LogERR("Commit failed: "+cerr); return;
     }
-    // Reload entry list and preview
+    // Reload entry list and preview (invalidates any prior reference into gEntries)
     gEntries = UgcScanner::Scan(SAVE_UGC_PATH);
     MiiManager::LoadUgcNames();
     if (gEntrySel >= (int)gEntries.size()) gEntrySel=(int)gEntries.size()-1;
     if (!gEntries.empty()) LoadPreview(gEntries[gEntrySel]);
     gOnSwitchMsg="Imported successfully"; gOnSwitchMsgCol=COL_GREEN;
-    LogOK("Import OK: "+e.stem);
+    LogOK("Import OK: "+stem);
     if (!gThumbTipSeen) { gShowThumbTip=true; gThumbTipCountdown=120; }
 }
 
@@ -1147,7 +1178,7 @@ static void DrawOnSwitch() {
                 DrawTextC("Y   export PNG", cx+btnGap/2+btnW/2, btnY+kBtnH/2, COL_GOLD, Font::Md);
             }
         }
-        DrawFooter("Up/Down  navigate    -  export folder    L/R  switch tab    B  back");
+        DrawFooter("Up/Down  select    A  import PNG    Y  export PNG    -  export dir    L/R  tab    B/+  back");
     }
 
     // ── Mii tab ───────────────────────────────────────────────────────────────
@@ -1203,7 +1234,7 @@ static void DrawOnSwitch() {
         }
         if (!gOnSwitchMsg.empty())
             DrawTextC(gOnSwitchMsg, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H/2+110, gOnSwitchMsgCol);
-        DrawFooter("Up/Down  navigate    A  import .ltd    Y  export .ltd    -  export folder    L/R  switch tab    B  back");
+        DrawFooter("Up/Down  select    A  import .ltd    Y  export .ltd    -  export dir    L/R  tab    B/+  back");
     }
 
     // ── WebUI tab ─────────────────────────────────────────────────────────────
@@ -1297,7 +1328,7 @@ static void DrawOnSwitch() {
             DrawText("Inactive", rightX+(rightW-lw)/2-20+lw, cy2, COL_RED);
         }
 
-        DrawFooter("L/R  switch tab    X  restart server    B  back    +  quit");
+        DrawFooter("L/R  tab    X  restart server    B/+  back");
     }
 
     SDL_RenderPresent(gRen);
@@ -1385,6 +1416,12 @@ static void DrawPlayer() {
             val = "?";
             for (int ri=0; ri<REGION_OPTION_COUNT; ri++)
                 if (SaveEditor::Hash(REGION_OPTIONS[ri].name)==ev) { val=REGION_OPTIONS[ri].label; break; }
+            if (val.size()>12) val=val.substr(0,10)+"..";
+        } else if (fd.isLang) {
+            uint32_t ev = SaveEditor::GetEnum(gPlayerSav, fh);
+            val = "?";
+            for (int li=0; li<LANG_OPTION_COUNT; li++)
+                if (SaveEditor::Hash(LANG_OPTIONS[li].name)==ev) { val=LANG_OPTIONS[li].label; break; }
             if (val.size()>12) val=val.substr(0,10)+"..";
         } else if (fd.isInt) {
             val = std::to_string((int32_t)SaveEditor::GetAnyScalar(gPlayerSav, fh));
@@ -1480,6 +1517,22 @@ static void DrawPlayer() {
         FillRect(bxR,btnY,btnW,btnH,COL_PANEL); DrawRect(bxR,btnY,btnW,btnH,COL_BORDER);
         DrawTextC("Next >", bxR+btnW/2, btnY+btnH/2, COL_DIM);
         DrawTextC("Left/Right  cycle region", cx, btnY+btnH+14, COL_DIM);
+    } else if (fd.isLang) {
+        uint32_t ev = SaveEditor::GetEnum(gPlayerSav, ph);
+        const char* llabel = "Unknown";
+        for (int li=0; li<LANG_OPTION_COUNT; li++) {
+            if (SaveEditor::Hash(LANG_OPTIONS[li].name)==ev) { llabel=LANG_OPTIONS[li].label; break; }
+        }
+        DrawTextC(llabel, cx, midY-36, COL_TEXT, Font::Lg);
+        const int btnW=140, btnH=36, btnGap=24;
+        int bxL=cx-btnGap/2-btnW, bxR=cx+btnGap/2, btnY=midY+22;
+        HitAdd(bxL,btnY,btnW,btnH, TSimBtn, (int)HidNpadButton_Left);
+        FillRect(bxL,btnY,btnW,btnH,COL_PANEL); DrawRect(bxL,btnY,btnW,btnH,COL_BORDER);
+        DrawTextC("< Prev", bxL+btnW/2, btnY+btnH/2, COL_DIM);
+        HitAdd(bxR,btnY,btnW,btnH, TSimBtn, (int)HidNpadButton_Right);
+        FillRect(bxR,btnY,btnW,btnH,COL_PANEL); DrawRect(bxR,btnY,btnW,btnH,COL_BORDER);
+        DrawTextC("Next >", bxR+btnW/2, btnY+btnH/2, COL_DIM);
+        DrawTextC("Left/Right  cycle language", cx, btnY+btnH+14, COL_DIM);
     } else {
         // Generic numeric: UInt, Int, RawEnum
         uint32_t rawV = fd.isUInt ? SaveEditor::GetUInt(gPlayerSav, ph) : SaveEditor::GetAnyScalar(gPlayerSav, ph);
@@ -1524,7 +1577,7 @@ static void DrawPlayer() {
     if (!gPlayerMsg.empty())
         DrawTextC(gPlayerMsg, cx, SE_TOP_Y+16, gPlayerMsgCol);
 
-    DrawFooter("Up/Down  select field    Left/Right  adjust    A  confirm    X  undo    B  save & exit    +  discard");
+    DrawFooter("Up/Down  field    Left/Right  value    A  edit    X  undo    L/R  tab    B/+  back");
     SDL_RenderPresent(gRen);
 }
 
@@ -1627,7 +1680,7 @@ static void DrawMiiStats() {
                 // Word text or status
                 int availW = midW - kw - (kw?8:0) - 8 - nw - 8;
                 std::string wt = filled ? SaveEditor::GetWStr64At(gMiiSav, H_WTXT_L, wIdx) : "";
-                std::string disp = filled ? (wt.empty()?"—":FitNodeName(wt,fsm,availW)) : "(empty)";
+                std::string disp = filled ? (wt.empty()?"—":FitNodeName(wt,fsm,availW)) : "—";
                 DrawText(disp, midX+8+nw+4, ry+(33-nh)/2, sel?(filled?COL_TEXT:COL_DIM):(filled?COL_DIM:COL_DIM));
             }
         } else if (gMiiStatsSubTab == MiiStatsSubTab::Relations) {
@@ -1898,17 +1951,17 @@ static void DrawMiiStats() {
             SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
             SDL_RenderDrawLine(gRen, editX+12, panelTop+30, editX+editW-12, panelTop+30);
             DrawTextC("Kind", cx2, panelTop+46, COL_DIM, Font::Sm);
-            DrawTextC(isFilled?(kindLbl?kindLbl:"?"):"(empty)",
+            DrawTextC(isFilled?(kindLbl?kindLbl:"?"):"—",
                       cx2, panelTop+76, isFilled?COL_TEXT:COL_DIM, Font::Lg);
             {
                 int bW=108,bH=28,bGap=14;
                 int bxL=cx2-bGap/2-bW, bxR=cx2+bGap/2, bY=panelTop+112;
                 HitAdd(bxL,bY,bW,bH,TSimBtn,(int)HidNpadButton_Left);
                 FillRect(bxL,bY,bW,bH,COL_PANEL); DrawRect(bxL,bY,bW,bH,COL_BORDER);
-                DrawTextC("< Kind",bxL+bW/2,bY+bH/2,COL_DIM);
+                DrawTextC("<",bxL+bW/2,bY+bH/2,COL_DIM,Font::Md);
                 HitAdd(bxR,bY,bW,bH,TSimBtn,(int)HidNpadButton_Right);
                 FillRect(bxR,bY,bW,bH,COL_PANEL); DrawRect(bxR,bY,bW,bH,COL_BORDER);
-                DrawTextC("Kind >",bxR+bW/2,bY+bH/2,COL_DIM);
+                DrawTextC(">",bxR+bW/2,bY+bH/2,COL_DIM,Font::Md);
             }
             // Text section
             SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
@@ -1934,8 +1987,17 @@ static void DrawMiiStats() {
                 FillRect(bX,bY,bW,bH,COL_SEL); DrawRect(bX,bY,bW,bH,COL_ACCENT);
                 DrawTextC("X  Edit Pronunciation",cx2,bY+bH/2,COL_ACCENT,Font::Sm);
             }
+            // Undo button
+            {
+                bool canUndo = gWordUndo.valid;
+                int ubW=120,ubH=34,ubX=cx2-ubW/2,ubY=panelTop+370;
+                HitAdd(ubX,ubY,ubW,ubH,TUndoWords,0);
+                FillRect(ubX,ubY,ubW,ubH,COL_PANEL);
+                DrawRect(ubX,ubY,ubW,ubH,canUndo?COL_GOLD:COL_BORDER);
+                DrawTextC("-  Undo",cx2,ubY+ubH/2,canUndo?COL_GOLD:COL_DIM,Font::Md);
+            }
             if (!gMiiStatsMsg.empty())
-                DrawTextC(gMiiStatsMsg, cx2, panelTop+376, gMiiStatsMsgCol);
+                DrawTextC(gMiiStatsMsg, cx2, panelTop+418, gMiiStatsMsgCol);
         } else if (gMiiStatsSubTab == MiiStatsSubTab::Relations) {
             // ── Relations editor ─────────────────────────────────────────────────
             static const uint32_t H_BASE_RP  = 0x8b41897eu;
@@ -2086,13 +2148,13 @@ static void DrawMiiStats() {
 
     DrawFooter(
         gMiiStatsSubTab==MiiStatsSubTab::Social
-            ? (gSocialExpanded ? "Y  sub-tab    ZL/ZR  prev/next mii    X  focus view    B  save and go back    +  discard"
-                               : "Y  sub-tab    ZL/ZR  prev/next mii    X  global graph    B  save and go back    +  discard")
+            ? (gSocialExpanded ? "ZL/ZR  mii    Y  subtab    X  focus view    L/R  tab    B/+  back"
+                               : "ZL/ZR  mii    Y  subtab    X  global graph    L/R  tab    B/+  back")
         : gMiiStatsSubTab==MiiStatsSubTab::Words
-            ? "Y  sub-tab    ZL/ZR  prev/next mii    Up/Down  slot    Left/Right  kind    A  text    X  pronunciation    B  back    +  discard"
+            ? "ZL/ZR  mii    Up/Down  slot    Left/Right  kind    A  text    X  pronunciation    -  undo    Y  subtab    L/R  tab    B/+  back"
         : gMiiStatsSubTab==MiiStatsSubTab::Relations
-            ? "Y  sub-tab    ZL/ZR  prev/next mii    Up/Down  relation    Left/Right  type    B  back    +  discard"
-        : "Y  sub-tab    ZL/ZR  prev/next mii    Up/Down  field    X  undo    B  save and go back    +  discard");
+            ? "ZL/ZR  mii    Up/Down  relation    Left/Right  type    Y  subtab    L/R  tab    B/+  back"
+        : "ZL/ZR  mii    Up/Down  field    Left/Right  value    X  undo    Y  subtab    L/R  tab    B/+  back");
     SDL_RenderPresent(gRen);
 }
 
@@ -2120,8 +2182,34 @@ static void DrawSaveWarning() {
     SDL_RenderPresent(gRen);
 }
 
+static void SwitchTabAfterPrompt() {
+    gOnSwitchMode = gBackPromptTargetMode;
+    gOnSwitchMsg  = "";
+    if (gBackPromptTargetMode == OnSwitchMode::MiiStats && !gMiiSav.loaded) {
+        std::string err;
+        if (!SaveEditor::Load(SAVE_MII_SAV, gMiiSav, err))
+            gMiiStatsMsg = "Load error: " + err;
+    }
+    if (gBackPromptTargetMode == OnSwitchMode::Player && !gPlayerSav.loaded) {
+        std::string err;
+        if (!SaveEditor::Load(SAVE_PLAYER_SAV, gPlayerSav, err))
+            gPlayerMsg = "Load error: " + err;
+    }
+}
 static void TAckBackYes(int) {
     gShowBackPrompt = false;
+    if (gBackPromptTabSwitch) {
+        if (gBackPromptIsMii && gMiiSavDirty) {
+            std::string err = SaveEditor::Save(SAVE_MII_SAV, gMiiSav);
+            if (err.empty()) { SaveMount::Commit(); gMiiSavDirty=false; }
+        }
+        if (!gBackPromptIsMii && gPlayerSavDirty) {
+            std::string err = SaveEditor::Save(SAVE_PLAYER_SAV, gPlayerSav);
+            if (err.empty()) { SaveMount::Commit(); gPlayerSavDirty=false; }
+        }
+        SwitchTabAfterPrompt();
+        return;
+    }
     if (gBackPromptIsMii && gMiiSavDirty) {
         std::string err = SaveEditor::Save(SAVE_MII_SAV, gMiiSav);
         if (err.empty()) { SaveMount::Commit(); gMiiSavDirty=false; }
@@ -2136,20 +2224,29 @@ static void TAckBackYes(int) {
     gPlayerSavDirty=false; gMiiSavDirty=false;
     memset(gPlayerUndoValid, 0, sizeof(gPlayerUndoValid));
     memset(gMiiUndoValid,    0, sizeof(gMiiUndoValid));
+    gWordUndo.valid = false;
     SaveMount::Unmount();
-    gSaveFeedbackFrames=90; gSaveFeedbackQuit=true;
+    gSaveFeedbackFrames=90; gSaveFeedbackQuit=!gBackPromptToUserPick;
     gScreen=Screen::SaveFeedback;
 }
 static void TAckBackNo(int) {
     gShowBackPrompt = false;
+    if (gBackPromptTabSwitch) {
+        if (gBackPromptIsMii) gMiiSavDirty=false;
+        else gPlayerSavDirty=false;
+        SwitchTabAfterPrompt();
+        return;
+    }
     FreePreview(); HttpServer::Stop(); gLog.clear();
     gEntries.clear(); gMiis.clear();
     gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
     gPlayerSavDirty=false; gMiiSavDirty=false;
     memset(gPlayerUndoValid, 0, sizeof(gPlayerUndoValid));
     memset(gMiiUndoValid,    0, sizeof(gMiiUndoValid));
+    gWordUndo.valid = false;
     SaveMount::Unmount();
-    gQuitApp = true;
+    if (gBackPromptToUserPick) gScreen = Screen::UserPick;
+    else gQuitApp = true;
 }
 static void TDismissThumbTip(int) {
     if (gThumbTipCountdown > 0) return;
@@ -2162,21 +2259,21 @@ static void DrawThumbTip() {
     SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
     SDL_RenderClear(gRen);
 
-    const int mW = 680, mH = 230;
+    const int mW = 820, mH = 310;
     int mx = (SCREEN_W - mW) / 2, my = (SCREEN_H - mH) / 2;
     FillRect(mx, my, mW, mH, {18, 22, 18, 255});
     DrawRect(mx, my, mW, mH, COL_GOLD);
 
-    DrawTextC("About inventory thumbnails", SCREEN_W/2, my + 28, COL_GOLD, Font::Md);
+    DrawTextC("About inventory thumbnails", SCREEN_W/2, my + 32, COL_GOLD, Font::Lg);
 
-    DrawTextC("Your texture was imported, but the inventory thumbnail", SCREEN_W/2, my + 68, COL_TEXT, Font::Sm);
-    DrawTextC("is managed by the game itself and won't update on its own.", SCREEN_W/2, my + 88, COL_TEXT, Font::Sm);
-    DrawTextC("To refresh it: open this item in Studio Workshop,", SCREEN_W/2, my + 116, COL_DIM, Font::Sm);
-    DrawTextC("enter its texture editor, and re-save — the game", SCREEN_W/2, my + 136, COL_DIM, Font::Sm);
-    DrawTextC("will automatically rebuild the thumbnail.", SCREEN_W/2, my + 156, COL_DIM, Font::Sm);
+    DrawTextC("Your texture was imported, but the inventory thumbnail", SCREEN_W/2, my + 88, COL_TEXT, Font::Md);
+    DrawTextC("is managed by the game itself and won't update on its own.", SCREEN_W/2, my + 114, COL_TEXT, Font::Md);
+    DrawTextC("To refresh it: open this item in Studio Workshop,", SCREEN_W/2, my + 152, COL_DIM, Font::Md);
+    DrawTextC("enter its texture editor, and re-save — the game", SCREEN_W/2, my + 176, COL_DIM, Font::Md);
+    DrawTextC("will automatically rebuild the thumbnail.", SCREEN_W/2, my + 200, COL_DIM, Font::Md);
 
-    const int btnW = 200, btnH = 38;
-    int bx = SCREEN_W/2 - btnW/2, by = my + mH - 54;
+    const int btnW = 220, btnH = 44;
+    int bx = SCREEN_W/2 - btnW/2, by = my + mH - 62;
     bool ready = (gThumbTipCountdown <= 0);
     SDL_Color btnBorder = ready ? COL_ACCENT : COL_BORDER;
     SDL_Color btnText   = ready ? COL_ACCENT : COL_DIM;
@@ -2199,15 +2296,22 @@ static void DrawBackPrompt() {
     DrawTextC("Save changes?", SCREEN_W/2, my+28, COL_GOLD, Font::Lg);
     DrawTextC("Unsaved edits will be lost if you choose No.", SCREEN_W/2, my+70, COL_DIM, Font::Sm);
     const int bW=180, bH=48, gap=30;
+    const char* yesLbl = gBackPromptTabSwitch  ? "A  Save"
+                       : gBackPromptToUserPick ? "A  Save & Back" : "A  Save & Exit";
+    const char* noLbl  = gBackPromptTabSwitch  ? "B  Discard"
+                       : gBackPromptToUserPick ? "B  Discard & Back" : "B  Discard & Exit";
+    const char* footer = gBackPromptTabSwitch  ? "A  save    B  discard"
+                       : gBackPromptToUserPick ? "A  save & back    B  discard & back"
+                                               : "A  save & exit    B  discard & exit";
     HitAdd(mx+mW/2-bW-gap/2, my+mH-70, bW, bH, TAckBackYes, 0);
     FillRect(mx+mW/2-bW-gap/2, my+mH-70, bW, bH, COL_SEL);
     DrawRect(mx+mW/2-bW-gap/2, my+mH-70, bW, bH, COL_GREEN);
-    DrawTextC("A  Save & Exit", mx+mW/2-gap/2-bW/2, my+mH-70+bH/2, COL_GREEN, Font::Md);
+    DrawTextC(yesLbl, mx+mW/2-gap/2-bW/2, my+mH-70+bH/2, COL_GREEN, Font::Md);
     HitAdd(mx+mW/2+gap/2, my+mH-70, bW, bH, TAckBackNo, 0);
     FillRect(mx+mW/2+gap/2, my+mH-70, bW, bH, COL_SEL);
     DrawRect(mx+mW/2+gap/2, my+mH-70, bW, bH, COL_RED);
-    DrawTextC("B  Undo & Exit", mx+mW/2+gap/2+bW/2, my+mH-70+bH/2, COL_RED, Font::Md);
-    DrawFooter("A  save & exit    B  undo & exit");
+    DrawTextC(noLbl, mx+mW/2+gap/2+bW/2, my+mH-70+bH/2, COL_RED, Font::Md);
+    DrawFooter(footer);
     SDL_RenderPresent(gRen);
 }
 static void TUndoPlayer(int) {
@@ -2218,7 +2322,7 @@ static void TUndoPlayer(int) {
     if (fd.isEnum)      SaveEditor::SetEnum(gPlayerSav, h, v);
     else if (fd.isSkinTone) SaveEditor::SetUInt(gPlayerSav, h, v);
     else if (fd.isUInt) SaveEditor::SetUInt(gPlayerSav, h, v);
-    else if (fd.isRegion) SaveEditor::SetEnum(gPlayerSav, h, v);
+    else if (fd.isRegion || fd.isLang) SaveEditor::SetEnum(gPlayerSav, h, v);
     else                SaveEditor::SetAnyScalar(gPlayerSav, h, v);
     gPlayerUndoValid[gPlayerFieldSel] = false;
     gPlayerSavDirty = true;
@@ -2231,6 +2335,20 @@ static void TUndoMii(int) {
     if (fd.isUInt) SaveEditor::SetUIntAt(gMiiSav, h, miiIdx, (uint32_t)gMiiUndoVal[gMiiStatsFieldSel]);
     else           SaveEditor::SetIntAt(gMiiSav, h, miiIdx, gMiiUndoVal[gMiiStatsFieldSel]);
     gMiiUndoValid[gMiiStatsFieldSel] = false;
+    gMiiSavDirty = true;
+}
+static void TUndoWords(int) {
+    if (!gWordUndo.valid) return;
+    if (gMiis.empty() || gMiiStatsMiiSel >= (int)gMiis.size()) return;
+    static const uint32_t H_WKIND_U = SaveEditor::Hash("Mii.MiiMisc.WordInfo.WordArray.WordKind");
+    static const uint32_t H_WTXT_U  = SaveEditor::Hash("Mii.MiiMisc.WordInfo.WordArray.WordText");
+    static const uint32_t H_WHOW_U  = SaveEditor::Hash("Mii.MiiMisc.WordInfo.WordArray.WordHowToCall");
+    int miiIdx = gMiis[gMiiStatsMiiSel].slot - 1;
+    int wIdx   = miiIdx * 12 + gMiiWordsSlotSel;
+    SaveEditor::SetAnyEnumAt(gMiiSav, H_WKIND_U, wIdx, gWordUndo.kind);
+    SaveEditor::SetWStr64At(gMiiSav,  H_WTXT_U,  wIdx, gWordUndo.text);
+    SaveEditor::SetWStr64At(gMiiSav,  H_WHOW_U,  wIdx, gWordUndo.how);
+    gWordUndo.valid = false;
     gMiiSavDirty = true;
 }
 static void DrawError() {
@@ -2488,9 +2606,8 @@ int main(int,char**) {
         }
         if (gQuitApp) break;
 
-        // + quits globally, but let Player/MiiStats tabs intercept it first for dirty check
-        bool plusOwned = gScreen == Screen::OnSwitch &&
-                         (gOnSwitchMode == OnSwitchMode::Player || gOnSwitchMode == OnSwitchMode::MiiStats);
+        // + returns to user select globally; OnSwitch tabs handle it themselves (auto-save)
+        bool plusOwned = gScreen == Screen::OnSwitch;
         if ((kDown&HidNpadButton_Plus) && !plusOwned) break;
 
         kDown |= gSimKDown;
@@ -2768,10 +2885,17 @@ int main(int,char**) {
                             LogOK("Exported to: "+outPath);}
                     }
                 }
-                if (kDown&HidNpadButton_B){
-                    FreePreview(); HttpServer::Stop(); gLog.clear();
-                    gEntries.clear(); gMiis.clear();
-                    gScreen=Screen::UserPick; SaveMount::Unmount();
+                if (kDown&(HidNpadButton_B|HidNpadButton_Plus)){
+                    bool hasDirty = gPlayerSavDirty || gMiiSavDirty;
+                    bool toUserPick = (kDown&HidNpadButton_B) != 0;
+                    if (hasDirty) {
+                        gShowBackPrompt=true; gBackPromptTabSwitch=false;
+                        gBackPromptIsMii=gMiiSavDirty; gBackPromptToUserPick=toUserPick;
+                    } else if (toUserPick) {
+                        FreePreview(); HttpServer::Stop(); gLog.clear();
+                        gEntries.clear(); gMiis.clear();
+                        SaveMount::Unmount(); gScreen=Screen::UserPick;
+                    } else { gQuitApp=true; }
                 }
             } else if (gOnSwitchMode == OnSwitchMode::Mii) {
                 // Tab switch
@@ -2838,10 +2962,17 @@ int main(int,char**) {
                     if(!err.empty()){gOnSwitchMsg=err;gOnSwitchMsgCol=COL_RED;LogERR("Mii export failed: "+err);}
                     else{gOnSwitchMsg="Exported to: "+outPath;gOnSwitchMsgCol=COL_GREEN;LogOK("Exported to: "+outPath);}
                 }
-                if (kDown&HidNpadButton_B){
-                    FreePreview(); HttpServer::Stop(); gLog.clear();
-                    gEntries.clear(); gMiis.clear();
-                    gScreen=Screen::UserPick; SaveMount::Unmount();
+                if (kDown&(HidNpadButton_B|HidNpadButton_Plus)){
+                    bool hasDirty = gPlayerSavDirty || gMiiSavDirty;
+                    bool toUserPick = (kDown&HidNpadButton_B) != 0;
+                    if (hasDirty) {
+                        gShowBackPrompt=true; gBackPromptTabSwitch=false;
+                        gBackPromptIsMii=gMiiSavDirty; gBackPromptToUserPick=toUserPick;
+                    } else if (toUserPick) {
+                        FreePreview(); HttpServer::Stop(); gLog.clear();
+                        gEntries.clear(); gMiis.clear();
+                        SaveMount::Unmount(); gScreen=Screen::UserPick;
+                    } else { gQuitApp=true; }
                 }
             } else if (gOnSwitchMode == OnSwitchMode::Player) {
                 // Lazy-load
@@ -2850,19 +2981,18 @@ int main(int,char**) {
                     if (!SaveEditor::Load(SAVE_PLAYER_SAV, gPlayerSav, err))
                         gPlayerMsg = "Load error: " + err;
                 }
-                // Tab switch
+                // Tab switch (prompt when dirty)
                 if (kDown&(HidNpadButton_L|HidNpadButton_ZL)){
                     if (gPlayerSavDirty) {
-                        std::string err = SaveEditor::Save(SAVE_PLAYER_SAV, gPlayerSav);
-                        if (err.empty()) { SaveMount::Commit(); gPlayerSavDirty=false; gPlayerMsg="saved"; }
-                        else gPlayerMsg = "save error: "+err;
+                        gShowBackPrompt=true; gBackPromptIsMii=false;
+                        gBackPromptTabSwitch=true; gBackPromptTargetMode=OnSwitchMode::Mii; break;
                     }
                     gOnSwitchMode=OnSwitchMode::Mii; gOnSwitchMsg=""; break;
                 }
                 if (kDown&(HidNpadButton_R|HidNpadButton_ZR)){
                     if (gPlayerSavDirty) {
-                        std::string err = SaveEditor::Save(SAVE_PLAYER_SAV, gPlayerSav);
-                        if (err.empty()) { SaveMount::Commit(); gPlayerSavDirty=false; }
+                        gShowBackPrompt=true; gBackPromptIsMii=false;
+                        gBackPromptTabSwitch=true; gBackPromptTargetMode=OnSwitchMode::MiiStats; break;
                     }
                     gOnSwitchMode=OnSwitchMode::MiiStats;
                     if (!gMiiSav.loaded) {
@@ -2969,6 +3099,25 @@ int main(int,char**) {
                             gPlayerSavDirty=true;
                         }
                     }
+                    // Language enum cycle
+                    if (fd.isLang) {
+                        uint32_t cur = SaveEditor::GetEnum(gPlayerSav, h);
+                        int lidx = 0;
+                        for (int li=0; li<LANG_OPTION_COUNT; li++)
+                            if (SaveEditor::Hash(LANG_OPTIONS[li].name)==cur) { lidx=li; break; }
+                        if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft)) {
+                            if (!gPlayerUndoValid[gPlayerFieldSel]) { gPlayerUndoVal[gPlayerFieldSel]=(int32_t)cur; gPlayerUndoValid[gPlayerFieldSel]=true; }
+                            int nidx = (lidx-1+LANG_OPTION_COUNT) % LANG_OPTION_COUNT;
+                            SaveEditor::SetEnum(gPlayerSav, h, SaveEditor::Hash(LANG_OPTIONS[nidx].name));
+                            gPlayerSavDirty=true;
+                        }
+                        if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) {
+                            if (!gPlayerUndoValid[gPlayerFieldSel]) { gPlayerUndoVal[gPlayerFieldSel]=(int32_t)cur; gPlayerUndoValid[gPlayerFieldSel]=true; }
+                            int nidx = (lidx+1) % LANG_OPTION_COUNT;
+                            SaveEditor::SetEnum(gPlayerSav, h, SaveEditor::Hash(LANG_OPTIONS[nidx].name));
+                            gPlayerSavDirty=true;
+                        }
+                    }
                     // Skin tone cycle
                     if (fd.isSkinTone) {
                         uint32_t cur = SaveEditor::GetUInt(gPlayerSav, h);
@@ -3004,32 +3153,20 @@ int main(int,char**) {
                     // X = undo
                     if (!fd.isStr && (kDown&HidNpadButton_X)) TUndoPlayer(0);
                 }
-                // B = save and go back
-                if (kDown&HidNpadButton_B) {
-                    bool wasDirty = gPlayerSavDirty;
-                    if (wasDirty) {
-                        std::string err = SaveEditor::Save(SAVE_PLAYER_SAV, gPlayerSav);
-                        if (!err.empty()) { gPlayerMsg="save error: "+err; goto player_b_done; }
-                        SaveMount::Commit(); gPlayerSavDirty=false;
-                    }
-                    FreePreview(); HttpServer::Stop(); gLog.clear();
-                    gEntries.clear(); gMiis.clear();
-                    gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
-                    gPlayerSavDirty=false; gMiiSavDirty=false;
-                    SaveMount::Unmount();
-                    if (wasDirty) { gSaveFeedbackFrames=90; gSaveFeedbackQuit=false; gScreen=Screen::SaveFeedback; }
-                    else { gScreen=Screen::UserPick; }
-                    player_b_done:;
-                }
-                // Plus = exit (shows prompt if dirty, exits directly if clean)
-                if (kDown&HidNpadButton_Plus) {
-                    if (gPlayerSavDirty) { gBackPromptIsMii=false; gShowBackPrompt=true; }
-                    else {
+                // B = back to user pick, Plus = quit app (both prompt when dirty)
+                if (kDown&(HidNpadButton_B|HidNpadButton_Plus)) {
+                    bool toUserPick = (kDown&HidNpadButton_B) != 0;
+                    if (gPlayerSavDirty) {
+                        gShowBackPrompt=true; gBackPromptIsMii=false; gBackPromptTabSwitch=false; gBackPromptToUserPick=toUserPick;
+                    } else if (toUserPick) {
                         FreePreview(); HttpServer::Stop(); gLog.clear();
                         gEntries.clear(); gMiis.clear();
                         gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
+                        gPlayerSavDirty=false; gMiiSavDirty=false;
                         SaveMount::Unmount();
                         gScreen=Screen::UserPick;
+                    } else {
+                        gQuitApp=true;
                     }
                 }
 
@@ -3040,18 +3177,18 @@ int main(int,char**) {
                     if (!SaveEditor::Load(SAVE_MII_SAV, gMiiSav, err))
                         gMiiStatsMsg = "Load error: " + err;
                 }
-                // Tab switch (L/R for main tabs, ZL/ZR for Stats/Social sub-tabs)
+                // Tab switch (L/R for main tabs — prompt when dirty)
                 if (kDown&HidNpadButton_L){
                     if (gMiiSavDirty) {
-                        std::string err = SaveEditor::Save(SAVE_MII_SAV, gMiiSav);
-                        if (err.empty()) { SaveMount::Commit(); gMiiSavDirty=false; }
+                        gShowBackPrompt=true; gBackPromptIsMii=true;
+                        gBackPromptTabSwitch=true; gBackPromptTargetMode=OnSwitchMode::Player; break;
                     }
                     gOnSwitchMode=OnSwitchMode::Player; gOnSwitchMsg=""; break;
                 }
                 if (kDown&HidNpadButton_R){
                     if (gMiiSavDirty) {
-                        std::string err = SaveEditor::Save(SAVE_MII_SAV, gMiiSav);
-                        if (err.empty()) { SaveMount::Commit(); gMiiSavDirty=false; }
+                        gShowBackPrompt=true; gBackPromptIsMii=true;
+                        gBackPromptTabSwitch=true; gBackPromptTargetMode=OnSwitchMode::WebUI; break;
                     }
                     gOnSwitchMode=OnSwitchMode::WebUI; gOnSwitchMsg=""; break;
                 }
@@ -3065,15 +3202,15 @@ int main(int,char**) {
                     auto prevMii = [&](){
                         gMiiStatsMiiSel = (gMiiStatsMiiSel>0) ? gMiiStatsMiiSel-1 : (int)gMiis.size()-1;
                         if (gMiiStatsMiiSel < gMiiStatsScroll) gMiiStatsScroll=gMiiStatsMiiSel;
+                        gWordUndo.valid = false;
                     };
                     auto nextMii = [&](){
                         gMiiStatsMiiSel = (gMiiStatsMiiSel+1<(int)gMiis.size()) ? gMiiStatsMiiSel+1 : 0;
                         if (gMiiStatsMiiSel >= gMiiStatsScroll+mseVis2) gMiiStatsScroll=gMiiStatsMiiSel-mseVis2+1;
+                        gWordUndo.valid = false;
                     };
-                    if (kDown&HidNpadButton_ZL) prevMii();
-                    if (kDown&HidNpadButton_ZR) nextMii();
-                    if (kNav&(HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))  prevMii();
-                    if (kNav&(HidNpadButton_StickLRight|HidNpadButton_StickRRight)) nextMii();
+                    if (kNav&HidNpadButton_ZL) prevMii();
+                    if (kNav&HidNpadButton_ZR) nextMii();
                 }
                 // D-pad Up/Down = field/slot nav depending on sub-tab
                 if (gMiiStatsSubTab==MiiStatsSubTab::Stats) {
@@ -3083,9 +3220,9 @@ int main(int,char**) {
                         gMiiStatsFieldSel = (gMiiStatsFieldSel+1<MII_STATS_FIELD_COUNT) ? gMiiStatsFieldSel+1 : 0;
                 } else if (gMiiStatsSubTab==MiiStatsSubTab::Words) {
                     if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))
-                        gMiiWordsSlotSel = (gMiiWordsSlotSel>0) ? gMiiWordsSlotSel-1 : 11;
+                        { gMiiWordsSlotSel = (gMiiWordsSlotSel>0) ? gMiiWordsSlotSel-1 : 11; gWordUndo.valid=false; }
                     if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
-                        gMiiWordsSlotSel = (gMiiWordsSlotSel<11) ? gMiiWordsSlotSel+1 : 0;
+                        { gMiiWordsSlotSel = (gMiiWordsSlotSel<11) ? gMiiWordsSlotSel+1 : 0; gWordUndo.valid=false; }
                 } else if (gMiiStatsSubTab==MiiStatsSubTab::Relations) {
                     if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))
                         { if (gMiiRelSel > 0) gMiiRelSel--; }
@@ -3107,28 +3244,34 @@ int main(int,char**) {
                     uint32_t curKind = SaveEditor::GetAnyEnumAt(gMiiSav, H_WKIND_I, wIdx, H_WINV_I);
                     int kIdx = WordKindIndex(curKind);
                     if (kIdx < 0) kIdx = 0;
+                    auto captureWordUndo = [&]() {
+                        if (!gWordUndo.valid) {
+                            gWordUndo.kind  = curKind;
+                            gWordUndo.text  = SaveEditor::GetWStr64At(gMiiSav, H_WTXT_I, wIdx);
+                            gWordUndo.how   = SaveEditor::GetWStr64At(gMiiSav, H_WHOW_I, wIdx);
+                            gWordUndo.valid = true;
+                        }
+                    };
                     // Left/Right: cycle kind
                     auto cycleKind = [&](int dir) {
+                        captureWordUndo();
                         int nk = (kIdx + dir + WORD_KIND_COUNT) % WORD_KIND_COUNT;
                         uint32_t nHash = SaveEditor::Hash(WORD_KIND_LIST[nk].name);
                         SaveEditor::SetAnyEnumAt(gMiiSav, H_WKIND_I, wIdx, nHash);
-                        if (nk == 0) { // clearing → wipe text/pronunciation/region
-                            SaveEditor::SetWStr64At(gMiiSav, H_WTXT_I, wIdx, "");
-                            SaveEditor::SetWStr64At(gMiiSav, H_WHOW_I, wIdx, "");
-                            SaveEditor::SetAnyEnumAt(gMiiSav, H_WREGION_I, wIdx, H_WJPJA_I);
-                        } else if (curKind == H_WINV_I) {
+                        if (curKind == H_WINV_I && nk != 0) {
                             // activating from empty: auto-set region to USen
                             SaveEditor::SetAnyEnumAt(gMiiSav, H_WREGION_I, wIdx, H_WUSEN_I);
                         }
                         gMiiSavDirty = true;
                     };
-                    if (kDown&HidNpadButton_Left)  cycleKind(-1);
-                    if (kDown&HidNpadButton_Right) cycleKind(+1);
+                    if (kDown&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))   cycleKind(-1);
+                    if (kDown&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) cycleKind(+1);
                     // A: edit text
                     if (kDown&HidNpadButton_A) {
                         std::string cur = SaveEditor::GetWStr64At(gMiiSav, H_WTXT_I, wIdx);
                         std::string nv = ShowKeyboard("Word Text (max 63 chars)", cur, 63);
                         if (nv != cur) {
+                            captureWordUndo();
                             SaveEditor::SetWStr64At(gMiiSav, H_WTXT_I, wIdx, nv);
                             if (!nv.empty() && curKind == H_WINV_I) {
                                 SaveEditor::SetAnyEnumAt(gMiiSav, H_WKIND_I, wIdx, SaveEditor::Hash("Phrase"));
@@ -3143,11 +3286,14 @@ int main(int,char**) {
                         std::string cur = SaveEditor::GetWStr64At(gMiiSav, H_WHOW_I, wIdx);
                         std::string nv = ShowKeyboard("Pronunciation (empty = same as text)", cur, 63);
                         if (nv != cur) {
+                            captureWordUndo();
                             SaveEditor::SetWStr64At(gMiiSav, H_WHOW_I, wIdx, nv);
                             gMiiSavDirty = true;
                         }
                         gMiiStatsMsg=""; gMiiStatsMsgCol=COL_TEXT;
                     }
+                    // Minus: undo
+                    if (kDown&HidNpadButton_Minus) TUndoWords(0);
                 }
                 // Edit (Relations sub-tab)
                 if (gMiiStatsSubTab==MiiStatsSubTab::Relations && gMiiSav.loaded && !gMiis.empty() && gMiiStatsMiiSel<(int)gMiis.size()) {
@@ -3171,8 +3317,8 @@ int main(int,char**) {
                             }
                             gMiiSavDirty = true;
                         };
-                        if (kDown&HidNpadButton_Left)  cycleType(-1);
-                        if (kDown&HidNpadButton_Right) cycleType(+1);
+                        if (kDown&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))   cycleType(-1);
+                        if (kDown&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) cycleType(+1);
                     }
                 }
                 // Edit field (Stats sub-tab only)
@@ -3210,13 +3356,13 @@ int main(int,char**) {
                             int curIdx = 0;
                             for (int fi=0; fi<FEELING_LABEL_COUNT; fi++)
                                 if (FEELING_LABELS[fi].hash==cur) { curIdx=fi; break; }
-                            if (kDown&HidNpadButton_Left) {
+                            if (kDown&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft)) {
                                 if (!gMiiUndoValid[gMiiStatsFieldSel]) { gMiiUndoVal[gMiiStatsFieldSel]=(int32_t)cur; gMiiUndoValid[gMiiStatsFieldSel]=true; }
                                 curIdx = (curIdx>0) ? curIdx-1 : FEELING_LABEL_COUNT-1;
                                 SaveEditor::SetEnumAt(gMiiSav, fh, miiIdx, FEELING_LABELS[curIdx].hash);
                                 gMiiSavDirty=true;
                             }
-                            if (kDown&HidNpadButton_Right) {
+                            if (kDown&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) {
                                 if (!gMiiUndoValid[gMiiStatsFieldSel]) { gMiiUndoVal[gMiiStatsFieldSel]=(int32_t)cur; gMiiUndoValid[gMiiStatsFieldSel]=true; }
                                 curIdx = (curIdx+1<FEELING_LABEL_COUNT) ? curIdx+1 : 0;
                                 SaveEditor::SetEnumAt(gMiiSav, fh, miiIdx, FEELING_LABELS[curIdx].hash);
@@ -3229,9 +3375,9 @@ int main(int,char**) {
                                 if (kDown&HidNpadButton_Left)  { if (fd.isUInt) adjustUInt(-scale); else adjustInt(-scale); }
                                 if (kDown&HidNpadButton_Right) { if (fd.isUInt) adjustUInt(scale);  else adjustInt(scale);  }
                             } else {
-                                // D-pad Left/Right: navigate button focus
-                                if (kNav&HidNpadButton_Left)  gMiiBtnSel = (gMiiBtnSel-1+6)%6;
-                                if (kNav&HidNpadButton_Right) gMiiBtnSel = (gMiiBtnSel+1)%6;
+                                // Left/Right (D-pad or stick): navigate button focus
+                                if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))   gMiiBtnSel = (gMiiBtnSel-1+6)%6;
+                                if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) gMiiBtnSel = (gMiiBtnSel+1)%6;
                                 // A fires focused button
                                 if (kDown&HidNpadButton_A && !fd.isStr) {
                                     static const int MSTEPS[]={100,10,1};
@@ -3251,32 +3397,20 @@ int main(int,char**) {
                     // X = undo
                     if (!fd.isStr && (kDown&HidNpadButton_X)) TUndoMii(0);
                 }
-                // B = save and go back
-                if (kDown&HidNpadButton_B) {
-                    bool wasDirty = gMiiSavDirty;
-                    if (wasDirty) {
-                        std::string err = SaveEditor::Save(SAVE_MII_SAV, gMiiSav);
-                        if (!err.empty()) { gMiiStatsMsg="save error: "+err; goto miistats_b_done; }
-                        SaveMount::Commit(); gMiiSavDirty=false;
-                    }
-                    FreePreview(); HttpServer::Stop(); gLog.clear();
-                    gEntries.clear(); gMiis.clear();
-                    gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
-                    gPlayerSavDirty=false; gMiiSavDirty=false;
-                    SaveMount::Unmount();
-                    if (wasDirty) { gSaveFeedbackFrames=90; gSaveFeedbackQuit=false; gScreen=Screen::SaveFeedback; }
-                    else { gScreen=Screen::UserPick; }
-                    miistats_b_done:;
-                }
-                // Plus = exit (shows prompt if dirty, exits directly if clean)
-                if (kDown&HidNpadButton_Plus) {
-                    if (gMiiSavDirty) { gBackPromptIsMii=true; gShowBackPrompt=true; }
-                    else {
+                // B = back to user pick, Plus = quit app (both prompt when dirty)
+                if (kDown&(HidNpadButton_B|HidNpadButton_Plus)) {
+                    bool toUserPick = (kDown&HidNpadButton_B) != 0;
+                    if (gMiiSavDirty) {
+                        gShowBackPrompt=true; gBackPromptIsMii=true; gBackPromptTabSwitch=false; gBackPromptToUserPick=toUserPick;
+                    } else if (toUserPick) {
                         FreePreview(); HttpServer::Stop(); gLog.clear();
                         gEntries.clear(); gMiis.clear();
                         gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
+                        gPlayerSavDirty=false; gMiiSavDirty=false;
                         SaveMount::Unmount();
                         gScreen=Screen::UserPick;
+                    } else {
+                        gQuitApp=true;
                     }
                 }
 
@@ -3303,12 +3437,19 @@ int main(int,char**) {
                 if (kDown&(HidNpadButton_R|HidNpadButton_ZR)){
                     gOnSwitchMode=OnSwitchMode::UGC; gOnSwitchMsg=""; break;
                 }
-                if (kDown&HidNpadButton_B){
-                    FreePreview(); HttpServer::Stop(); gLog.clear();
-                    gEntries.clear(); gMiis.clear();
-                    gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
-                    gPlayerSavDirty=false; gMiiSavDirty=false;
-                    gScreen=Screen::UserPick; SaveMount::Unmount();
+                if (kDown&(HidNpadButton_B|HidNpadButton_Plus)){
+                    bool hasDirty = gPlayerSavDirty || gMiiSavDirty;
+                    bool toUserPick = (kDown&HidNpadButton_B) != 0;
+                    if (hasDirty) {
+                        gShowBackPrompt=true; gBackPromptTabSwitch=false;
+                        gBackPromptIsMii=gMiiSavDirty; gBackPromptToUserPick=toUserPick;
+                    } else if (toUserPick) {
+                        FreePreview(); HttpServer::Stop(); gLog.clear();
+                        gEntries.clear(); gMiis.clear();
+                        gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
+                        gPlayerSavDirty=false; gMiiSavDirty=false;
+                        gScreen=Screen::UserPick; SaveMount::Unmount();
+                    } else { gQuitApp=true; }
                 }
             }
             // WebUI standby prevention: keep screen on while a client connected recently

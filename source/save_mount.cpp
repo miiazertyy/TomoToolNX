@@ -12,6 +12,7 @@ std::vector<UserInfo> GetUsers() {
     std::vector<UserInfo> users;
 
     Result rc = accountInitialize(AccountServiceType_Application);
+    if (R_FAILED(rc)) rc = accountInitialize(AccountServiceType_System);
     if (R_FAILED(rc)) return users;
 
     s32 count = 0;
