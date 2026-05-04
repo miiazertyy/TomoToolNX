@@ -69,6 +69,8 @@ Five tabs are available, navigated with **L / R** (or **ZL / ZR**):
 
 The export folder defaults to `/switch/TomoToolNX/Exports` and can be changed via the file browser. The chosen path is saved persistently in `/switch/TomoToolNX/config.ini`.
 
+After importing, the texture file is updated and committed immediately. However, the in-game inventory thumbnail is cached separately by the game and will not update on its own. To refresh it: open the item in **Studio Workshop**, enter its texture editor, and re-save — the game will automatically rebuild the thumbnail.
+
 ---
 
 #### Miis tab
