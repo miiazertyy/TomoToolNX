@@ -23,7 +23,7 @@ include $(DEVKITPRO)/libnx/switch_rules
 TARGET      := TomoToolNX
 APP_TITLE   := TomoToolNX
 APP_AUTHOR  := Imprimante
-APP_VERSION := 1.2.0
+APP_VERSION := 1.2.1
 BUILD		:=	build
 SOURCES		:=	source
 DATA		:=	data

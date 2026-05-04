@@ -66,7 +66,7 @@ static const char* HTML_UI = R"HTML(<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>TomoToolNX</title>
 
 <style>
@@ -77,7 +77,7 @@ static const char* HTML_UI = R"HTML(<!DOCTYPE html>
   --text:#e8e8e8;--muted:#666;--accent:#c8a96e;--accent2:#7eb8c8;
   --ok:#6abf7b;--err:#c86a6a;
 }
-body{font-family:'Mikhak',system-ui,sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;font-size:14px}
+body{font-family:'Mikhak',system-ui,sans-serif;background:var(--bg);color:var(--text);height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidden;font-size:14px}
 header{background:var(--surface);padding:10px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);flex-shrink:0}
 header h1{font-size:15px;font-weight:400;letter-spacing:.08em;color:var(--accent)}
 header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
@@ -102,7 +102,7 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .entry:hover{background:var(--surface)}
 .entry.active{background:var(--surface2);border-left:2px solid var(--accent)}
 .entry-name{font-size:13px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.toolbar{background:var(--surface);padding:9px 16px;display:flex;gap:8px;border-top:1px solid var(--border);align-items:center;flex-shrink:0}
+.toolbar{background:var(--surface);padding:9px 16px;padding-bottom:max(9px,env(safe-area-inset-bottom,0px));display:flex;gap:8px;border-top:1px solid var(--border);align-items:center;flex-shrink:0}
 .btn{padding:6px 14px;border:1px solid var(--border);border-radius:3px;font-size:12px;font-family:inherit;letter-spacing:.06em;cursor:pointer;background:var(--surface2);color:var(--text);transition:border-color .15s,color .15s}
 .btn:disabled{opacity:.35;cursor:not-allowed}
 .btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
@@ -114,6 +114,8 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .btn-cyan:hover:not(:disabled){border-color:var(--accent2);color:var(--accent2)}
 .status{font-size:11px;padding:4px 10px;border-radius:2px;flex:1;min-width:0;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .status.ok{color:var(--ok)}.status.err{color:var(--err)}.status.info{color:var(--muted)}
+#save-warn{display:none;background:#2a1010;border:1px solid var(--err);border-radius:4px;padding:10px 14px;margin:8px 0;font-size:11px;line-height:1.6;color:var(--text)}
+#save-warn b{color:var(--err)}
 /* Mii panel */
 
 
@@ -148,12 +150,12 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .save-sub-tabs{display:flex;gap:6px;padding:8px 0 4px}
 .save-sub-tab{background:var(--panel);border:1px solid var(--border);color:var(--dim);padding:5px 18px;border-radius:4px;cursor:pointer;font-size:.85rem;transition:all .15s}
 .save-sub-tab.active{border-color:var(--gold);color:var(--gold)}
-.save-sub-panel{padding:0}
+.save-sub-panel{padding:0;flex:1;overflow-y:auto;min-height:0;display:flex;flex-direction:column}
 .save-mii-layout{display:flex;gap:12px;flex-wrap:wrap}
 .mii-slot-list{display:flex;flex-direction:column;gap:4px;min-width:160px;max-width:200px;max-height:520px;overflow-y:auto;flex-shrink:0}
 .mii-slot-btn{background:var(--panel2);border:1px solid var(--border);color:var(--dim);padding:6px 10px;border-radius:3px;cursor:pointer;text-align:left;font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:all .12s}
 .mii-slot-btn.active{border-color:var(--gold);color:var(--text)}
-.save-fields-wrap{flex:1;min-width:0}
+.save-fields-wrap{flex:1;min-width:0;overflow-y:auto}
 .save-table{width:100%;border-collapse:collapse;font-size:.85rem}
 .save-table tr:nth-child(even){background:var(--panel)}
 .save-table td{padding:6px 8px;vertical-align:middle}
@@ -169,13 +171,15 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 <header>
   <h1>TomoToolNX <span>tomodachi life editor</span></h1>
   <span id="hdr-count"></span>
-  <button class="btn" style="margin-left:auto;font-size:.75rem;padding:4px 10px" onclick="restartServer()">restart server</button>
 </header>
 <div class="tabs">
   <button class="tab active" onclick="switchTab('ugc',this)">textures</button>
   <button class="tab" onclick="switchTab('mii',this)">miis</button>
   <button class="tab" onclick="switchTab('save',this)">save editor</button>
 </div>
+
+<!-- one-time tips -->
+<div id="save-warn"><b>Warning</b> — Modifying save data can break your game. Make sure you have a backup before editing.<button class="tip-close" onclick="dismissSaveWarn()">Got it</button></div>
 
 <!-- UGC Panel -->
 <div class="panel active" id="panel-ugc">
@@ -276,6 +280,7 @@ function switchTab(name, btn) {
   btn.classList.add('active');
   document.getElementById('panel-'+name).classList.add('active');
   if(name==='mii' && miiEntries.length===0) loadMiis();
+  if(name==='save') initSaveWarn();
 }
 
 // ── UGC ────────────────────────────────────────────────────────────────────────
@@ -379,6 +384,8 @@ async function uploadMiiFile(file){
 }
 function setMiiStatus(msg,cls){const el=document.getElementById('mii-status');el.textContent=msg;el.className='status '+cls;}
 function restartServer(){alert('Press X on the console to restart the server.');}
+function initSaveWarn(){if(!localStorage.getItem('saveWarnSeen'))document.getElementById('save-warn').style.display='block';}
+function dismissSaveWarn(){document.getElementById('save-warn').style.display='none';localStorage.setItem('saveWarnSeen','1');}
 
 // ── Modal ──────────────────────────────────────────────────────────────────────
 function showSpinner(msg){
@@ -776,8 +783,7 @@ static void HandlePreview(int fd,const std::string& query){
     SrvLog("WebUI: preview "+stem);
     auto entries=UgcScanner::Scan(s_ugcPath);const UgcTextureEntry* found=nullptr;for(auto& e:entries)if(e.stem==stem){found=&e;break;}
     if(!found){Send404(fd);return;}
-    RgbaImage img;std::string err=TextureProcessor::DecodeFile(found->ugctexPath,img,false);if(!err.empty()){Send500(fd,err);return;}
-    TextureProcessor::ConvertLinearToSrgb(img.pixels);
+    RgbaImage img;std::string err=TextureProcessor::DecodeFile(found->ugctexPath,img,true);if(!err.empty()){Send500(fd,err);return;}
     auto png=EncodePng(img);if(png.empty()){Send500(fd,"PNG encode failed");return;}
     Send200Bin(fd,"image/png",png);
 }
@@ -786,8 +792,7 @@ static void HandleExport(int fd,const std::string& query){
     SrvLog("WebUI: export "+stem);
     auto entries=UgcScanner::Scan(s_ugcPath);const UgcTextureEntry* found=nullptr;for(auto& e:entries)if(e.stem==stem){found=&e;break;}
     if(!found){Send404(fd);return;}
-    RgbaImage img;std::string err=TextureProcessor::DecodeFile(found->ugctexPath,img,false);if(!err.empty()){Send500(fd,err);return;}
-    TextureProcessor::ConvertLinearToSrgb(img.pixels);
+    RgbaImage img;std::string err=TextureProcessor::DecodeFile(found->ugctexPath,img,true);if(!err.empty()){Send500(fd,err);return;}
     auto png=EncodePng(img);if(png.empty()){Send500(fd,"PNG encode failed");return;}
     Send200Bin(fd,"image/png",png,"attachment; filename=\""+stem+".png\"");
 }

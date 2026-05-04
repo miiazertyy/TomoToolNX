@@ -4,7 +4,7 @@
 
 #include <string>
 
-#define APP_VERSION "1.2.0"  // bump this before each release
+#define APP_VERSION "1.2.1"  // bump this before each release
 #define GITHUB_REPO "miiazertyy/TomoToolNX"
 #define UPDATE_NRO_PATH "sdmc:/switch/TomoToolNX/TomoToolNX.nro"
 

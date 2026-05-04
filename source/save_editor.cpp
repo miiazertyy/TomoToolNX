@@ -252,6 +252,24 @@ uint32_t GetEnum(const SavFile& s, uint32_t h, uint32_t def) {
 void SetEnum(SavFile& s, uint32_t h, uint32_t v) {
     auto* e = FindMut(s,h); if (e && e->type==DT_Enum) e->inlineRaw = v;
 }
+uint32_t GetAnyScalar(const SavFile& s, uint32_t h, uint32_t def) {
+    auto* e = Find(s,h);
+    if (!e) return def;
+    switch(e->type) {
+        case DT_Bool: case DT_Int: case DT_UInt: case DT_Float: case DT_Enum:
+            return e->inlineRaw;
+        default: return def;
+    }
+}
+void SetAnyScalar(SavFile& s, uint32_t h, uint32_t v) {
+    auto* e = FindMut(s,h);
+    if (!e) return;
+    switch(e->type) {
+        case DT_Bool: case DT_Int: case DT_UInt: case DT_Float: case DT_Enum:
+            e->inlineRaw = v; break;
+        default: break;
+    }
+}
 int ArraySize(const SavFile& s, uint32_t h) {
     auto* e = Find(s,h);
     if (!e || e->payload.size() < 4) return 0;
@@ -298,6 +316,27 @@ void SetUIntAt(SavFile& s, uint32_t h, int idx, uint32_t v) {
 }
 void SetEnumAt(SavFile& s, uint32_t h, int idx, uint32_t v) {
     ArrayWrite(FindMut(s,h), DT_EnumArray, idx, v);
+}
+// Reads from EnumArray or UIntArray (identical binary layout — game uses either).
+uint32_t GetAnyEnumAt(const SavFile& s, uint32_t h, int idx, uint32_t def) {
+    const Entry* e = Find(s, h);
+    if (!e || e->payload.size() < 4) return def;
+    if (e->type != DT_EnumArray && e->type != DT_UIntArray) return def;
+    uint32_t cnt = R32(e->payload.data());
+    if (idx < 0 || (uint32_t)idx >= cnt) return def;
+    size_t off = 4 + (size_t)idx * 4;
+    if (off + 4 > e->payload.size()) return def;
+    return R32(e->payload.data() + off);
+}
+void SetAnyEnumAt(SavFile& s, uint32_t h, int idx, uint32_t v) {
+    Entry* e = FindMut(s, h);
+    if (!e || e->payload.size() < 4) return;
+    if (e->type != DT_EnumArray && e->type != DT_UIntArray) return;
+    uint32_t cnt = R32(e->payload.data());
+    if (idx < 0 || (uint32_t)idx >= cnt) return;
+    size_t off = 4 + (size_t)idx * 4;
+    if (off + 4 > e->payload.size()) return;
+    W32(e->payload.data() + off, v);
 }
 
 // ── UTF-16LE ↔ UTF-8 ──────────────────────────────────────────────────────────
@@ -371,6 +410,26 @@ void SetWStr32At(SavFile& s, uint32_t h, int idx, const std::string& utf8) {
     size_t off = 4 + (size_t)idx * 64;
     if (off + 64 > e->payload.size()) return;
     Utf8ToUtf16Le(utf8, e->payload.data() + off, 32);
+}
+
+// ── Array WStr64 ──────────────────────────────────────────────────────────────
+std::string GetWStr64At(const SavFile& s, uint32_t h, int idx) {
+    auto* e = Find(s,h);
+    if (!e || e->type!=DT_WStr64Array || e->payload.size()<4) return "";
+    uint32_t cnt = R32(e->payload.data());
+    if (idx<0 || (uint32_t)idx>=cnt) return "";
+    size_t off = 4 + (size_t)idx * 128;
+    if (off + 128 > e->payload.size()) return "";
+    return Utf16LeToUtf8(e->payload.data() + off, 128);
+}
+void SetWStr64At(SavFile& s, uint32_t h, int idx, const std::string& utf8) {
+    auto* e = FindMut(s,h);
+    if (!e || e->type!=DT_WStr64Array || e->payload.size()<4) return;
+    uint32_t cnt = R32(e->payload.data());
+    if (idx<0 || (uint32_t)idx>=cnt) return;
+    size_t off = 4 + (size_t)idx * 128;
+    if (off + 128 > e->payload.size()) return;
+    Utf8ToUtf16Le(utf8, e->payload.data() + off, 64); // 64 UTF-16 code units incl. null
 }
 
 } // namespace SaveEditor

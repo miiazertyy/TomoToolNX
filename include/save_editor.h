@@ -70,6 +70,10 @@ void     SetUIntAt (SavFile& s, uint32_t h, int idx, uint32_t v);
 void     SetEnumAt (SavFile& s, uint32_t h, int idx, uint32_t v);
 int      ArraySize (const SavFile& s, uint32_t h);  // element count of any array entry
 
+// Reads/writes EnumArray or UIntArray (identical 4-byte layout — game uses either).
+uint32_t GetAnyEnumAt(const SavFile& s, uint32_t h, int idx, uint32_t def = 0);
+void     SetAnyEnumAt(SavFile& s, uint32_t h, int idx, uint32_t v);
+
 // ── Wide-string accessors (UTF-8 ↔ UTF-16LE in payload) ──────────────────────
 // Scalar WStr32 (DataType 28, 64-byte payload)
 std::string GetWStr32   (const SavFile& s, uint32_t h);
@@ -78,5 +82,13 @@ void        SetWStr32   (SavFile& s, uint32_t h, const std::string& utf8);
 // Array element: WStr32Array (DataType 29, each element 64 bytes)
 std::string GetWStr32At (const SavFile& s, uint32_t h, int idx);
 void        SetWStr32At (SavFile& s, uint32_t h, int idx, const std::string& utf8);
+
+// Array element: WStr64Array (DataType 31, each element 128 bytes, 63 usable chars)
+std::string GetWStr64At (const SavFile& s, uint32_t h, int idx);
+void        SetWStr64At (SavFile& s, uint32_t h, int idx, const std::string& utf8);
+
+// ── Any-scalar accessor (Bool/Int/UInt/Float/Enum regardless of stored type) ──
+uint32_t GetAnyScalar(const SavFile& s, uint32_t h, uint32_t def = 0);
+void     SetAnyScalar(SavFile& s, uint32_t h, uint32_t v);
 
 } // namespace SaveEditor

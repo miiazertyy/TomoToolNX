@@ -225,8 +225,13 @@ static void TSelMii  (int idx);
 static void TSelBrowse(int idx);
 static void TAdjust  (int delta); // encoded: negative=left, positive=right; |val| = scale
 static void TSelPlayerField(int idx);
+static void TSetSkinTone(int idx);
+static void TSetIslandSize(int val);
 static void TSelMiiStatsMii(int idx);
 static void TSelMiiStatsField(int idx);
+static void TSelMiiWordsSlot(int idx);
+static void TSelMiiRelation(int idx);
+static void TRelMeterAdj(int delta);
 static void TSetSocialView(int v);
 static void TAckSaveWarning(int);
 static void TPlayerKbd(int);
@@ -237,11 +242,15 @@ static void TUndoMii(int);
 static void DrawBackPrompt();
 static void TAckBackYes(int);
 static void TAckBackNo(int);
+static void TDismissThumbTip(int);
+static void DrawThumbTip();
+static void SaveConfig();
 
 // ─── Save editor state ────────────────────────────────────────────────────────
 static SaveEditor::SavFile gPlayerSav, gMiiSav;
 static bool   gPlayerSavDirty   = false, gMiiSavDirty = false;
 static int    gPlayerFieldSel   = 0;
+static int    gPlayerScroll     = 0;
 static int    gMiiStatsMiiSel   = 0; // index into gMiis
 static int    gMiiStatsFieldSel = 0;
 static int    gMiiStatsScroll   = 0;
@@ -249,8 +258,8 @@ static std::string gPlayerMsg, gMiiStatsMsg;
 static SDL_Color   gPlayerMsgCol = COL_TEXT, gMiiStatsMsgCol = COL_TEXT;
 
 // Undo state (single-step undo per field)
-static int32_t gPlayerUndoVal[5]   = {};
-static bool    gPlayerUndoValid[5] = {};
+static int32_t gPlayerUndoVal[16]   = {};
+static bool    gPlayerUndoValid[16] = {};
 static int32_t gMiiUndoVal[16]     = {};
 static bool    gMiiUndoValid[16]   = {};
 
@@ -268,24 +277,60 @@ static bool gQuitApp         = false;
 static int  gSaveFeedbackFrames = 0;
 static bool gSaveFeedbackQuit   = false;
 
+// Thumb-tip modal (shown once after first successful UGC import)
+static bool gShowThumbTip      = false;
+static int  gThumbTipCountdown = 0;  // frames remaining before button enables
+static bool gThumbTipSeen      = false;
+
 // ─── Player field table ───────────────────────────────────────────────────────
 struct SaveFieldDef {
     const char* label;
-    const char* fieldName;
-    bool isStr;   // WStr32 scalar
-    bool isUInt;  // UInt scalar
-    bool isEnum;  // Enum scalar — cycle with Left/Right, show symbol
+    const char* fieldName;  // "" when rawHash is used
+    uint32_t    rawHash;    // 0 = hash fieldName; nonzero = use directly
+    bool isStr;      // WStr32 keyboard edit
+    bool isUInt;     // UInt nudge (GetUInt/SetUInt)
+    bool isEnum;     // Currency enum cycle
+    bool isInt;      // Signed int nudge (GetAnyScalar/SetAnyScalar)
+    bool isSkinTone; // UInt 0-5 swatch buttons
+    bool isIslandSz; // Any-scalar, 4 safe preset buttons (values 1-4)
+    bool isRegion;   // Named region enum cycle (7 values)
+    bool isRawEnum;  // Raw unsigned nudge (GetAnyScalar/SetAnyScalar)
     int32_t minVal, maxVal; // -1 = unclamped
     const char* desc;
 };
-static const SaveFieldDef PLAYER_FIELDS[] = {
-    {"Name",       "Player.Name",       true,  false, false, 0, 0, "Your player's display name."},
-    {"Island",     "Player.IslandName", true,  false, false, 0, 0, "The name of your island."},
-    {"Money",      "Player.Money",      false, true,  false, 0,-1, "Current coin balance."},
-    {"Currency",   "Player.Currency",   false, false, true,  0,-1, "Regional currency symbol shown in-game."},
-    {"Boot Count", "Player.BootNum",    false, true,  false, 0,-1, "Number of times the game has been launched."},
+static uint32_t PFHash(const SaveFieldDef& fd) {
+    return fd.rawHash ? fd.rawHash : SaveEditor::Hash(fd.fieldName);
+}
+static const struct { const char* name; const char* label; } REGION_OPTIONS[] = {
+    {"NorthAmerica",  "North America"},
+    {"SouthAmericaN", "S.America (N)"},
+    {"SouthAmericaS", "S.America (S)"},
+    {"Australia",     "Australia/NZ"},
+    {"Asia",          "HK/TW/Korea"},
+    {"OthersN",       "Other (N)"},
+    {"OthersS",       "Other (S)"},
 };
-static const int PLAYER_FIELD_COUNT = 5;
+static const int REGION_OPTION_COUNT = 7;
+//                    label           fieldName                              rawHash      Str    UInt   Enum   Int    Skin   Island Region RawEn  min  max  desc
+static const SaveFieldDef PLAYER_FIELDS[] = {
+    {"Name",          "Player.Name",                           0,           true,  false, false, false, false, false, false, false, 0,   0,   "Your player's display name."},
+    {"Island",        "Player.IslandName",                     0,           true,  false, false, false, false, false, false, false, 0,   0,   "The name of your island."},
+    {"Money",         "Player.Money",                          0,           false, true,  false, false, false, false, false, false, 0,   -1,  "Current coin balance."},
+    {"Currency",      "Player.Currency",                       0,           false, false, true,  false, false, false, false, false, 0,   -1,  "Regional currency symbol shown in-game."},
+    {"Boot Count",    "Player.BootNum",                        0,           false, true,  false, false, false, false, false, false, 0,   -1,  "Number of times the game has been launched."},
+    {"Skin Tone",     "Player.SkinColorIndex",                 0,           false, false, false, false, true,  false, false, false, 0,   5,   "Player hand/skin color (0-5)."},
+    {"Bday Day",      "",                                      0xdb7786bbu, false, false, false, false, false, false, false, true,  1,   31,  "Birthday day of the month (1-31)."},
+    {"Bday Month",    "",                                      0xc754bef3u, false, false, false, false, false, false, false, true,  1,   12,  "Birthday month (1-12)."},
+    {"Bday Year",     "",                                      0x11996629u, false, false, false, true,  false, false, false, false, -1,  -1,  "Birthday year."},
+    {"Island Size",   "",                                      0x870a807cu, false, false, false, false, false, true,  false, false, 1,   4,   "Island size preset. Other values corrupt the save!"},
+    {"Fountain Lv",   "Liberation.FountainLevel",              0,           false, false, false, false, false, false, false, true,  0,   -1,  "Wishing fountain upgrade level."},
+    {"Wishes",        "",                                      0xa32f7e47u, false, false, false, false, false, false, false, true,  0,   -1,  "Number of wishes made."},
+    {"Region",        "Player.Region",                         0,           false, false, false, false, false, false, true,  false, 0,   -1,  "Player region (affects seasons and weather)."},
+    {"Region Code",   "Player.RegionCode",                     0,           false, false, false, false, false, false, false, true,  0,   -1,  "Numeric region code."},
+    {"Name Lang",     "Player.NameRegionLanguageID",           0,           false, false, false, false, false, false, false, true,  0,   -1,  "Language ID for player name pronunciation."},
+    {"Island Lang",   "Player.IslandNameRegionLanguageID",     0,           false, false, false, false, false, false, false, true,  0,   -1,  "Language ID for island name pronunciation."},
+};
+static const int PLAYER_FIELD_COUNT = 16;
 
 // ─── Mii stats field table ─────────────────────────────────────────────────────
 struct MiiStatsDef {
@@ -337,6 +382,31 @@ static const char* FeelingName(uint32_t hash) {
     return nullptr;
 }
 
+// Word kind options (Mii.MiiMisc.WordInfo.WordArray.WordKind)
+static const struct { const char* name; const char* label; } WORD_KIND_LIST[] = {
+    { "Invalid",     "(empty)"     },
+    { "TalkStart",   "Talk Start"  },
+    { "TalkEnd",     "Talk End"    },
+    { "Phrase",      "Phrase"      },
+    { "Happy",       "Happy"       },
+    { "Sad",         "Sad"         },
+    { "Angry",       "Angry"       },
+    { "Greeting",    "Greeting"    },
+    { "TalkInSleep", "Sleep Talk"  },
+    { "ShoutToSea",  "Shout Sea"   },
+    { "BeforeEat",   "Before Eat"  },
+};
+static const int WORD_KIND_COUNT = 11;
+static int WordKindIndex(uint32_t hash) {
+    for (int i = 0; i < WORD_KIND_COUNT; i++)
+        if (SaveEditor::Hash(WORD_KIND_LIST[i].name) == hash) return i;
+    return -1;
+}
+static const char* WordKindLabel(uint32_t hash) {
+    int i = WordKindIndex(hash);
+    return i >= 0 ? WORD_KIND_LIST[i].label : nullptr;
+}
+
 // Player.Currency enum hash → symbol / name  (hash of 'Player.Currency' = 0xdc88f139)
 static const struct { uint32_t hash; const char* symbol; const char* name; } CURRENCY_LABELS[] = {
     { 0x7e3d1e46u, "---",  "Invalid"    },
@@ -379,13 +449,13 @@ static const int RELATION_TYPE_COUNT = 15;
 static const char* RelTypeName(uint32_t hash) {
     for (int i = 0; i < RELATION_TYPE_COUNT; i++)
         if (RELATION_TYPE_NAMES[i].hash == hash) return RELATION_TYPE_NAMES[i].name;
-    return "?";
+    return "Unknown";
 }
 static SDL_Color RelTypeColor(uint32_t hash) {
-    if (hash==0xba939a42u) return {100,200,120,255}; // Friend
+    if (hash==0xba939a42u) return {230,210, 60,255}; // Friend   → yellow
     if (hash==0xc2d067a7u) return {255,150,180,255}; // Couple
     if (hash==0xb7ce0c18u) return {255,100,100,255}; // Lover
-    if (hash==0x354a0515u) return {100,170,255,255}; // Know
+    if (hash==0x354a0515u) return {100,210,120,255}; // Know     → green
     if (hash==0x7783d4c3u) return {160, 80,160,255}; // Ex-Lover
     if (hash==0xfe59f825u) return {160, 60, 60,255}; // Divorce
     if (hash==0xdcfc7603u||hash==0xe193c5a2u) return {220,150, 80,255}; // Parent/Child
@@ -394,20 +464,56 @@ static SDL_Color RelTypeColor(uint32_t hash) {
     if (hash==0x804172f3u) return {160,160,160,255}; // Relative
     return {100,100,100,255};
 }
+static uint32_t RelTypeCounterpart(uint32_t hash) {
+    if (hash==0xdcfc7603u) return 0xe193c5a2u; // Parent → Child
+    if (hash==0xe193c5a2u) return 0xdcfc7603u; // Child → Parent
+    if (hash==0x1918f808u) return 0x3b1d200au; // SiblingOld → SiblingYng
+    if (hash==0x3b1d200au) return 0x1918f808u; // SiblingYng → SiblingOld
+    if (hash==0x2fd9785bu) return 0x7e3cd550u; // Grandparent → Grandchild
+    if (hash==0x7e3cd550u) return 0x2fd9785bu; // Grandchild → Grandparent
+    return hash; // all other types are symmetric
+}
+static bool RelMeterFixed(uint32_t hash) {
+    return hash==0x0784a8dcu || hash==0x7e3d1e46u; // Other or Invalid
+}
 
-// Social sub-view state (within MiiStats tab)
-static bool gMiiStatsSocialView = false;
-static bool gSocialExpanded     = false; // X = fullscreen social graph
-static int  gSocialScroll       = 0;
+// Fit a UTF-8 string to maxW pixels wide using font f, appending "~" if truncated.
+static std::string FitNodeName(const std::string& s, TTF_Font* f, int maxW) {
+    const std::string src = s.empty() ? "?" : s;
+    if (!f) return src;
+    int w = 0, h = 0;
+    TTF_SizeUTF8(f, src.c_str(), &w, &h);
+    if (w <= maxW) return src;
+    std::string t = src;
+    while (!t.empty()) {
+        // strip trailing bytes until we're at a UTF-8 codepoint boundary
+        do { t.pop_back(); } while (!t.empty() && (uint8_t(t.back()) & 0xC0) == 0x80);
+        std::string cand = t + "~";
+        TTF_SizeUTF8(f, cand.c_str(), &w, &h);
+        if (w <= maxW) return cand;
+    }
+    return "~";
+}
+
+// MiiStats sub-tab state
+enum class MiiStatsSubTab { Stats=0, Words=1, Relations=2, Social=3 };
+static MiiStatsSubTab gMiiStatsSubTab  = MiiStatsSubTab::Stats;
+static bool           gSocialExpanded  = false;
+static int            gSocialScroll    = 0;
+static int            gMiiWordsSlotSel = 0;   // 0-11: selected word slot
+static int            gMiiRelSel       = 0;   // selected row in filtered relations list
+static int            gMiiRelPairIdx   = -1;  // actual pair array index (set during draw)
+static bool           gMiiRelSelfA     = true; // selected Mii is 'A' in the pair
 
 // WebUI standby prevention
 static bool            gStandbyOff      = false;
 static OnSwitchMode    gPrevOnSwitchMode = OnSwitchMode::UGC;
 
 // Save editor first-launch warning
-static bool         gSaveWarningAcked  = false;
-static bool         gShowSaveWarning   = false;
-static OnSwitchMode gSaveWarningTarget = OnSwitchMode::Player;
+static bool         gSaveWarningAcked    = false;
+static bool         gShowSaveWarning     = false;
+static int          gSaveWarningCountdown = 0;
+static OnSwitchMode gSaveWarningTarget   = OnSwitchMode::Player;
 
 // Windows-style accelerating key repeat for directional navigation.
 // Returns kDown OR any held directional buttons that should fire this frame.
@@ -449,13 +555,52 @@ static void TAdjust(int delta) {
     gBtnTouchActive = true;
 }
 static void TSelPlayerField(int idx) { gPlayerFieldSel=idx; }
+static void TSetSkinTone(int idx) {
+    if (!gPlayerSav.loaded) return;
+    uint32_t h = PFHash(PLAYER_FIELDS[gPlayerFieldSel]);
+    uint32_t cur = SaveEditor::GetUInt(gPlayerSav, h);
+    if (!gPlayerUndoValid[gPlayerFieldSel]) { gPlayerUndoVal[gPlayerFieldSel]=(int32_t)cur; gPlayerUndoValid[gPlayerFieldSel]=true; }
+    SaveEditor::SetUInt(gPlayerSav, h, (uint32_t)idx);
+    gPlayerSavDirty = true;
+}
+static void TSetIslandSize(int val) {
+    if (!gPlayerSav.loaded) return;
+    uint32_t h = PFHash(PLAYER_FIELDS[gPlayerFieldSel]);
+    uint32_t cur = SaveEditor::GetAnyScalar(gPlayerSav, h);
+    if (!gPlayerUndoValid[gPlayerFieldSel]) { gPlayerUndoVal[gPlayerFieldSel]=(int32_t)cur; gPlayerUndoValid[gPlayerFieldSel]=true; }
+    SaveEditor::SetAnyScalar(gPlayerSav, h, (uint32_t)val);
+    gPlayerSavDirty = true;
+}
 static void TSelMiiStatsMii(int idx) {
     if (idx>=0 && idx<(int)gMiis.size()) gMiiStatsMiiSel=idx;
 }
 static void TSelMiiStatsField(int idx) { gMiiStatsFieldSel=idx; }
-static void TSetSocialView(int v) { gMiiStatsSocialView=(v!=0); gSocialScroll=0; }
+static void TSelMiiWordsSlot(int idx)  { gMiiWordsSlotSel=idx; }
+static void TSelMiiRelation(int idx)   { gMiiRelSel=idx; }
+static void TRelMeterAdj(int delta) {
+    if (gMiiRelPairIdx < 0 || !gMiiSav.loaded) return;
+    static const uint32_t H_BASE_RA  = 0x8b41897eu;
+    static const uint32_t H_METER_RA = 0x42c2fc2fu;
+    int myDir = gMiiRelSelfA ? gMiiRelPairIdx*2   : gMiiRelPairIdx*2+1;
+    int otDir = gMiiRelSelfA ? gMiiRelPairIdx*2+1 : gMiiRelPairIdx*2;
+    uint32_t myType = SaveEditor::GetEnumAt(gMiiSav, H_BASE_RA, myDir, 0x0784a8dcu);
+    if (RelMeterFixed(myType)) return;
+    auto adjM = [&](int dir) {
+        int32_t m = SaveEditor::GetIntAt(gMiiSav, H_METER_RA, dir);
+        m = std::max(0, std::min(100, m + delta));
+        SaveEditor::SetIntAt(gMiiSav, H_METER_RA, dir, m);
+    };
+    adjM(myDir);
+    adjM(otDir);
+    gMiiSavDirty = true;
+}
+static void TSetSocialView(int v) {
+    gMiiStatsSubTab = (MiiStatsSubTab)v;
+    gSocialScroll = 0;
+    if (gMiiStatsSubTab != MiiStatsSubTab::Social) gSocialExpanded = false;
+}
 static void TAckSaveWarning(int) {
-    gSaveWarningAcked = true; gShowSaveWarning = false;
+    gSaveWarningAcked = true; gShowSaveWarning = false; SaveConfig();
     gOnSwitchMode = gSaveWarningTarget;
     if (gSaveWarningTarget == OnSwitchMode::Player && !gPlayerSav.loaded) {
         std::string err;
@@ -618,6 +763,7 @@ static void DoOnSwitchImport(const std::string& pngPath) {
     if (!gEntries.empty()) LoadPreview(gEntries[gEntrySel]);
     gOnSwitchMsg="Imported successfully"; gOnSwitchMsgCol=COL_GREEN;
     LogOK("Import OK: "+e.stem);
+    if (!gThumbTipSeen) { gShowThumbTip=true; gThumbTipCountdown=120; }
 }
 
 // ─── Draw helpers ─────────────────────────────────────────────────────────────
@@ -850,7 +996,9 @@ static void LoadConfig() {
         std::string val = s.substr(eq + 1);
         while (!val.empty() && (val.back()=='\n'||val.back()=='\r'||val.back()==' '))
             val.pop_back();
-        if (key == "export_path") gExportPath = val;
+        if (key == "export_path")      gExportPath      = val;
+        if (key == "thumb_tip_seen")   gThumbTipSeen    = (val == "1");
+        if (key == "save_warn_acked")  gSaveWarningAcked = (val == "1");
     }
     fclose(f);
 }
@@ -858,7 +1006,9 @@ static void LoadConfig() {
 static void SaveConfig() {
     FILE* f = fopen(CONFIG_PATH, "w");
     if (!f) return;
-    fprintf(f, "export_path=%s\n", gExportPath.c_str());
+    fprintf(f, "export_path=%s\n",     gExportPath.c_str());
+    fprintf(f, "thumb_tip_seen=%d\n",  gThumbTipSeen     ? 1 : 0);
+    fprintf(f, "save_warn_acked=%d\n", gSaveWarningAcked ? 1 : 0);
     fclose(f);
 }
 
@@ -1192,33 +1342,60 @@ static void DrawPlayer() {
         return;
     }
 
-    // Left panel: field list
+    // Left panel: field list (compact rows)
     FillRect(SE_LIST_X-4, SE_TOP_Y, SE_LIST_W+8, SCREEN_H-SE_TOP_Y-32, COL_PANEL);
     DrawRect(SE_LIST_X-4, SE_TOP_Y, SE_LIST_W+8, SCREEN_H-SE_TOP_Y-32, COL_BORDER);
 
-    for (int i = 0; i < PLAYER_FIELD_COUNT; i++) {
+    static const int PL_ROW_H = 33;
+    int plListH = SCREEN_H - SE_TOP_Y - 32;
+    int plVis   = plListH / PL_ROW_H;
+    if (gPlayerFieldSel < gPlayerScroll) gPlayerScroll = gPlayerFieldSel;
+    if (gPlayerFieldSel >= gPlayerScroll + plVis) gPlayerScroll = gPlayerFieldSel - plVis + 1;
+    if (gPlayerScroll < 0) gPlayerScroll = 0;
+
+    TTF_Font* fsm_pl = GetFont(Font::Sm);
+    for (int i = gPlayerScroll; i < PLAYER_FIELD_COUNT && i < gPlayerScroll + plVis; i++) {
         bool sel = (i == gPlayerFieldSel);
-        int ry = SE_TOP_Y + 2 + i * SE_ROW_H;
-        HitAdd(SE_LIST_X, ry, SE_LIST_W, SE_ROW_H-1, TSelPlayerField, i);
-        FillRect(SE_LIST_X, ry, SE_LIST_W, SE_ROW_H-1, sel?COL_SEL:COL_BG);
-        if (sel) DrawRect(SE_LIST_X, ry, SE_LIST_W, SE_ROW_H-1, COL_GOLD);
+        int ry = SE_TOP_Y + (i - gPlayerScroll) * PL_ROW_H;
+        HitAdd(SE_LIST_X, ry, SE_LIST_W, PL_ROW_H-1, TSelPlayerField, i);
+        FillRect(SE_LIST_X, ry, SE_LIST_W, PL_ROW_H-1, sel?COL_SEL:COL_BG);
+        if (sel) DrawRect(SE_LIST_X, ry, SE_LIST_W, PL_ROW_H-1, COL_GOLD);
 
         const auto& fd = PLAYER_FIELDS[i];
-        DrawText(fd.label, SE_LIST_X+6, ry+6, sel?COL_TEXT:COL_DIM);
+        uint32_t fh = PFHash(fd);
+        int lw=0,lh=0;
+        if(fsm_pl) TTF_SizeUTF8(fsm_pl, fd.label, &lw, &lh);
+        DrawText(fd.label, SE_LIST_X+8, ry+(PL_ROW_H-lh)/2, sel?COL_TEXT:COL_DIM);
 
-        // Current value preview
         std::string val;
         if (fd.isStr) {
-            val = SaveEditor::GetWStr32(gPlayerSav, SaveEditor::Hash(fd.fieldName));
+            val = SaveEditor::GetWStr32(gPlayerSav, fh);
+            if (val.size() > 16) val = val.substr(0,14) + "..";
         } else if (fd.isEnum) {
-            uint32_t ev = SaveEditor::GetEnum(gPlayerSav, SaveEditor::Hash(fd.fieldName));
-            val = std::string(CurrencySymbol(ev)) + " " + CurrencyName(ev);
+            uint32_t ev = SaveEditor::GetEnum(gPlayerSav, fh);
+            val = std::string(CurrencySymbol(ev));
+        } else if (fd.isSkinTone) {
+            val = std::to_string(SaveEditor::GetUInt(gPlayerSav, fh)+1);
+        } else if (fd.isIslandSz) {
+            static const char* SL[] = {"50x36","70x50","90x64","120x80"};
+            uint32_t sv = SaveEditor::GetAnyScalar(gPlayerSav, fh);
+            val = (sv>=1&&sv<=4) ? SL[sv-1] : "?";
+        } else if (fd.isRegion) {
+            uint32_t ev = SaveEditor::GetEnum(gPlayerSav, fh);
+            val = "?";
+            for (int ri=0; ri<REGION_OPTION_COUNT; ri++)
+                if (SaveEditor::Hash(REGION_OPTIONS[ri].name)==ev) { val=REGION_OPTIONS[ri].label; break; }
+            if (val.size()>12) val=val.substr(0,10)+"..";
+        } else if (fd.isInt) {
+            val = std::to_string((int32_t)SaveEditor::GetAnyScalar(gPlayerSav, fh));
+        } else if (fd.isUInt) {
+            val = std::to_string(SaveEditor::GetUInt(gPlayerSav, fh));
         } else {
-            val = std::to_string(SaveEditor::GetUInt(gPlayerSav, SaveEditor::Hash(fd.fieldName)));
+            val = std::to_string(SaveEditor::GetAnyScalar(gPlayerSav, fh));
         }
-        TTF_Font* fsm=GetFont(Font::Sm); int vw=0,vh=0;
-        if(fsm) TTF_SizeUTF8(fsm,val.c_str(),&vw,&vh);
-        DrawText(val, SE_LIST_X+SE_LIST_W-vw-6, ry+SE_ROW_H-vh-8, sel?COL_ACCENT:COL_DIM);
+        int vw=0,vh=0;
+        if(fsm_pl) TTF_SizeUTF8(fsm_pl, val.c_str(), &vw, &vh);
+        DrawText(val, SE_LIST_X+SE_LIST_W-vw-8, ry+(PL_ROW_H-vh)/2, sel?COL_ACCENT:COL_DIM);
     }
 
     // Right panel: edit controls for selected field
@@ -1226,6 +1403,7 @@ static void DrawPlayer() {
     DrawRect(SE_DETAIL_X, SE_TOP_Y, SE_DETAIL_W, SCREEN_H-SE_TOP_Y-32, COL_BORDER);
 
     const auto& fd = PLAYER_FIELDS[gPlayerFieldSel];
+    uint32_t ph = PFHash(fd);
     int cx = SE_DETAIL_X + SE_DETAIL_W/2;
     int midY = SE_TOP_Y + (SCREEN_H-SE_TOP_Y-32)/2;
 
@@ -1233,15 +1411,14 @@ static void DrawPlayer() {
     DrawTextC(fd.desc,  cx, midY-76,  COL_DIM, Font::Sm);
 
     if (fd.isStr) {
-        std::string val = SaveEditor::GetWStr32(gPlayerSav, SaveEditor::Hash(fd.fieldName));
+        std::string val = SaveEditor::GetWStr32(gPlayerSav, ph);
         DrawTextC(val.empty() ? "(empty)" : val, cx, midY-40, COL_TEXT, Font::Lg);
-        // Touch/A to edit button
         int bw=260, bh=40, bx=cx-bw/2, by=midY+10;
         HitAdd(bx,by,bw,bh, TPlayerKbd, 0);
         FillRect(bx,by,bw,bh,COL_SEL); DrawRect(bx,by,bw,bh,COL_ACCENT);
         DrawTextC("A  edit with keyboard", cx, by+bh/2, COL_ACCENT, Font::Md);
     } else if (fd.isEnum) {
-        uint32_t ev = SaveEditor::GetEnum(gPlayerSav, SaveEditor::Hash(fd.fieldName));
+        uint32_t ev = SaveEditor::GetEnum(gPlayerSav, ph);
         DrawTextC(CurrencySymbol(ev), cx, midY-36, COL_TEXT, Font::Lg);
         DrawTextC(CurrencyName(ev), cx, midY-4, COL_DIM, Font::Md);
         const int btnW=140, btnH=36, btnGap=24;
@@ -1253,11 +1430,62 @@ static void DrawPlayer() {
         FillRect(bxR,btnY,btnW,btnH,COL_PANEL); DrawRect(bxR,btnY,btnW,btnH,COL_BORDER);
         DrawTextC("Next >", bxR+btnW/2, btnY+btnH/2, COL_DIM);
         DrawTextC("Left/Right  cycle currency", cx, btnY+btnH+14, COL_DIM);
+    } else if (fd.isSkinTone) {
+        static const SDL_Color SKIN_COLS[] = {
+            {246,217,189,255},{236,193,157,255},{210,160,122,255},
+            {176,122,84,255},{130,85,51,255},{90,57,28,255}
+        };
+        uint32_t cur = SaveEditor::GetUInt(gPlayerSav, ph);
+        int sw=66, sh=66, sgap=12;
+        int totalSW = 6*(sw+sgap)-sgap;
+        int sbx = cx - totalSW/2, sby = midY-30;
+        for (int si=0; si<6; si++) {
+            bool ssel = ((uint32_t)si == cur);
+            HitAdd(sbx, sby, sw, sh, TSetSkinTone, si);
+            FillRect(sbx, sby, sw, sh, SKIN_COLS[si]);
+            DrawRect(sbx, sby, sw, sh, ssel ? COL_GOLD : SDL_Color{80,80,80,255});
+            if (ssel) DrawRect(sbx+2, sby+2, sw-4, sh-4, COL_GOLD);
+            sbx += sw+sgap;
+        }
+        DrawTextC("Left/Right  cycle tone", cx, sby+sh+14, COL_DIM, Font::Sm);
+    } else if (fd.isIslandSz) {
+        static const char* SZ_LABELS[] = {"50 x 36","70 x 50","90 x 64","120 x 80"};
+        uint32_t cur = SaveEditor::GetAnyScalar(gPlayerSav, ph, 0);
+        DrawTextC("Other sizes will corrupt the save file!", cx, midY-46, COL_RED, Font::Sm);
+        int bw=140, bh=44, bgap=12;
+        int totalBW = 4*(bw+bgap)-bgap;
+        int bbx = cx - totalBW/2, bby = midY-16;
+        for (int pi=0; pi<4; pi++) {
+            bool psel = (cur == (uint32_t)(pi+1));
+            HitAdd(bbx, bby, bw, bh, TSetIslandSize, pi+1);
+            FillRect(bbx, bby, bw, bh, psel?COL_SEL:COL_PANEL);
+            DrawRect(bbx, bby, bw, bh, psel?COL_GOLD:COL_BORDER);
+            DrawTextC(SZ_LABELS[pi], bbx+bw/2, bby+bh/2, psel?COL_GOLD:COL_DIM);
+            bbx += bw+bgap;
+        }
+        DrawTextC("Left/Right  cycle size", cx, bby+bh+14, COL_DIM, Font::Sm);
+    } else if (fd.isRegion) {
+        uint32_t ev = SaveEditor::GetEnum(gPlayerSav, ph);
+        const char* rlabel = "Unknown";
+        for (int ri=0; ri<REGION_OPTION_COUNT; ri++) {
+            if (SaveEditor::Hash(REGION_OPTIONS[ri].name)==ev) { rlabel=REGION_OPTIONS[ri].label; break; }
+        }
+        DrawTextC(rlabel, cx, midY-36, COL_TEXT, Font::Lg);
+        const int btnW=140, btnH=36, btnGap=24;
+        int bxL=cx-btnGap/2-btnW, bxR=cx+btnGap/2, btnY=midY+22;
+        HitAdd(bxL,btnY,btnW,btnH, TSimBtn, (int)HidNpadButton_Left);
+        FillRect(bxL,btnY,btnW,btnH,COL_PANEL); DrawRect(bxL,btnY,btnW,btnH,COL_BORDER);
+        DrawTextC("< Prev", bxL+btnW/2, btnY+btnH/2, COL_DIM);
+        HitAdd(bxR,btnY,btnW,btnH, TSimBtn, (int)HidNpadButton_Right);
+        FillRect(bxR,btnY,btnW,btnH,COL_PANEL); DrawRect(bxR,btnY,btnW,btnH,COL_BORDER);
+        DrawTextC("Next >", bxR+btnW/2, btnY+btnH/2, COL_DIM);
+        DrawTextC("Left/Right  cycle region", cx, btnY+btnH+14, COL_DIM);
     } else {
-        uint32_t val = SaveEditor::GetUInt(gPlayerSav, SaveEditor::Hash(fd.fieldName));
-        DrawTextC(std::to_string(val), cx, midY-40, COL_TEXT, Font::Lg);
+        // Generic numeric: UInt, Int, RawEnum
+        uint32_t rawV = fd.isUInt ? SaveEditor::GetUInt(gPlayerSav, ph) : SaveEditor::GetAnyScalar(gPlayerSav, ph);
+        std::string dispV = fd.isInt ? std::to_string((int32_t)rawV) : std::to_string(rawV);
+        DrawTextC(dispV, cx, midY-40, COL_TEXT, Font::Lg);
 
-        // Touch nudge buttons: [-1000] [-100] [-10] [-1] [+1] [+10] [+100] [+1000]
         static const int STEPS[]={1000,100,10,1};
         int bw=52, bh=52, gap=6;
         int totalBW = 4*(bw+gap)*2 + 20;
@@ -1272,7 +1500,7 @@ static void DrawPlayer() {
             DrawTextC("-"+std::to_string(s), bx+bw/2, by+bh/2, focused?COL_GOLD:COL_RED, Font::Md);
             bx += bw+gap; btnIdx++;
         }
-        bx += 20; // centre gap
+        bx += 20;
         for (int j = 3; j >= 0; j--) {
             bool focused = (gPlayerBtnSel == btnIdx);
             int s = STEPS[j];
@@ -1282,21 +1510,21 @@ static void DrawPlayer() {
             DrawTextC("+"+std::to_string(s), bx+bw/2, by+bh/2, focused?COL_GOLD:COL_GREEN, Font::Md);
             bx += bw+gap; btnIdx++;
         }
-        // Undo button
-        {
-            bool canUndo = gPlayerUndoValid[gPlayerFieldSel];
-            int ubW=100, ubH=44, ubX=cx-ubW/2, ubY=by+bh+14;
-            HitAdd(ubX, ubY, ubW, ubH, TUndoPlayer, 0);
-            FillRect(ubX, ubY, ubW, ubH, COL_PANEL);
-            DrawRect(ubX, ubY, ubW, ubH, canUndo ? COL_GOLD : COL_BORDER);
-            DrawTextC("Undo", ubX+ubW/2, ubY+ubH/2, canUndo ? COL_GOLD : COL_DIM, Font::Md);
-        }
+    }
+    // Undo button for all non-string fields
+    if (!fd.isStr) {
+        bool canUndo = gPlayerUndoValid[gPlayerFieldSel];
+        int ubW=100, ubH=44, ubX=cx-ubW/2, ubY=midY+130;
+        HitAdd(ubX, ubY, ubW, ubH, TUndoPlayer, 0);
+        FillRect(ubX, ubY, ubW, ubH, COL_PANEL);
+        DrawRect(ubX, ubY, ubW, ubH, canUndo ? COL_GOLD : COL_BORDER);
+        DrawTextC("Undo", ubX+ubW/2, ubY+ubH/2, canUndo ? COL_GOLD : COL_DIM, Font::Md);
     }
 
     if (!gPlayerMsg.empty())
         DrawTextC(gPlayerMsg, cx, SE_TOP_Y+16, gPlayerMsgCol);
 
-    DrawFooter("Up/Down  select field    A  adjust    X  undo    B  save and go back    +  discard");
+    DrawFooter("Up/Down  select field    Left/Right  adjust    A  confirm    X  undo    B  save & exit    +  discard");
     SDL_RenderPresent(gRen);
 }
 
@@ -1359,62 +1587,146 @@ static void DrawMiiStats() {
         DrawTextC("no miis", SE_LIST_X+MSE_LIST_W/2, SE_TOP_Y+80, COL_DIM);
     }
 
-    // Middle: field list for selected mii
+    // Middle: field list for selected mii (hidden in Social tab — graph expands into its space)
     int midX = SE_LIST_X + MSE_LIST_W + 12;
     int midW = 340;
-    FillRect(midX, SE_TOP_Y, midW, SCREEN_H-SE_TOP_Y-32, {8,8,8,255});
-    DrawRect(midX, SE_TOP_Y, midW, SCREEN_H-SE_TOP_Y-32, COL_BORDER);
+    if (gMiiStatsSubTab != MiiStatsSubTab::Social) {
+        FillRect(midX, SE_TOP_Y, midW, SCREEN_H-SE_TOP_Y-32, {8,8,8,255});
+        DrawRect(midX, SE_TOP_Y, midW, SCREEN_H-SE_TOP_Y-32, COL_BORDER);
+    }
 
     if (!gMiis.empty() && gMiiStatsMiiSel < (int)gMiis.size()) {
         int miiSlotIdx = gMiis[gMiiStatsMiiSel].slot - 1; // 0-based array index
 
-        for (int i = 0; i < MII_STATS_FIELD_COUNT; i++) {
-            bool sel = (i == gMiiStatsFieldSel);
-            int ry = SE_TOP_Y + 2 + i * 34;
-            if (ry + 34 > SCREEN_H - 32) break;
-            HitAdd(midX+1, ry, midW-2, 33, TSelMiiStatsField, i);
-            FillRect(midX+1, ry, midW-2, 33, sel?COL_SEL:COL_BG);
-            if (sel) DrawRect(midX+1, ry, midW-2, 33, COL_GOLD);
-
-            const auto& fd = MII_STATS_FIELDS[i];
-            DrawText(fd.label, midX+8, ry+8, sel?COL_TEXT:COL_DIM);
-
-            std::string val;
-            if (fd.isStr) {
-                val = SaveEditor::GetWStr32At(gMiiSav, SaveEditor::Hash(fd.fieldName), miiSlotIdx);
-            } else if (fd.isUInt) {
-                val = std::to_string(SaveEditor::GetUIntAt(gMiiSav, SaveEditor::Hash(fd.fieldName), miiSlotIdx));
-            } else if (fd.isEnum) {
-                uint32_t ev = SaveEditor::GetEnumAt(gMiiSav, SaveEditor::Hash(fd.fieldName), miiSlotIdx);
-                const char* lbl = FeelingName(ev);
-                val = lbl ? lbl : ("?" + std::to_string(ev));
-            } else {
-                int32_t v = SaveEditor::GetIntAt(gMiiSav, SaveEditor::Hash(fd.fieldName), miiSlotIdx);
-                val = std::to_string(v + fd.dispOffset);
+        if (gMiiStatsSubTab == MiiStatsSubTab::Words) {
+            // Word slots list (12 items)
+            static const uint32_t H_WKIND_L = SaveEditor::Hash("Mii.MiiMisc.WordInfo.WordArray.WordKind");
+            static const uint32_t H_WTXT_L  = SaveEditor::Hash("Mii.MiiMisc.WordInfo.WordArray.WordText");
+            static const uint32_t H_WINV_L  = SaveEditor::Hash("Invalid");
+            TTF_Font* fsm = GetFont(Font::Sm);
+            for (int i = 0; i < 12; i++) {
+                bool sel = (i == gMiiWordsSlotSel);
+                int ry = SE_TOP_Y + 2 + i * 34;
+                if (ry + 34 > SCREEN_H - 32) break;
+                HitAdd(midX+1, ry, midW-2, 33, TSelMiiWordsSlot, i);
+                FillRect(midX+1, ry, midW-2, 33, sel?COL_SEL:COL_BG);
+                if (sel) DrawRect(midX+1, ry, midW-2, 33, COL_GOLD);
+                int wIdx = miiSlotIdx * 12 + i;
+                uint32_t kh = SaveEditor::GetAnyEnumAt(gMiiSav, H_WKIND_L, wIdx, H_WINV_L);
+                bool filled = (kh != H_WINV_L);
+                const char* kLbl = filled ? WordKindLabel(kh) : nullptr;
+                // Kind label right-aligned
+                int kw=0,kh2=0;
+                if (fsm && kLbl) TTF_SizeUTF8(fsm, kLbl, &kw, &kh2);
+                if (kLbl) DrawText(kLbl, midX+midW-kw-8, ry+(33-kh2)/2, sel?COL_ACCENT:COL_DIM);
+                // Slot number
+                std::string numS = std::to_string(i+1)+".";
+                int nw=0,nh=0;
+                if (fsm) TTF_SizeUTF8(fsm, numS.c_str(), &nw, &nh);
+                DrawText(numS, midX+8, ry+(33-nh)/2, sel?COL_TEXT:COL_DIM);
+                // Word text or status
+                int availW = midW - kw - (kw?8:0) - 8 - nw - 8;
+                std::string wt = filled ? SaveEditor::GetWStr64At(gMiiSav, H_WTXT_L, wIdx) : "";
+                std::string disp = filled ? (wt.empty()?"—":FitNodeName(wt,fsm,availW)) : "(empty)";
+                DrawText(disp, midX+8+nw+4, ry+(33-nh)/2, sel?(filled?COL_TEXT:COL_DIM):(filled?COL_DIM:COL_DIM));
             }
-            TTF_Font* fsm=GetFont(Font::Sm); int vw=0,vh=0;
-            if(fsm) TTF_SizeUTF8(fsm,val.c_str(),&vw,&vh);
-            DrawText(val, midX+midW-vw-8, ry+(33-vh)/2, sel?COL_ACCENT:COL_DIM);
+        } else if (gMiiStatsSubTab == MiiStatsSubTab::Relations) {
+            // Relations list: pairs involving this Mii
+            static const uint32_t H_IDA_ML   = 0xf7420afbu;
+            static const uint32_t H_IDB_ML   = 0x4071f71cu;
+            static const uint32_t H_BASE_ML  = 0x8b41897eu;
+            static const uint32_t H_MNAME_ML = 0x2499bfdau;
+            int pairCount = SaveEditor::ArraySize(gMiiSav, H_IDA_ML);
+            TTF_Font* fsm2 = GetFont(Font::Sm);
+            int row = 0, filtRow = 0;
+            gMiiRelPairIdx = -1;
+            for (int pi = 0; pi < pairCount; pi++) {
+                int a = SaveEditor::GetIntAt(gMiiSav, H_IDA_ML, pi);
+                int b = SaveEditor::GetIntAt(gMiiSav, H_IDB_ML, pi);
+                if (a < 0 || b < 0) continue;
+                if (a != miiSlotIdx && b != miiSlotIdx) continue;
+                bool selfA = (a == miiSlotIdx);
+                int other  = selfA ? b : a;
+                int myDir  = selfA ? pi*2 : pi*2+1;
+                uint32_t myType = SaveEditor::GetEnumAt(gMiiSav, H_BASE_ML, myDir, 0x0784a8dcu);
+                SDL_Color tc = RelTypeColor(myType);
+                bool sel = (filtRow == gMiiRelSel);
+                if (sel) { gMiiRelPairIdx = pi; gMiiRelSelfA = selfA; }
+                int ry = SE_TOP_Y + 2 + row * 34;
+                if (ry + 34 > SCREEN_H - 32) break;
+                HitAdd(midX+1, ry, midW-2, 33, TSelMiiRelation, filtRow);
+                FillRect(midX+1, ry, midW-2, 33, sel?COL_SEL:COL_BG);
+                if (sel) DrawRect(midX+1, ry, midW-2, 33, COL_GOLD);
+                // Type label right-aligned (colored)
+                const char* tName = RelTypeName(myType);
+                int tw=0,th=0;
+                if (fsm2 && tName) TTF_SizeUTF8(fsm2, tName, &tw, &th);
+                DrawText(tName?tName:"?", midX+midW-tw-8, ry+(33-th)/2, tc);
+                // Other Mii name left
+                std::string oName = SaveEditor::GetWStr32At(gMiiSav, H_MNAME_ML, other);
+                int availRL = midW - tw - (tw?8:0) - 16;
+                std::string oFit = FitNodeName(oName.empty()?"?":oName, fsm2, availRL);
+                int rnw=0,rnh=0;
+                if (fsm2) TTF_SizeUTF8(fsm2, oFit.c_str(), &rnw, &rnh);
+                DrawText(oFit, midX+8, ry+(33-rnh)/2, sel?COL_TEXT:COL_DIM);
+                filtRow++; row++;
+            }
+            if (filtRow > 0 && gMiiRelSel >= filtRow) gMiiRelSel = filtRow-1;
+            if (row == 0)
+                DrawTextC("no relations", midX+midW/2, SE_TOP_Y+80, COL_DIM);
+        } else {
+            // Stats fields list
+            for (int i = 0; i < MII_STATS_FIELD_COUNT; i++) {
+                bool sel = (i == gMiiStatsFieldSel);
+                int ry = SE_TOP_Y + 2 + i * 34;
+                if (ry + 34 > SCREEN_H - 32) break;
+                HitAdd(midX+1, ry, midW-2, 33, TSelMiiStatsField, i);
+                FillRect(midX+1, ry, midW-2, 33, sel?COL_SEL:COL_BG);
+                if (sel) DrawRect(midX+1, ry, midW-2, 33, COL_GOLD);
+                const auto& fd = MII_STATS_FIELDS[i];
+                std::string val;
+                if (fd.isStr) {
+                    val = SaveEditor::GetWStr32At(gMiiSav, SaveEditor::Hash(fd.fieldName), miiSlotIdx);
+                } else if (fd.isUInt) {
+                    val = std::to_string(SaveEditor::GetUIntAt(gMiiSav, SaveEditor::Hash(fd.fieldName), miiSlotIdx));
+                } else if (fd.isEnum) {
+                    uint32_t ev = SaveEditor::GetEnumAt(gMiiSav, SaveEditor::Hash(fd.fieldName), miiSlotIdx);
+                    const char* lbl = FeelingName(ev);
+                    val = lbl ? lbl : ("?" + std::to_string(ev));
+                } else {
+                    int32_t v = SaveEditor::GetIntAt(gMiiSav, SaveEditor::Hash(fd.fieldName), miiSlotIdx);
+                    val = std::to_string(v + fd.dispOffset);
+                }
+                TTF_Font* fsm=GetFont(Font::Sm); int lw=0,lh=0,vw=0,vh=0;
+                if(fsm) TTF_SizeUTF8(fsm,fd.label,&lw,&lh);
+                if(fsm) TTF_SizeUTF8(fsm,val.c_str(),&vw,&vh);
+                DrawText(fd.label, midX+8, ry+(33-lh)/2, sel?COL_TEXT:COL_DIM);
+                DrawText(val, midX+midW-vw-8, ry+(33-vh)/2, sel?COL_ACCENT:COL_DIM);
+            }
         }
     }
 
     // Right: edit controls / social view
+    // In Social mode the panel extends left to cover the hidden middle panel
     int editX = midX + midW + 8;
     int editW = SCREEN_W - editX - 8;
-    FillRect(editX, SE_TOP_Y, editW, SCREEN_H-SE_TOP_Y-32, {6,6,6,255});
-    DrawRect(editX, SE_TOP_Y, editW, SCREEN_H-SE_TOP_Y-32, COL_BORDER);
+    int panelX = (gMiiStatsSubTab == MiiStatsSubTab::Social) ? midX   : editX;
+    int panelW = (gMiiStatsSubTab == MiiStatsSubTab::Social) ? (SCREEN_W - midX - 8) : editW;
+    FillRect(panelX, SE_TOP_Y, panelW, SCREEN_H-SE_TOP_Y-32, {6,6,6,255});
+    DrawRect(panelX, SE_TOP_Y, panelW, SCREEN_H-SE_TOP_Y-32, COL_BORDER);
 
-    // Sub-tab bar: [Stats] [Social]
+    // Sub-tab bar: [Stats] [Words] [Relations] [Social]
     {
         int stW=100, stH=22, stGap=4, stX=editX+8, stY=SE_TOP_Y+6;
-        HitAdd(stX, stY, stW, stH, TSetSocialView, 0);
-        FillRect(stX, stY, stW, stH, !gMiiStatsSocialView?COL_SEL:COL_PANEL);
-        DrawRect(stX, stY, stW, stH, !gMiiStatsSocialView?COL_GOLD:COL_BORDER);
-        DrawTextC("Stats", stX+stW/2, stY+stH/2, !gMiiStatsSocialView?COL_GOLD:COL_DIM);
-        HitAdd(stX+stW+stGap, stY, stW, stH, TSetSocialView, 1);
-        FillRect(stX+stW+stGap, stY, stW, stH, gMiiStatsSocialView?COL_SEL:COL_PANEL);
-        DrawRect(stX+stW+stGap, stY, stW, stH, gMiiStatsSocialView?COL_GOLD:COL_BORDER);
-        DrawTextC("Social", stX+stW+stGap+stW/2, stY+stH/2, gMiiStatsSocialView?COL_GOLD:COL_DIM);
+        const char* stLabels[] = {"Stats","Words","Relations","Social"};
+        for (int ti=0; ti<4; ti++) {
+            bool sSel = ((int)gMiiStatsSubTab == ti);
+            int sx = stX + ti*(stW+stGap);
+            HitAdd(sx, stY, stW, stH, TSetSocialView, ti);
+            FillRect(sx, stY, stW, stH, sSel?COL_SEL:COL_PANEL);
+            DrawRect(sx, stY, stW, stH, sSel?COL_GOLD:COL_BORDER);
+            DrawTextC(stLabels[ti], sx+stW/2, stY+stH/2, sSel?COL_GOLD:COL_DIM);
+        }
     }
 
     if (!gMiis.empty() && gMiiStatsMiiSel < (int)gMiis.size()) {
@@ -1422,7 +1734,7 @@ static void DrawMiiStats() {
         int panelTop = SE_TOP_Y + 32;
         int panelH   = SCREEN_H - panelTop - 32;
 
-        if (gMiiStatsSocialView) {
+        if (gMiiStatsSubTab == MiiStatsSubTab::Social) {
             static const uint32_t H_ID_A  = 0xf7420afbu;
             static const uint32_t H_ID_B  = 0x4071f71cu;
             static const uint32_t H_BASE  = 0x8b41897eu;
@@ -1431,23 +1743,36 @@ static void DrawMiiStats() {
             int pairCount = SaveEditor::ArraySize(gMiiSav, H_ID_A);
 
             if (gSocialExpanded) {
-                // ── Global graph: every mii as a node, every edge shown ──────────
-                int gcx = editX + editW/2;
+                // ── Global graph ─────────────────────────────────────────────────
+                int gcx = panelX + panelW/2;
                 int gcy = panelTop + panelH/2;
                 int N   = (int)gMiis.size();
-                int R   = std::min(editW/2, panelH/2) - 64;
-                if (R < 40) R = 40;
                 if (N == 0) {
                     DrawTextC("no miis", gcx, gcy, COL_DIM, Font::Md);
                 } else {
-                    // Pre-compute node screen positions
+                    // Node size scales with count
+                    int nW = N <= 8 ? 80 : N <= 14 ? 68 : 56;
+                    int nH = N <= 8 ? 30 : N <= 14 ? 26 : 22;
+                    // Radius: large enough that adjacent nodes don't overlap
+                    int defR = std::min(panelW/2, panelH/2) - nH/2 - 10;
+                    int R = defR;
+                    if (N > 1) {
+                        int minR = (int)((float)(nW + 6) / (2.0f * sinf((float)M_PI / N))) + 2;
+                        if (minR > R) R = minR;
+                    }
+                    // Clamp so nodes stay inside the panel
+                    int maxR = std::min(panelW/2 - nW/2 - 4, panelH/2 - nH/2 - 4);
+                    if (R > maxR) R = maxR;
+                    if (R < 40)  R = 40;
+
+                    // Pre-compute node positions
                     std::vector<int> nx_(N), ny_(N);
                     for (int i = 0; i < N; i++) {
                         float a = -(float)M_PI/2.f + (2.f*(float)M_PI*i)/N;
                         nx_[i] = gcx + (int)((float)R * cosf(a));
                         ny_[i] = gcy + (int)((float)R * sinf(a));
                     }
-                    // Draw edges first
+                    // Edges first — colored, semi-transparent, no labels
                     for (int i = 0; i < pairCount; i++) {
                         int sa = SaveEditor::GetIntAt(gMiiSav, H_ID_A, i);
                         int sb = SaveEditor::GetIntAt(gMiiSav, H_ID_B, i);
@@ -1458,25 +1783,27 @@ static void DrawMiiStats() {
                             if (gMiis[j].slot-1 == sb) bi = j;
                         }
                         if (ai < 0 || bi < 0) continue;
-                        uint32_t relT = SaveEditor::GetEnumAt(gMiiSav, H_BASE, i*2);
-                        SDL_Color lc = RelTypeColor(relT);
-                        SDL_SetRenderDrawColor(gRen, lc.r, lc.g, lc.b, 160);
+                        SDL_Color lc = RelTypeColor(SaveEditor::GetEnumAt(gMiiSav, H_BASE, i*2));
+                        SDL_SetRenderDrawColor(gRen, lc.r, lc.g, lc.b, 110);
                         SDL_RenderDrawLine(gRen, nx_[ai], ny_[ai], nx_[bi], ny_[bi]);
-                        int lx=(nx_[ai]+nx_[bi])/2, ly=(ny_[ai]+ny_[bi])/2;
-                        DrawTextC(RelTypeName(relT), lx, ly, lc, Font::Sm);
                     }
-                    // Draw nodes
-                    int nW = N > 7 ? 72 : 88, nH = N > 7 ? 26 : 34;
+                    // Nodes on top of edges
+                    TTF_Font* fsm = GetFont(Font::Sm);
                     for (int i = 0; i < N; i++) {
                         bool isSel = (i == gMiiStatsMiiSel);
-                        std::string name = SaveEditor::GetWStr32At(gMiiSav, H_NAME, gMiis[i].slot-1);
-                        SDL_Color fill = isSel ? COL_ACCENT : COL_PANEL2;
-                        SDL_Color text = isSel ? SDL_Color{10,10,10,255} : COL_TEXT;
-                        SDL_Color border = isSel ? COL_GOLD : COL_BORDER;
+                        std::string raw = SaveEditor::GetWStr32At(gMiiSav, H_NAME, gMiis[i].slot-1);
+                        std::string name = FitNodeName(raw, fsm, nW - 10);
+                        SDL_Color fill   = isSel ? COL_ACCENT : COL_PANEL2;
+                        SDL_Color border = isSel ? COL_GOLD   : COL_BORDER;
+                        SDL_Color text   = isSel ? SDL_Color{10,10,10,255} : COL_TEXT;
+                        // Shadow
+                        FillRect(nx_[i]-nW/2+2, ny_[i]-nH/2+2, nW, nH, {0,0,0,110});
                         HitAdd(nx_[i]-nW/2, ny_[i]-nH/2, nW, nH, TSelMiiStatsMii, i);
                         FillRect(nx_[i]-nW/2, ny_[i]-nH/2, nW, nH, fill);
-                        DrawRect (nx_[i]-nW/2, ny_[i]-nH/2, nW, nH, border);
-                        DrawTextC(name.empty()?"?":name, nx_[i], ny_[i], text, Font::Sm);
+                        // Gold top strip for selected
+                        if (isSel) FillRect(nx_[i]-nW/2, ny_[i]-nH/2, nW, 2, COL_GOLD);
+                        DrawRect(nx_[i]-nW/2, ny_[i]-nH/2, nW, nH, border);
+                        DrawTextC(name, nx_[i], ny_[i], text, Font::Sm);
                     }
                 }
             } else {
@@ -1495,42 +1822,193 @@ static void DrawMiiStats() {
                     r.outM  = SaveEditor::GetIntAt(gMiiSav, H_METER, selfA ? i*2 : i*2+1);
                     rows.push_back(r);
                 }
-                int gcx = editX + editW/2;
+                int gcx = panelX + panelW/2;
                 int gcy = panelTop + panelH/2;
-                int R   = std::min(editW/2, panelH/2) - 76;
-                if (R < 60) R = 60;
 
                 if (rows.empty()) {
                     DrawTextC("no relationships", gcx, gcy, COL_DIM, Font::Md);
                 } else {
-                    int n = (int)rows.size();
-                    int nW = n > 10 ? 74 : 88, nH = n > 10 ? 28 : 36;
-                    for (int i = 0; i < n; i++) {
-                        float angle = -(float)M_PI/2.f + (2.f*(float)M_PI*i)/n;
-                        int nx = gcx + (int)((float)R * cosf(angle));
-                        int ny = gcy + (int)((float)R * sinf(angle));
-                        SDL_Color lc = RelTypeColor(rows[i].outT);
-                        SDL_SetRenderDrawColor(gRen, lc.r, lc.g, lc.b, 200);
-                        SDL_RenderDrawLine(gRen, gcx, gcy, nx, ny);
-                        int lx=(gcx+nx)/2, ly=(gcy+ny)/2;
-                        DrawTextC(RelTypeName(rows[i].outT), lx, ly-10, lc, Font::Sm);
-                        DrawTextC(std::to_string(rows[i].outM), lx, ly+4, COL_DIM, Font::Sm);
-                    }
+                    int n   = (int)rows.size();
+                    int nW  = n > 10 ? 80 : 96, nH = 44;
+                    int cnW = 120, cnH = 44;
+                    int R   = std::min(panelW/2, panelH/2) - nH/2 - 16;
+                    if (R < 80) R = 80;
+
+                    TTF_Font* fsm = GetFont(Font::Sm);
                     std::string cName = SaveEditor::GetWStr32At(gMiiSav, H_NAME, miiSlotIdx);
-                    int cnW=106, cnH=42;
-                    FillRect(gcx-cnW/2, gcy-cnH/2, cnW, cnH, COL_ACCENT);
-                    DrawRect (gcx-cnW/2, gcy-cnH/2, cnW, cnH, COL_TEXT);
-                    DrawTextC(cName.empty()?"?":cName, gcx, gcy, {10,10,10,255}, Font::Sm);
+                    std::string cFit  = FitNodeName(cName.empty()?"?":cName, fsm, cnW - 14);
+
+                    // Pre-compute satellite positions
+                    std::vector<int> snx(n), sny(n);
                     for (int i = 0; i < n; i++) {
                         float angle = -(float)M_PI/2.f + (2.f*(float)M_PI*i)/n;
-                        int nx = gcx + (int)((float)R * cosf(angle));
-                        int ny = gcy + (int)((float)R * sinf(angle));
-                        SDL_Color nc = RelTypeColor(rows[i].outT);
-                        std::string nn = SaveEditor::GetWStr32At(gMiiSav, H_NAME, rows[i].other);
-                        FillRect(nx-nW/2, ny-nH/2, nW, nH, COL_PANEL2);
-                        DrawRect (nx-nW/2, ny-nH/2, nW, nH, nc);
-                        DrawTextC(nn.empty()?"?":nn, nx, ny, COL_TEXT, Font::Sm);
+                        snx[i] = gcx + (int)((float)R * cosf(angle));
+                        sny[i] = gcy + (int)((float)R * sinf(angle));
                     }
+
+                    // 1. Edges (drawn under everything)
+                    for (int i = 0; i < n; i++) {
+                        SDL_Color lc = RelTypeColor(rows[i].outT);
+                        SDL_SetRenderDrawColor(gRen, lc.r, lc.g, lc.b, 180);
+                        SDL_RenderDrawLine(gRen, gcx, gcy, snx[i], sny[i]);
+                    }
+
+                    // 2. Center node (drawn before satellites so satellites overlap it)
+                    FillRect(gcx-cnW/2+2, gcy-cnH/2+2, cnW, cnH, {0,0,0,110});
+                    FillRect(gcx-cnW/2, gcy-cnH/2, cnW, cnH, COL_ACCENT);
+                    DrawRect(gcx-cnW/2, gcy-cnH/2, cnW, cnH, COL_TEXT);
+                    DrawTextC(cFit, gcx, gcy, {10,10,10,255}, Font::Md);
+
+                    // 3. Satellite nodes
+                    for (int i = 0; i < n; i++) {
+                        SDL_Color lc = RelTypeColor(rows[i].outT);
+                        const char* relLbl = RelTypeName(rows[i].outT);
+                        std::string nn    = SaveEditor::GetWStr32At(gMiiSav, H_NAME, rows[i].other);
+                        std::string nFit  = FitNodeName(nn.empty()?"?":nn, fsm, nW - 16);
+                        // Shadow
+                        FillRect(snx[i]-nW/2+2, sny[i]-nH/2+2, nW, nH, {0,0,0,110});
+                        FillRect(snx[i]-nW/2, sny[i]-nH/2, nW, nH, COL_PANEL2);
+                        // Left accent bar (relationship color)
+                        FillRect(snx[i]-nW/2, sny[i]-nH/2, 3, nH, lc);
+                        DrawRect(snx[i]-nW/2, sny[i]-nH/2, nW, nH, lc);
+                        // Name (upper row)
+                        DrawTextC(nFit, snx[i]+2, sny[i]-11, COL_TEXT, Font::Sm);
+                        // Rel type (lower row, colored)
+                        DrawTextC(relLbl ? relLbl : "?", snx[i]+2, sny[i]+11, lc, Font::Sm);
+                    }
+                }
+            }
+        } else if (gMiiStatsSubTab == MiiStatsSubTab::Words) {
+            // ── Words editor ──────────────────────────────────────────────────────
+            static const uint32_t H_WKIND_R  = SaveEditor::Hash("Mii.MiiMisc.WordInfo.WordArray.WordKind");
+            static const uint32_t H_WTXT_R   = SaveEditor::Hash("Mii.MiiMisc.WordInfo.WordArray.WordText");
+            static const uint32_t H_WHOW_R   = SaveEditor::Hash("Mii.MiiMisc.WordInfo.WordArray.WordHowToCall");
+            static const uint32_t H_WINV_R   = SaveEditor::Hash("Invalid");
+            int wIdx = miiSlotIdx * 12 + gMiiWordsSlotSel;
+            uint32_t curKind  = SaveEditor::GetAnyEnumAt(gMiiSav, H_WKIND_R, wIdx, H_WINV_R);
+            std::string curText = SaveEditor::GetWStr64At(gMiiSav, H_WTXT_R, wIdx);
+            std::string curHow  = SaveEditor::GetWStr64At(gMiiSav, H_WHOW_R, wIdx);
+            bool isFilled = (curKind != H_WINV_R);
+            const char* kindLbl = WordKindLabel(curKind);
+            int cx2 = editX + editW/2;
+            // Slot header
+            DrawTextC("Slot " + std::to_string(gMiiWordsSlotSel+1) + " / 12",
+                      cx2, panelTop+14, COL_DIM, Font::Sm);
+            // Kind section
+            SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
+            SDL_RenderDrawLine(gRen, editX+12, panelTop+30, editX+editW-12, panelTop+30);
+            DrawTextC("Kind", cx2, panelTop+46, COL_DIM, Font::Sm);
+            DrawTextC(isFilled?(kindLbl?kindLbl:"?"):"(empty)",
+                      cx2, panelTop+76, isFilled?COL_TEXT:COL_DIM, Font::Lg);
+            {
+                int bW=108,bH=28,bGap=14;
+                int bxL=cx2-bGap/2-bW, bxR=cx2+bGap/2, bY=panelTop+112;
+                HitAdd(bxL,bY,bW,bH,TSimBtn,(int)HidNpadButton_Left);
+                FillRect(bxL,bY,bW,bH,COL_PANEL); DrawRect(bxL,bY,bW,bH,COL_BORDER);
+                DrawTextC("< Kind",bxL+bW/2,bY+bH/2,COL_DIM);
+                HitAdd(bxR,bY,bW,bH,TSimBtn,(int)HidNpadButton_Right);
+                FillRect(bxR,bY,bW,bH,COL_PANEL); DrawRect(bxR,bY,bW,bH,COL_BORDER);
+                DrawTextC("Kind >",bxR+bW/2,bY+bH/2,COL_DIM);
+            }
+            // Text section
+            SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
+            SDL_RenderDrawLine(gRen, editX+12, panelTop+154, editX+editW-12, panelTop+154);
+            DrawTextC("Word Text", cx2, panelTop+166, COL_DIM, Font::Sm);
+            std::string dispTxt = curText.empty() ? "(none)" : curText;
+            DrawTextC(dispTxt, cx2, panelTop+192, (isFilled&&!curText.empty())?COL_TEXT:COL_DIM, Font::Md);
+            {
+                int bW=240,bH=34,bX=cx2-bW/2,bY=panelTop+218;
+                HitAdd(bX,bY,bW,bH,TSimBtn,(int)HidNpadButton_A);
+                FillRect(bX,bY,bW,bH,COL_SEL); DrawRect(bX,bY,bW,bH,COL_ACCENT);
+                DrawTextC("A  Edit Text",cx2,bY+bH/2,COL_ACCENT,Font::Sm);
+            }
+            // Pronunciation section
+            SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
+            SDL_RenderDrawLine(gRen, editX+12, panelTop+266, editX+editW-12, panelTop+266);
+            DrawTextC("Pronunciation  (optional)", cx2, panelTop+280, COL_DIM, Font::Sm);
+            std::string dispHow = curHow.empty() ? "(same as text)" : curHow;
+            DrawTextC(dispHow, cx2, panelTop+302, !curHow.empty()?COL_TEXT:COL_DIM, Font::Sm);
+            {
+                int bW=240,bH=34,bX=cx2-bW/2,bY=panelTop+322;
+                HitAdd(bX,bY,bW,bH,TSimBtn,(int)HidNpadButton_X);
+                FillRect(bX,bY,bW,bH,COL_SEL); DrawRect(bX,bY,bW,bH,COL_ACCENT);
+                DrawTextC("X  Edit Pronunciation",cx2,bY+bH/2,COL_ACCENT,Font::Sm);
+            }
+            if (!gMiiStatsMsg.empty())
+                DrawTextC(gMiiStatsMsg, cx2, panelTop+376, gMiiStatsMsgCol);
+        } else if (gMiiStatsSubTab == MiiStatsSubTab::Relations) {
+            // ── Relations editor ─────────────────────────────────────────────────
+            static const uint32_t H_BASE_RP  = 0x8b41897eu;
+            static const uint32_t H_METER_RP = 0x42c2fc2fu;
+            static const uint32_t H_IDA_RP   = 0xf7420afbu;
+            static const uint32_t H_IDB_RP   = 0x4071f71cu;
+            static const uint32_t H_MNAME_RP = 0x2499bfdau;
+            int cx2 = editX + editW/2;
+            if (gMiiRelPairIdx < 0) {
+                DrawTextC("no relations", cx2, panelTop + panelH/2, COL_DIM, Font::Md);
+            } else {
+                int myDir  = gMiiRelSelfA ? gMiiRelPairIdx*2   : gMiiRelPairIdx*2+1;
+                int otDir  = gMiiRelSelfA ? gMiiRelPairIdx*2+1 : gMiiRelPairIdx*2;
+                uint32_t myType = SaveEditor::GetEnumAt(gMiiSav, H_BASE_RP, myDir, 0x0784a8dcu);
+                uint32_t otType = SaveEditor::GetEnumAt(gMiiSav, H_BASE_RP, otDir, 0x0784a8dcu);
+                int32_t  myMeter = SaveEditor::GetIntAt(gMiiSav, H_METER_RP, myDir);
+                bool fixed = RelMeterFixed(myType);
+                int other = gMiiRelSelfA ? SaveEditor::GetIntAt(gMiiSav, H_IDB_RP, gMiiRelPairIdx)
+                                         : SaveEditor::GetIntAt(gMiiSav, H_IDA_RP, gMiiRelPairIdx);
+                std::string oName = SaveEditor::GetWStr32At(gMiiSav, H_MNAME_RP, other < 0 ? 0 : other);
+                // Header: other Mii name
+                DrawTextC(oName.empty()?"(unknown)":oName, cx2, panelTop+14, COL_TEXT, Font::Md);
+                SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
+                SDL_RenderDrawLine(gRen, editX+12, panelTop+34, editX+editW-12, panelTop+34);
+                // Your relationship type
+                DrawTextC("Your type", cx2, panelTop+48, COL_DIM, Font::Sm);
+                SDL_Color myTC = RelTypeColor(myType);
+                const char* myTN = RelTypeName(myType);
+                DrawTextC(myTN?myTN:"?", cx2, panelTop+74, myTC, Font::Lg);
+                {
+                    int bW=108,bH=28,bGap=14;
+                    int bxL=cx2-bGap/2-bW, bxR=cx2+bGap/2, bY=panelTop+112;
+                    HitAdd(bxL,bY,bW,bH,TSimBtn,(int)HidNpadButton_Left);
+                    FillRect(bxL,bY,bW,bH,COL_PANEL); DrawRect(bxL,bY,bW,bH,COL_BORDER);
+                    DrawTextC("< Type",bxL+bW/2,bY+bH/2,COL_DIM);
+                    HitAdd(bxR,bY,bW,bH,TSimBtn,(int)HidNpadButton_Right);
+                    FillRect(bxR,bY,bW,bH,COL_PANEL); DrawRect(bxR,bY,bW,bH,COL_BORDER);
+                    DrawTextC("Type >",bxR+bW/2,bY+bH/2,COL_DIM);
+                }
+                // Their type (auto-counterpart, read-only display)
+                SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
+                SDL_RenderDrawLine(gRen, editX+12, panelTop+148, editX+editW-12, panelTop+148);
+                DrawTextC("Their type  (auto)", cx2, panelTop+160, COL_DIM, Font::Sm);
+                SDL_Color otTC = RelTypeColor(otType);
+                const char* otTN = RelTypeName(otType);
+                DrawTextC(otTN?otTN:"?", cx2, panelTop+180, otTC, Font::Sm);
+                // Meter
+                SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
+                SDL_RenderDrawLine(gRen, editX+12, panelTop+206, editX+editW-12, panelTop+206);
+                DrawTextC("Meter", cx2, panelTop+220, COL_DIM, Font::Sm);
+                std::string mStr = fixed ? "100 (fixed)" : std::to_string(myMeter);
+                DrawTextC(mStr, cx2, panelTop+246, fixed?COL_DIM:COL_TEXT, Font::Lg);
+                if (!fixed) {
+                    static const int MSTEPS[] = {10, 1};
+                    int bW=62,bH=32,bGap=5;
+                    int totalBW = (2*(bW+bGap))*2 + 20;
+                    int bxBase = cx2 - totalBW/2, bY = panelTop+284;
+                    int bx = bxBase;
+                    for (int s : MSTEPS) {
+                        HitAdd(bx,bY,bW,bH,TRelMeterAdj,-s);
+                        FillRect(bx,bY,bW,bH,COL_PANEL); DrawRect(bx,bY,bW,bH,COL_RED);
+                        DrawTextC("-"+std::to_string(s),bx+bW/2,bY+bH/2,COL_RED,Font::Sm);
+                        bx+=bW+bGap;
+                    }
+                    bx+=20;
+                    for (int j=1;j>=0;j--) {
+                        int s=MSTEPS[j];
+                        HitAdd(bx,bY,bW,bH,TRelMeterAdj,s);
+                        FillRect(bx,bY,bW,bH,COL_PANEL); DrawRect(bx,bY,bW,bH,COL_GREEN);
+                        DrawTextC("+"+std::to_string(s),bx+bW/2,bY+bH/2,COL_GREEN,Font::Sm);
+                        bx+=bW+bGap;
+                    }
+                    DrawTextC("both directions set together", cx2, panelTop+326, COL_DIM, Font::Sm);
                 }
             }
         } else {
@@ -1606,10 +2084,15 @@ static void DrawMiiStats() {
         }
     }
 
-    DrawFooter(gMiiStatsSocialView
-        ? (gSocialExpanded ? "Y  stats/social    ZL/ZR  prev/next mii    X  focus view    B  save and go back    +  discard"
-                           : "Y  stats/social    ZL/ZR  prev/next mii    X  global graph    B  save and go back    +  discard")
-        : "Y  stats/social    ZL/ZR  prev/next mii    Up/Down  field    X  undo    B  save and go back    +  discard");
+    DrawFooter(
+        gMiiStatsSubTab==MiiStatsSubTab::Social
+            ? (gSocialExpanded ? "Y  sub-tab    ZL/ZR  prev/next mii    X  focus view    B  save and go back    +  discard"
+                               : "Y  sub-tab    ZL/ZR  prev/next mii    X  global graph    B  save and go back    +  discard")
+        : gMiiStatsSubTab==MiiStatsSubTab::Words
+            ? "Y  sub-tab    ZL/ZR  prev/next mii    Up/Down  slot    Left/Right  kind    A  text    X  pronunciation    B  back    +  discard"
+        : gMiiStatsSubTab==MiiStatsSubTab::Relations
+            ? "Y  sub-tab    ZL/ZR  prev/next mii    Up/Down  relation    Left/Right  type    B  back    +  discard"
+        : "Y  sub-tab    ZL/ZR  prev/next mii    Up/Down  field    X  undo    B  save and go back    +  discard");
     SDL_RenderPresent(gRen);
 }
 
@@ -1624,13 +2107,16 @@ static void DrawSaveWarning() {
     DrawTextC("Warning", SCREEN_W/2, my+28, COL_RED, Font::Lg);
     DrawTextC("Modifying these values can break your game.", SCREEN_W/2, my+84, COL_TEXT, Font::Md);
     DrawTextC("Make a backup in the Backup tab before editing.", SCREEN_W/2, my+114, COL_DIM, Font::Sm);
-    const int btnW = 160, btnH = 44;
+    const int btnW = 200, btnH = 44;
     int bx = SCREEN_W/2 - btnW/2, by = my + mH - 60;
-    HitAdd(bx, by, btnW, btnH, TAckSaveWarning, 0);
+    bool wReady = (gSaveWarningCountdown <= 0);
+    if (wReady) HitAdd(bx, by, btnW, btnH, TAckSaveWarning, 0);
     FillRect(bx, by, btnW, btnH, COL_SEL);
-    DrawRect(bx, by, btnW, btnH, COL_ACCENT);
-    DrawTextC("I understand", SCREEN_W/2, by + btnH/2, COL_ACCENT, Font::Md);
-    DrawFooter("A  I understand");
+    DrawRect(bx, by, btnW, btnH, wReady ? COL_ACCENT : COL_BORDER);
+    int wSecs = (gSaveWarningCountdown + 59) / 60;
+    std::string wLabel = wReady ? "I understand" : ("I understand  (" + std::to_string(wSecs) + ")");
+    DrawTextC(wLabel, SCREEN_W/2, by + btnH/2, wReady ? COL_ACCENT : COL_DIM, Font::Md);
+    DrawFooter(wReady ? "A  I understand" : "");
     SDL_RenderPresent(gRen);
 }
 
@@ -1665,6 +2151,43 @@ static void TAckBackNo(int) {
     SaveMount::Unmount();
     gQuitApp = true;
 }
+static void TDismissThumbTip(int) {
+    if (gThumbTipCountdown > 0) return;
+    gShowThumbTip = false;
+    gThumbTipSeen = true;
+    SaveConfig();
+}
+static void DrawThumbTip() {
+    HitClear();
+    SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
+    SDL_RenderClear(gRen);
+
+    const int mW = 680, mH = 230;
+    int mx = (SCREEN_W - mW) / 2, my = (SCREEN_H - mH) / 2;
+    FillRect(mx, my, mW, mH, {18, 22, 18, 255});
+    DrawRect(mx, my, mW, mH, COL_GOLD);
+
+    DrawTextC("About inventory thumbnails", SCREEN_W/2, my + 28, COL_GOLD, Font::Md);
+
+    DrawTextC("Your texture was imported, but the inventory thumbnail", SCREEN_W/2, my + 68, COL_TEXT, Font::Sm);
+    DrawTextC("is managed by the game itself and won't update on its own.", SCREEN_W/2, my + 88, COL_TEXT, Font::Sm);
+    DrawTextC("To refresh it: open this item in Studio Workshop,", SCREEN_W/2, my + 116, COL_DIM, Font::Sm);
+    DrawTextC("enter its texture editor, and re-save — the game", SCREEN_W/2, my + 136, COL_DIM, Font::Sm);
+    DrawTextC("will automatically rebuild the thumbnail.", SCREEN_W/2, my + 156, COL_DIM, Font::Sm);
+
+    const int btnW = 200, btnH = 38;
+    int bx = SCREEN_W/2 - btnW/2, by = my + mH - 54;
+    bool ready = (gThumbTipCountdown <= 0);
+    SDL_Color btnBorder = ready ? COL_ACCENT : COL_BORDER;
+    SDL_Color btnText   = ready ? COL_ACCENT : COL_DIM;
+    if (ready) HitAdd(bx, by, btnW, btnH, TDismissThumbTip, 0);
+    FillRect(bx, by, btnW, btnH, COL_PANEL);
+    DrawRect(bx, by, btnW, btnH, btnBorder);
+    int secs = (gThumbTipCountdown + 59) / 60;
+    std::string label = ready ? "Got it" : ("Got it  (" + std::to_string(secs) + ")");
+    DrawTextC(label, SCREEN_W/2, by + btnH/2, btnText, Font::Md);
+    SDL_RenderPresent(gRen);
+}
 static void DrawBackPrompt() {
     HitClear();
     SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
@@ -1679,19 +2202,24 @@ static void DrawBackPrompt() {
     HitAdd(mx+mW/2-bW-gap/2, my+mH-70, bW, bH, TAckBackYes, 0);
     FillRect(mx+mW/2-bW-gap/2, my+mH-70, bW, bH, COL_SEL);
     DrawRect(mx+mW/2-bW-gap/2, my+mH-70, bW, bH, COL_GREEN);
-    DrawTextC("A  Save & Back", mx+mW/2-gap/2-bW/2, my+mH-70+bH/2, COL_GREEN, Font::Md);
+    DrawTextC("A  Save & Exit", mx+mW/2-gap/2-bW/2, my+mH-70+bH/2, COL_GREEN, Font::Md);
     HitAdd(mx+mW/2+gap/2, my+mH-70, bW, bH, TAckBackNo, 0);
     FillRect(mx+mW/2+gap/2, my+mH-70, bW, bH, COL_SEL);
     DrawRect(mx+mW/2+gap/2, my+mH-70, bW, bH, COL_RED);
-    DrawTextC("B  Discard & Back", mx+mW/2+gap/2+bW/2, my+mH-70+bH/2, COL_RED, Font::Md);
-    DrawFooter("A  save & back    B  discard & back");
+    DrawTextC("B  Undo & Exit", mx+mW/2+gap/2+bW/2, my+mH-70+bH/2, COL_RED, Font::Md);
+    DrawFooter("A  save & exit    B  undo & exit");
     SDL_RenderPresent(gRen);
 }
 static void TUndoPlayer(int) {
     if (!gPlayerUndoValid[gPlayerFieldSel]) return;
     const auto& fd = PLAYER_FIELDS[gPlayerFieldSel];
-    uint32_t h = SaveEditor::Hash(fd.fieldName);
-    SaveEditor::SetUInt(gPlayerSav, h, (uint32_t)gPlayerUndoVal[gPlayerFieldSel]);
+    uint32_t h = PFHash(fd);
+    uint32_t v = (uint32_t)gPlayerUndoVal[gPlayerFieldSel];
+    if (fd.isEnum)      SaveEditor::SetEnum(gPlayerSav, h, v);
+    else if (fd.isSkinTone) SaveEditor::SetUInt(gPlayerSav, h, v);
+    else if (fd.isUInt) SaveEditor::SetUInt(gPlayerSav, h, v);
+    else if (fd.isRegion) SaveEditor::SetEnum(gPlayerSav, h, v);
+    else                SaveEditor::SetAnyScalar(gPlayerSav, h, v);
     gPlayerUndoValid[gPlayerFieldSel] = false;
     gPlayerSavDirty = true;
 }
@@ -2086,7 +2614,8 @@ int main(int,char**) {
                 if (!importErr.empty()) LogERR("Import: "+importErr);
                 else { LogOK("Import OK"); gEntries=UgcScanner::Scan(SAVE_UGC_PATH);
                        MiiManager::LoadUgcNames();
-                       if (!gEntries.empty()) LoadPreview(gEntries[gEntrySel < (int)gEntries.size() ? gEntrySel : 0]); }
+                       if (!gEntries.empty()) LoadPreview(gEntries[gEntrySel < (int)gEntries.size() ? gEntrySel : 0]);
+                       if (!gThumbTipSeen) { gShowThumbTip=true; gThumbTipCountdown=120; } }
             }
             if (HttpServer::HasPendingCommit()) {
                 LogINF("Committing save...");
@@ -2099,9 +2628,17 @@ int main(int,char**) {
                 gMiis = MiiManager::ListMiis();
                 LogOK("Mii list updated");
             }
+            // Thumb tip modal
+            if (gShowThumbTip) {
+                if (gThumbTipCountdown > 0) gThumbTipCountdown--;
+                if (gThumbTipCountdown <= 0 && (kDown & HidNpadButton_A)) TDismissThumbTip(0);
+                DrawThumbTip();
+                break;
+            }
             // Warning modal takes priority over all other input
             if (gShowSaveWarning) {
-                if (kDown & HidNpadButton_A) TAckSaveWarning(0);
+                if (gSaveWarningCountdown > 0) gSaveWarningCountdown--;
+                if (gSaveWarningCountdown <= 0 && (kDown & HidNpadButton_A)) TAckSaveWarning(0);
                 if (gShowSaveWarning) DrawSaveWarning();
                 break;
             }
@@ -2243,7 +2780,7 @@ int main(int,char**) {
                 }
                 if (kDown&(HidNpadButton_R|HidNpadButton_ZR)){
                     if (!gSaveWarningAcked) {
-                        gSaveWarningTarget=OnSwitchMode::Player; gShowSaveWarning=true; break;
+                        gSaveWarningTarget=OnSwitchMode::Player; gShowSaveWarning=true; gSaveWarningCountdown=120; break;
                     }
                     gOnSwitchMode=OnSwitchMode::Player;
                     if (!gPlayerSav.loaded) {
@@ -2340,78 +2877,125 @@ int main(int,char**) {
                     gPlayerFieldSel = (gPlayerFieldSel>0) ? gPlayerFieldSel-1 : PLAYER_FIELD_COUNT-1;
                 if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
                     gPlayerFieldSel = (gPlayerFieldSel+1<PLAYER_FIELD_COUNT) ? gPlayerFieldSel+1 : 0;
-                // Edit via +/- button callbacks
+                // Edit via callbacks
                 if (gPlayerSav.loaded) {
                     const auto& fd = PLAYER_FIELDS[gPlayerFieldSel];
-                    int scale = gTouchScale;
-                    gTouchScale = 1;
-                    if (!fd.isStr && !fd.isEnum) {
+                    uint32_t h = PFHash(fd);
+
+                    // Numeric nudge: UInt, Int, RawEnum
+                    bool isNumeric = fd.isUInt || fd.isInt || fd.isRawEnum;
+                    if (isNumeric) {
+                        int scale = gTouchScale; gTouchScale = 1;
+                        auto getV = [&]() -> uint32_t {
+                            return fd.isUInt ? SaveEditor::GetUInt(gPlayerSav, h)
+                                             : SaveEditor::GetAnyScalar(gPlayerSav, h);
+                        };
+                        auto setV = [&](uint32_t v) {
+                            if (fd.isUInt) SaveEditor::SetUInt(gPlayerSav, h, v);
+                            else           SaveEditor::SetAnyScalar(gPlayerSav, h, v);
+                            gPlayerSavDirty = true;
+                        };
+                        auto adjustV = [&](int delta) {
+                            uint32_t v = getV();
+                            if (!gPlayerUndoValid[gPlayerFieldSel]) { gPlayerUndoVal[gPlayerFieldSel]=(int32_t)v; gPlayerUndoValid[gPlayerFieldSel]=true; }
+                            if (fd.isInt) {
+                                int32_t sv = (int32_t)v + delta;
+                                if (fd.minVal != -1 && sv < fd.minVal) sv = fd.minVal;
+                                if (fd.maxVal != -1 && sv > fd.maxVal) sv = fd.maxVal;
+                                setV((uint32_t)sv);
+                            } else {
+                                if (delta < 0) {
+                                    uint32_t ad=(uint32_t)(-delta);
+                                    uint32_t nv=(v>=ad)?v-ad:0;
+                                    if(fd.minVal>=0&&(int32_t)nv<fd.minVal)nv=(uint32_t)fd.minVal;
+                                    setV(nv);
+                                } else {
+                                    uint32_t nv=v+(uint32_t)delta;
+                                    if(fd.maxVal>=0&&(int32_t)nv>fd.maxVal)nv=(uint32_t)fd.maxVal;
+                                    setV(nv);
+                                }
+                            }
+                        };
                         if (gBtnTouchActive) {
-                            // Touch button tapped — apply value change directly
                             gBtnTouchActive = false;
-                            uint32_t h = SaveEditor::Hash(fd.fieldName);
-                            if (kDown&HidNpadButton_Left) {
-                                uint32_t v = SaveEditor::GetUInt(gPlayerSav, h);
-                                if (!gPlayerUndoValid[gPlayerFieldSel]) { gPlayerUndoVal[gPlayerFieldSel]=(int32_t)v; gPlayerUndoValid[gPlayerFieldSel]=true; }
-                                uint32_t nv = (v>=(uint32_t)scale)?v-(uint32_t)scale:0;
-                                if (fd.minVal>=0 && (int32_t)nv<fd.minVal) nv=(uint32_t)fd.minVal;
-                                SaveEditor::SetUInt(gPlayerSav, h, nv); gPlayerSavDirty=true;
-                            }
-                            if (kDown&HidNpadButton_Right) {
-                                uint32_t v = SaveEditor::GetUInt(gPlayerSav, h);
-                                if (!gPlayerUndoValid[gPlayerFieldSel]) { gPlayerUndoVal[gPlayerFieldSel]=(int32_t)v; gPlayerUndoValid[gPlayerFieldSel]=true; }
-                                uint32_t nv = v+(uint32_t)scale;
-                                if (fd.maxVal>=0 && (int32_t)nv>fd.maxVal) nv=(uint32_t)fd.maxVal;
-                                SaveEditor::SetUInt(gPlayerSav, h, nv); gPlayerSavDirty=true;
-                            }
+                            if (kDown&HidNpadButton_Left)  adjustV(-scale);
+                            if (kDown&HidNpadButton_Right) adjustV( scale);
                         } else {
-                            // D-pad/stick — navigate button focus
                             if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))
                                 gPlayerBtnSel = (gPlayerBtnSel-1+8)%8;
                             if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight))
                                 gPlayerBtnSel = (gPlayerBtnSel+1)%8;
-                            // A fires focused button
                             if (kDown&HidNpadButton_A) {
                                 static const int PSTEPS[]={1000,100,10,1};
                                 int pdelta = (gPlayerBtnSel<4) ? -(int)PSTEPS[gPlayerBtnSel] : (int)PSTEPS[7-gPlayerBtnSel];
-                                uint32_t h = SaveEditor::Hash(fd.fieldName);
-                                uint32_t v = SaveEditor::GetUInt(gPlayerSav, h);
-                                if (!gPlayerUndoValid[gPlayerFieldSel]) { gPlayerUndoVal[gPlayerFieldSel]=(int32_t)v; gPlayerUndoValid[gPlayerFieldSel]=true; }
-                                if (pdelta<0) {
-                                    uint32_t ad=(uint32_t)(-pdelta);
-                                    uint32_t nv=(v>=ad)?v-ad:0;
-                                    if(fd.minVal>=0&&(int32_t)nv<fd.minVal)nv=(uint32_t)fd.minVal;
-                                    SaveEditor::SetUInt(gPlayerSav,h,nv);
-                                } else {
-                                    uint32_t nv=v+(uint32_t)pdelta;
-                                    if(fd.maxVal>=0&&(int32_t)nv>fd.maxVal)nv=(uint32_t)fd.maxVal;
-                                    SaveEditor::SetUInt(gPlayerSav,h,nv);
-                                }
-                                gPlayerSavDirty=true;
+                                adjustV(pdelta);
                             }
                         }
                     }
+                    // Currency enum cycle
                     if (fd.isEnum) {
-                        uint32_t fh = SaveEditor::Hash(fd.fieldName);
-                        uint32_t cur = SaveEditor::GetEnum(gPlayerSav, fh);
+                        uint32_t cur = SaveEditor::GetEnum(gPlayerSav, h);
                         int idx = CurrencyIndex(cur);
                         if (idx < 0) idx = 0;
                         if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft)) {
                             if (!gPlayerUndoValid[gPlayerFieldSel]) { gPlayerUndoVal[gPlayerFieldSel]=(int32_t)cur; gPlayerUndoValid[gPlayerFieldSel]=true; }
                             int nidx = (idx > 0) ? idx-1 : CURRENCY_LABEL_COUNT-1;
-                            SaveEditor::SetEnum(gPlayerSav, fh, CURRENCY_LABELS[nidx].hash);
+                            SaveEditor::SetEnum(gPlayerSav, h, CURRENCY_LABELS[nidx].hash);
                             gPlayerSavDirty=true;
                         }
                         if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) {
                             if (!gPlayerUndoValid[gPlayerFieldSel]) { gPlayerUndoVal[gPlayerFieldSel]=(int32_t)cur; gPlayerUndoValid[gPlayerFieldSel]=true; }
                             int nidx = (idx+1 < CURRENCY_LABEL_COUNT) ? idx+1 : 0;
-                            SaveEditor::SetEnum(gPlayerSav, fh, CURRENCY_LABELS[nidx].hash);
+                            SaveEditor::SetEnum(gPlayerSav, h, CURRENCY_LABELS[nidx].hash);
                             gPlayerSavDirty=true;
+                        }
+                    }
+                    // Region enum cycle
+                    if (fd.isRegion) {
+                        uint32_t cur = SaveEditor::GetEnum(gPlayerSav, h);
+                        int ridx = 0;
+                        for (int ri=0; ri<REGION_OPTION_COUNT; ri++)
+                            if (SaveEditor::Hash(REGION_OPTIONS[ri].name)==cur) { ridx=ri; break; }
+                        if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft)) {
+                            if (!gPlayerUndoValid[gPlayerFieldSel]) { gPlayerUndoVal[gPlayerFieldSel]=(int32_t)cur; gPlayerUndoValid[gPlayerFieldSel]=true; }
+                            int nidx = (ridx-1+REGION_OPTION_COUNT) % REGION_OPTION_COUNT;
+                            SaveEditor::SetEnum(gPlayerSav, h, SaveEditor::Hash(REGION_OPTIONS[nidx].name));
+                            gPlayerSavDirty=true;
+                        }
+                        if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) {
+                            if (!gPlayerUndoValid[gPlayerFieldSel]) { gPlayerUndoVal[gPlayerFieldSel]=(int32_t)cur; gPlayerUndoValid[gPlayerFieldSel]=true; }
+                            int nidx = (ridx+1) % REGION_OPTION_COUNT;
+                            SaveEditor::SetEnum(gPlayerSav, h, SaveEditor::Hash(REGION_OPTIONS[nidx].name));
+                            gPlayerSavDirty=true;
+                        }
+                    }
+                    // Skin tone cycle
+                    if (fd.isSkinTone) {
+                        uint32_t cur = SaveEditor::GetUInt(gPlayerSav, h);
+                        if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft)) {
+                            if (!gPlayerUndoValid[gPlayerFieldSel]) { gPlayerUndoVal[gPlayerFieldSel]=(int32_t)cur; gPlayerUndoValid[gPlayerFieldSel]=true; }
+                            SaveEditor::SetUInt(gPlayerSav, h, (cur>0)?cur-1:5); gPlayerSavDirty=true;
+                        }
+                        if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) {
+                            if (!gPlayerUndoValid[gPlayerFieldSel]) { gPlayerUndoVal[gPlayerFieldSel]=(int32_t)cur; gPlayerUndoValid[gPlayerFieldSel]=true; }
+                            SaveEditor::SetUInt(gPlayerSav, h, (cur<5)?cur+1:0); gPlayerSavDirty=true;
+                        }
+                    }
+                    // Island size cycle (safe presets 1-4 only)
+                    if (fd.isIslandSz) {
+                        uint32_t cur = SaveEditor::GetAnyScalar(gPlayerSav, h);
+                        if (cur<1||cur>4) cur=1;
+                        if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft)) {
+                            if (!gPlayerUndoValid[gPlayerFieldSel]) { gPlayerUndoVal[gPlayerFieldSel]=(int32_t)cur; gPlayerUndoValid[gPlayerFieldSel]=true; }
+                            SaveEditor::SetAnyScalar(gPlayerSav, h, (cur>1)?cur-1:4); gPlayerSavDirty=true;
+                        }
+                        if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) {
+                            if (!gPlayerUndoValid[gPlayerFieldSel]) { gPlayerUndoVal[gPlayerFieldSel]=(int32_t)cur; gPlayerUndoValid[gPlayerFieldSel]=true; }
+                            SaveEditor::SetAnyScalar(gPlayerSav, h, (cur<4)?cur+1:1); gPlayerSavDirty=true;
                         }
                     }
                     // A = keyboard for string fields
                     if (fd.isStr && (kDown&HidNpadButton_A)) {
-                        uint32_t h = SaveEditor::Hash(fd.fieldName);
                         std::string cur = SaveEditor::GetWStr32(gPlayerSav, h);
                         std::string nv = ShowKeyboard(fd.label, cur, 30);
                         if (nv != cur) { SaveEditor::SetWStr32(gPlayerSav, h, nv); gPlayerSavDirty=true; }
@@ -2437,9 +3021,17 @@ int main(int,char**) {
                     else { gScreen=Screen::UserPick; }
                     player_b_done:;
                 }
-                // Plus = discard prompt (only if dirty)
-                if (kDown&HidNpadButton_Plus && gPlayerSavDirty)
-                    { gBackPromptIsMii=false; gShowBackPrompt=true; }
+                // Plus = exit (shows prompt if dirty, exits directly if clean)
+                if (kDown&HidNpadButton_Plus) {
+                    if (gPlayerSavDirty) { gBackPromptIsMii=false; gShowBackPrompt=true; }
+                    else {
+                        FreePreview(); HttpServer::Stop(); gLog.clear();
+                        gEntries.clear(); gMiis.clear();
+                        gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
+                        SaveMount::Unmount();
+                        gScreen=Screen::UserPick;
+                    }
+                }
 
             } else if (gOnSwitchMode == OnSwitchMode::MiiStats) {
                 // Lazy-load
@@ -2463,10 +3055,10 @@ int main(int,char**) {
                     }
                     gOnSwitchMode=OnSwitchMode::WebUI; gOnSwitchMsg=""; break;
                 }
-                // Y toggles Stats/Social sub-tab
-                if (kDown&HidNpadButton_Y) { gMiiStatsSocialView=!gMiiStatsSocialView; gSocialExpanded=false; gSocialScroll=0; }
-                // X toggles global graph (all miis) in social view
-                if (kDown&HidNpadButton_X && gMiiStatsSocialView) gSocialExpanded=!gSocialExpanded;
+                // Y cycles Stats → Words → Relations → Social → Stats
+                if (kDown&HidNpadButton_Y) { gMiiStatsSubTab=(MiiStatsSubTab)(((int)gMiiStatsSubTab+1)%4); gSocialScroll=0; if(gMiiStatsSubTab!=MiiStatsSubTab::Social) gSocialExpanded=false; }
+                // X toggles global graph in Social sub-tab only
+                if (kDown&HidNpadButton_X && gMiiStatsSubTab==MiiStatsSubTab::Social) gSocialExpanded=!gSocialExpanded;
                 // ZL/ZR switch selected mii
                 if (!gMiis.empty()) {
                     int mseVis2=(SCREEN_H-SE_TOP_Y-32)/ITEM_H;
@@ -2483,15 +3075,108 @@ int main(int,char**) {
                     if (kNav&(HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))  prevMii();
                     if (kNav&(HidNpadButton_StickLRight|HidNpadButton_StickRRight)) nextMii();
                 }
-                // D-pad Up/Down = field nav in Stats view only
-                if (!gMiiStatsSocialView) {
+                // D-pad Up/Down = field/slot nav depending on sub-tab
+                if (gMiiStatsSubTab==MiiStatsSubTab::Stats) {
                     if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))
                         gMiiStatsFieldSel = (gMiiStatsFieldSel>0) ? gMiiStatsFieldSel-1 : MII_STATS_FIELD_COUNT-1;
                     if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
                         gMiiStatsFieldSel = (gMiiStatsFieldSel+1<MII_STATS_FIELD_COUNT) ? gMiiStatsFieldSel+1 : 0;
+                } else if (gMiiStatsSubTab==MiiStatsSubTab::Words) {
+                    if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))
+                        gMiiWordsSlotSel = (gMiiWordsSlotSel>0) ? gMiiWordsSlotSel-1 : 11;
+                    if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
+                        gMiiWordsSlotSel = (gMiiWordsSlotSel<11) ? gMiiWordsSlotSel+1 : 0;
+                } else if (gMiiStatsSubTab==MiiStatsSubTab::Relations) {
+                    if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))
+                        { if (gMiiRelSel > 0) gMiiRelSel--; }
+                    if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
+                        gMiiRelSel++;
+                    // gMiiRelSel clamped to valid range in draw phase
                 }
-                // Edit field (Stats view only)
-                if (!gMiiStatsSocialView && gMiiSav.loaded && !gMiis.empty() && gMiiStatsMiiSel<(int)gMiis.size()) {
+                // Edit (Words sub-tab)
+                if (gMiiStatsSubTab==MiiStatsSubTab::Words && gMiiSav.loaded && !gMiis.empty() && gMiiStatsMiiSel<(int)gMiis.size()) {
+                    int miiIdx = gMiis[gMiiStatsMiiSel].slot - 1;
+                    static const uint32_t H_WKIND_I  = SaveEditor::Hash("Mii.MiiMisc.WordInfo.WordArray.WordKind");
+                    static const uint32_t H_WTXT_I   = SaveEditor::Hash("Mii.MiiMisc.WordInfo.WordArray.WordText");
+                    static const uint32_t H_WHOW_I   = SaveEditor::Hash("Mii.MiiMisc.WordInfo.WordArray.WordHowToCall");
+                    static const uint32_t H_WREGION_I= SaveEditor::Hash("Mii.MiiMisc.WordInfo.WordArray.WordRegionLanguageID");
+                    static const uint32_t H_WINV_I   = SaveEditor::Hash("Invalid");
+                    static const uint32_t H_WUSEN_I  = SaveEditor::Hash("USen");
+                    static const uint32_t H_WJPJA_I  = SaveEditor::Hash("JPja");
+                    int wIdx = miiIdx * 12 + gMiiWordsSlotSel;
+                    uint32_t curKind = SaveEditor::GetAnyEnumAt(gMiiSav, H_WKIND_I, wIdx, H_WINV_I);
+                    int kIdx = WordKindIndex(curKind);
+                    if (kIdx < 0) kIdx = 0;
+                    // Left/Right: cycle kind
+                    auto cycleKind = [&](int dir) {
+                        int nk = (kIdx + dir + WORD_KIND_COUNT) % WORD_KIND_COUNT;
+                        uint32_t nHash = SaveEditor::Hash(WORD_KIND_LIST[nk].name);
+                        SaveEditor::SetAnyEnumAt(gMiiSav, H_WKIND_I, wIdx, nHash);
+                        if (nk == 0) { // clearing → wipe text/pronunciation/region
+                            SaveEditor::SetWStr64At(gMiiSav, H_WTXT_I, wIdx, "");
+                            SaveEditor::SetWStr64At(gMiiSav, H_WHOW_I, wIdx, "");
+                            SaveEditor::SetAnyEnumAt(gMiiSav, H_WREGION_I, wIdx, H_WJPJA_I);
+                        } else if (curKind == H_WINV_I) {
+                            // activating from empty: auto-set region to USen
+                            SaveEditor::SetAnyEnumAt(gMiiSav, H_WREGION_I, wIdx, H_WUSEN_I);
+                        }
+                        gMiiSavDirty = true;
+                    };
+                    if (kDown&HidNpadButton_Left)  cycleKind(-1);
+                    if (kDown&HidNpadButton_Right) cycleKind(+1);
+                    // A: edit text
+                    if (kDown&HidNpadButton_A) {
+                        std::string cur = SaveEditor::GetWStr64At(gMiiSav, H_WTXT_I, wIdx);
+                        std::string nv = ShowKeyboard("Word Text (max 63 chars)", cur, 63);
+                        if (nv != cur) {
+                            SaveEditor::SetWStr64At(gMiiSav, H_WTXT_I, wIdx, nv);
+                            if (!nv.empty() && curKind == H_WINV_I) {
+                                SaveEditor::SetAnyEnumAt(gMiiSav, H_WKIND_I, wIdx, SaveEditor::Hash("Phrase"));
+                                SaveEditor::SetAnyEnumAt(gMiiSav, H_WREGION_I, wIdx, H_WUSEN_I);
+                            }
+                            gMiiSavDirty = true;
+                        }
+                        gMiiStatsMsg=""; gMiiStatsMsgCol=COL_TEXT;
+                    }
+                    // X: edit pronunciation
+                    if (kDown&HidNpadButton_X) {
+                        std::string cur = SaveEditor::GetWStr64At(gMiiSav, H_WHOW_I, wIdx);
+                        std::string nv = ShowKeyboard("Pronunciation (empty = same as text)", cur, 63);
+                        if (nv != cur) {
+                            SaveEditor::SetWStr64At(gMiiSav, H_WHOW_I, wIdx, nv);
+                            gMiiSavDirty = true;
+                        }
+                        gMiiStatsMsg=""; gMiiStatsMsgCol=COL_TEXT;
+                    }
+                }
+                // Edit (Relations sub-tab)
+                if (gMiiStatsSubTab==MiiStatsSubTab::Relations && gMiiSav.loaded && !gMiis.empty() && gMiiStatsMiiSel<(int)gMiis.size()) {
+                    if (gMiiRelPairIdx >= 0) {
+                        static const uint32_t H_BASE_RI  = 0x8b41897eu;
+                        static const uint32_t H_METER_RI = 0x42c2fc2fu;
+                        int myDir = gMiiRelSelfA ? gMiiRelPairIdx*2   : gMiiRelPairIdx*2+1;
+                        int otDir = gMiiRelSelfA ? gMiiRelPairIdx*2+1 : gMiiRelPairIdx*2;
+                        uint32_t curType = SaveEditor::GetEnumAt(gMiiSav, H_BASE_RI, myDir, 0x0784a8dcu);
+                        int tIdx = 0;
+                        for (int ti=0; ti<RELATION_TYPE_COUNT; ti++)
+                            if (RELATION_TYPE_NAMES[ti].hash == curType) { tIdx=ti; break; }
+                        auto cycleType = [&](int dir) {
+                            int nk = (tIdx + dir + RELATION_TYPE_COUNT) % RELATION_TYPE_COUNT;
+                            uint32_t nHash = RELATION_TYPE_NAMES[nk].hash;
+                            SaveEditor::SetEnumAt(gMiiSav, H_BASE_RI, myDir, nHash);
+                            SaveEditor::SetEnumAt(gMiiSav, H_BASE_RI, otDir, RelTypeCounterpart(nHash));
+                            if (RelMeterFixed(nHash)) {
+                                SaveEditor::SetIntAt(gMiiSav, H_METER_RI, myDir, 100);
+                                SaveEditor::SetIntAt(gMiiSav, H_METER_RI, otDir, 100);
+                            }
+                            gMiiSavDirty = true;
+                        };
+                        if (kDown&HidNpadButton_Left)  cycleType(-1);
+                        if (kDown&HidNpadButton_Right) cycleType(+1);
+                    }
+                }
+                // Edit field (Stats sub-tab only)
+                if (gMiiStatsSubTab==MiiStatsSubTab::Stats && gMiiSav.loaded && !gMiis.empty() && gMiiStatsMiiSel<(int)gMiis.size()) {
                     int miiIdx = gMiis[gMiiStatsMiiSel].slot - 1;
                     const auto& fd = MII_STATS_FIELDS[gMiiStatsFieldSel];
                     int scale = gTouchScale;
@@ -2583,9 +3268,17 @@ int main(int,char**) {
                     else { gScreen=Screen::UserPick; }
                     miistats_b_done:;
                 }
-                // Plus = discard prompt (only if dirty)
-                if (kDown&HidNpadButton_Plus && gMiiSavDirty)
-                    { gBackPromptIsMii=true; gShowBackPrompt=true; }
+                // Plus = exit (shows prompt if dirty, exits directly if clean)
+                if (kDown&HidNpadButton_Plus) {
+                    if (gMiiSavDirty) { gBackPromptIsMii=true; gShowBackPrompt=true; }
+                    else {
+                        FreePreview(); HttpServer::Stop(); gLog.clear();
+                        gEntries.clear(); gMiis.clear();
+                        gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
+                        SaveMount::Unmount();
+                        gScreen=Screen::UserPick;
+                    }
+                }
 
             } else { // WebUI tab
                 // X = restart HTTP server
@@ -2597,7 +3290,7 @@ int main(int,char**) {
                 // Tab switch
                 if (kDown&(HidNpadButton_L|HidNpadButton_ZL)){
                     if (!gSaveWarningAcked) {
-                        gSaveWarningTarget=OnSwitchMode::MiiStats; gShowSaveWarning=true; break;
+                        gSaveWarningTarget=OnSwitchMode::MiiStats; gShowSaveWarning=true; gSaveWarningCountdown=120; break;
                     }
                     gOnSwitchMode=OnSwitchMode::MiiStats; gOnSwitchMsg="";
                     if (!gMiiSav.loaded) {
