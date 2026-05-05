@@ -58,65 +58,74 @@ Press **B** on the console to stop the server and return to the mode picker.
 
 Browse and edit directly on the console using the controller. No network required.
 
-Five tabs are available, navigated with **L / R** (or **ZL / ZR**):
+Four tabs are available, navigated with **L / R** (or **ZL / ZR**): **webui**, **textures**, **mii**, and **player**.
 
 ---
 
 #### Textures tab
 
 - **Up / Down** — navigate the texture list
+- **Left / Right** (or sticks) — jump to first / last entry
 - **A** — import a PNG from the SD card (file browser opens)
 - **Y** — export the selected texture as PNG
-- **B** — back to mode picker
+- **Minus** — open the file browser to change the export folder
+- **B** — back to user select (prompts to save if there are unsaved changes)
 
-The export folder defaults to `/switch/TomoToolNX/Exports` and can be changed via the file browser. The chosen path is saved persistently in `/switch/TomoToolNX/config.ini`.
+The export folder defaults to `/switch/TomoToolNX/Exports` and can be changed via the file browser (**Minus**). The chosen path is saved persistently in `/switch/TomoToolNX/config.ini`.
 
 ---
 
-#### Miis tab
+#### Mii tab
 
-- **Up / Down** — navigate the Mii list
-- **A** — import a `.ltd` file from the SD card
-- **Y** — export the selected Mii as a `.ltd` file
-- **B** — back to mode picker
+Edit per-Mii stats, words, and relationships. Press **ZL / ZR** to switch between Miis. Press **Y** to cycle through the four sub-tabs: **Stats → Words → Relations → Social**.
+
+**Stats sub-tab** (default):
+
+- **Up / Down** — select field
+- **Left / Right** (or stick) — navigate the nudge buttons (numeric fields) / cycle enum options
+- **A** — fire the focused nudge button, or open the keyboard for text fields
+- **X** (text field) — edit pronunciation
+- **X** (numeric field) — undo (reverts to the value when the tab was opened)
+
+When the **Name** field is selected:
+
+- **Left** — import a `.ltd` file from the SD card
+- **Right** — export the selected Mii as a `.ltd` file
+
+**Words sub-tab** (press **Y** once):
+
+- **Up / Down** — select word slot (1–12)
+- **Left / Right** (or stick) — cycle the word kind
+- **A** — edit word text (keyboard)
+- **X** — edit pronunciation
+- **Minus** — undo the current word slot
+
+**Relations sub-tab** (press **Y** twice):
+
+- **Up / Down** — navigate the relations list
+- **Left / Right** (or stick) — cycle the relation type for the selected pair
+
+**Social sub-tab** (press **Y** three times):
+
+- **X** — toggle between focus view (selected Mii at center, connected Miis as satellites) and global graph (all Miis arranged in a circle with all relationship edges drawn)
+- **B** — back (prompts to save if there are unsaved changes)
+
+The social graph uses color-coded edges by relationship type. The global graph is also accessible from the WebUI **mii** tab.
 
 ---
 
 #### Player tab
 
-Edit player save data fields: Name, Island Name, Money, Currency, and Boot Count.
+Edit player save data fields: Name, Island, Money, Currency, Boot Count, Skin Tone, Birthday, Island Size, Fountain Level, Wishes, Region, Name Language, and Island Language.
 
 - **Up / Down** — select field
-- **Left / Right** (or left/right stick) — navigate the nudge buttons (numeric fields) / cycle currency options
+- **Left / Right** (or left/right stick) — navigate the nudge buttons (numeric fields) / cycle options
 - **A** — fire the focused nudge button, or open the keyboard for text fields
-- **X** — undo (reverts the selected field to the value it had when the tab was opened)
+- **X** (text field) — edit pronunciation
+- **X** (numeric field) — undo (reverts the selected field to the value it had when the tab was opened)
 - **B** — back (prompts to save if there are unsaved changes)
 
 Changes are saved to the player save file. A warning is shown on first entry reminding you to make a backup before editing.
-
----
-
-#### Mii Stats tab
-
-Edit per-Mii stats and view the social relationship graph. Use **ZL / ZR** to switch between Miis.
-
-**Stats sub-tab** (default):
-
-- **Up / Down** — select field
-- **Left / Right** (or stick) — navigate the nudge buttons
-- **A** — fire the focused nudge button, or open the keyboard for text fields
-- **X** — undo (reverts to the value when the tab was opened)
-- **Y** — switch to the Social sub-tab
-- **B** — back
-
-**Social sub-tab** (press **Y** to enter):
-
-- **ZL / ZR** — previous / next Mii
-- **X** — toggle between focus view (selected Mii at center, connected Miis as satellites) and global graph (all Miis arranged in a circle with all relationship edges drawn)
-- **Y** — return to the Stats sub-tab
-- **B** — back
-
-The social graph uses color-coded edges by relationship type. The global graph is also accessible from the WebUI Mii tab.
 
 ---
 

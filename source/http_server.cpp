@@ -77,7 +77,7 @@ static const char* HTML_UI = R"HTML(<!DOCTYPE html>
   --text:#e8e8e8;--muted:#666;--accent:#c8a96e;--accent2:#7eb8c8;
   --ok:#6abf7b;--err:#c86a6a;
 }
-body{font-family:'Mikhak',system-ui,sans-serif;background:var(--bg);color:var(--text);height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidden;font-size:14px}
+html{height:100%;height:-webkit-fill-available}body{font-family:'Mikhak',system-ui,sans-serif;background:var(--bg);color:var(--text);height:100%;height:-webkit-fill-available;height:100dvh;display:flex;flex-direction:column;overflow:hidden;font-size:14px}
 header{background:var(--surface);padding:10px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);flex-shrink:0}
 header h1{font-size:15px;font-weight:400;letter-spacing:.08em;color:var(--accent)}
 header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
@@ -147,20 +147,35 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .social-close{margin-top:10px;font-size:.8rem;color:var(--muted);cursor:pointer}
 .social-close:hover{color:var(--text)}
 /* ── Save editor ── */
-.save-mii-layout{display:flex;gap:12px;flex-wrap:wrap}
-.mii-slot-list{display:flex;flex-direction:column;gap:4px;min-width:160px;max-width:200px;max-height:520px;overflow-y:auto;flex-shrink:0}
-.mii-slot-btn{background:var(--panel2);border:1px solid var(--border);color:var(--dim);padding:6px 10px;border-radius:3px;cursor:pointer;text-align:left;font-size:.82rem;font-family:inherit;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:all .12s}
-.mii-slot-btn.active{border-color:var(--gold);color:var(--text)}
-.save-fields-wrap{flex:1;min-width:0;overflow-y:auto}
-.save-table{width:100%;border-collapse:collapse;font-size:.85rem}
-.save-table tr:nth-child(even){background:var(--panel)}
-.save-table td{padding:6px 8px;vertical-align:middle}
-.save-label{color:var(--dim);white-space:nowrap;width:140px}
-.save-label small{font-size:.72rem;opacity:.7;margin-left:4px}
-.save-val{width:100%}
-.save-input{background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:3px;width:100%;box-sizing:border-box;font-size:.85rem;font-family:inherit;line-height:1.4}
-.save-input:focus{outline:none;border-color:var(--gold)}
-@media(max-width:600px){.save-mii-layout{flex-direction:column}.mii-slot-list{max-width:100%;flex-direction:row;flex-wrap:wrap}.save-label{width:110px}}
+#save-fields-player{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px;min-height:0}
+#save-fields-player::-webkit-scrollbar{width:4px}#save-fields-player::-webkit-scrollbar-thumb{background:var(--border)}
+.ed-card{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:12px 14px}
+.ed-card-title{font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;border-bottom:1px solid var(--border);padding-bottom:6px}
+.ed-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px}
+.ed-field{display:flex;flex-direction:column;gap:3px}
+.ed-label{font-size:.75rem;color:var(--muted)}
+.ed-input,.ed-select{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:3px;font-size:.85rem;font-family:inherit;width:100%;box-sizing:border-box}
+.ed-input:focus,.ed-select:focus{outline:none;border-color:var(--accent)}
+.ed-select{cursor:pointer;-webkit-appearance:none;appearance:none}
+.ed-swatches{display:flex;gap:6px;flex-wrap:wrap;padding-top:2px}
+.ed-swatch{width:26px;height:26px;border-radius:50%;border:2px solid var(--surface2);cursor:pointer;transition:border-color .12s,transform .1s;flex-shrink:0;padding:0}
+.ed-swatch.active{border-color:var(--text);transform:scale(1.18)}
+.ed-presets{display:flex;gap:6px;flex-wrap:wrap;padding-top:2px}
+.ed-preset{background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:4px 10px;border-radius:3px;font-size:.8rem;font-family:inherit;cursor:pointer;transition:all .12s}
+.ed-preset.active{border-color:var(--accent);color:var(--accent)}
+.ed-bday{display:flex;gap:8px}
+.ed-bday .ed-field{flex:1;min-width:0}
+.ed-bar{height:5px;background:var(--surface2);border-radius:3px;overflow:hidden;margin-top:4px}
+.ed-bar-fill{height:100%;background:var(--accent);border-radius:3px;transition:width .15s}
+.save-mii-layout{display:flex;flex:1;min-height:0;overflow:hidden}
+.mii-slot-list{display:flex;flex-direction:column;gap:3px;width:148px;min-width:110px;overflow-y:auto;flex-shrink:0;padding:8px 6px;border-right:1px solid var(--border);background:var(--surface)}
+.mii-slot-list::-webkit-scrollbar{width:3px}.mii-slot-list::-webkit-scrollbar-thumb{background:var(--border)}
+.mii-slot-btn{background:transparent;border:1px solid transparent;color:var(--muted);padding:5px 8px;border-radius:3px;cursor:pointer;text-align:left;font-size:.8rem;font-family:inherit;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:all .12s;width:100%}
+.mii-slot-btn:hover{color:var(--text)}
+.mii-slot-btn.active{border-color:var(--accent);color:var(--text);background:var(--surface2)}
+#save-fields-mii{flex:1;min-width:0;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:10px}
+#save-fields-mii::-webkit-scrollbar{width:4px}#save-fields-mii::-webkit-scrollbar-thumb{background:var(--border)}
+@media(max-width:600px){.save-mii-layout{flex-direction:column}.mii-slot-list{width:100%;flex-direction:row;flex-wrap:wrap;max-height:90px;border-right:none;border-bottom:1px solid var(--border)}}
 </style>
 </head>
 <body>
@@ -184,15 +199,15 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
     <img id="preview-img" style="display:none" alt="">
   </div>
   <div class="info-bar" id="info-bar"></div>
-  <div class="list-wrap">
-    <div class="list-label">textures</div>
-    <div id="list"></div>
-  </div>
-  <div class="toolbar">
+  <div class="toolbar" style="border-top:none;padding-bottom:9px">
     <button class="btn btn-cyan" id="btn-import" disabled onclick="doImport()">import</button>
     <button class="btn btn-gold" id="btn-export" disabled onclick="doExport()">export</button>
     <button class="btn" onclick="loadList()">refresh</button>
     <div class="status info" id="status"></div>
+  </div>
+  <div class="list-wrap" style="padding-bottom:env(safe-area-inset-bottom,0px)">
+    <div class="list-label">textures</div>
+    <div id="list"></div>
   </div>
 </div>
 
@@ -210,7 +225,7 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
     <button class="btn btn-gold" id="save-apply-player" disabled onclick="applySave('player')">apply to Switch</button>
     <div class="status info" id="save-status-player"></div>
   </div>
-  <div id="save-fields-player" class="save-fields-wrap"></div>
+  <div id="save-fields-player"></div>
 </div>
 
 <!-- Mii Stats Panel -->
@@ -221,13 +236,13 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
     <div class="status info" id="save-status-mii"></div>
   </div>
   <div class="toolbar" style="margin-top:4px">
-    <button class="btn btn-primary" id="btn-mii-import" onclick="doMiiImport(savMiiSlot+1)">import .ltd</button>
-    <button class="btn btn-gold" id="btn-mii-export" onclick="doMiiExport(savMiiSlot+1)">export .ltd</button>
+    <button class="btn btn-primary" id="btn-mii-import" disabled onclick="doMiiImport(savMiiSlot+1)">import .ltd</button>
+    <button class="btn btn-gold" id="btn-mii-export" disabled onclick="doMiiExport(savMiiSlot+1)">export .ltd</button>
     <div class="status info" id="mii-io-status"></div>
   </div>
   <div class="save-mii-layout">
     <div id="mii-slots" class="mii-slot-list"></div>
-    <div id="save-fields-mii" class="save-fields-wrap"></div>
+    <div id="save-fields-mii"></div>
   </div>
 </div>
 
@@ -475,34 +490,23 @@ function setEnumAt(entries,hash,idx,val){const e=findE(entries,hash);if(!e||e.ty
 function getUInt(entries,hash){const e=findE(entries,hash);return(e&&e.type===20)?e.inlineRaw>>>0:0;}
 function setUInt(entries,hash,val){const e=findE(entries,hash);if(e&&e.type===20)e.inlineRaw=val>>>0;}
 
-// ── Field definitions ────────────────────────────────────────────────────────
-const PLAYER_FIELDS=[
-  {label:'Name',           hash:H('Player.Name'),        kind:'wstr32',  hint:''},
-  {label:'Island Name',    hash:H('Player.IslandName'),  kind:'wstr32',  hint:''},
-  {label:'How To Call',    hash:H('Player.HowToCallName'),kind:'wstr32', hint:'pronunciation'},
-  {label:'Island Pronunc.',hash:H('Player.HowToCallIslandName'),kind:'wstr32',hint:''},
-  {label:'Money',          hash:H('Player.Money'),       kind:'uint',    min:0},
-  {label:'Currency',       hash:H('Player.Currency'),    kind:'uint',    min:0},
-  {label:'Boot Count',     hash:H('Player.BootNum'),     kind:'uint',    min:0, hint:'play count'},
-];
-const MII_FIELDS=[
-  {label:'Name',          hash:H('Mii.Name.Name'),                       kind:'wstr32a'},
-  {label:'Level',         hash:H('Mii.MiiMisc.SatisfyInfo.Level'),       kind:'int',  dispOff:1, min:0},
-  {label:'Level Meter',   hash:H('Mii.MiiMisc.SatisfyInfo.Meter'),      kind:'int',  min:0,max:100},
-  {label:'Money',         hash:H('Mii.Belongings.Money'),                kind:'uint', min:0},
-  {label:'Birthday Day',  hash:H('Mii.MiiMisc.BirthdayInfo.Day'),       kind:'int',  min:1,max:31},
-  {label:'Birthday Month',hash:H('Mii.MiiMisc.BirthdayInfo.Month'),     kind:'int',  min:1,max:12},
-  {label:'Birth Year',    hash:H('Mii.MiiMisc.BirthdayInfo.Year'),      kind:'int'},
-  {label:'Direct Age',    hash:H('Mii.MiiMisc.BirthdayInfo.DirectAge'), kind:'int',  min:0},
-  {label:'Activeness',    hash:H('Mii.CharacterParam.Activeness'),       kind:'int'},
-  {label:'Audacity',      hash:H('Mii.CharacterParam.Audaciousness'),    kind:'int'},
-  {label:'Commonsense',   hash:H('Mii.CharacterParam.Commonsense'),      kind:'int'},
-  {label:'Gaiety',        hash:H('Mii.CharacterParam.Gaiety'),           kind:'int'},
-  {label:'Sociability',   hash:H('Mii.CharacterParam.Sociability'),      kind:'int'},
-  {label:'Bond Meter',    hash:H('Mii.MiiMisc.BondInfo.Meter'),         kind:'int',  min:0,max:100},
-  {label:'Mood (enum)',   hash:H('Mii.Feeling.Type'),                    kind:'enum', min:0},
-  {label:'Fullness',      hash:H('Mii.MiiMisc.EatInfo.EatFullness'),    kind:'int',  min:0,max:100},
-];
+// ── Scalar accessors ──────────────────────────────────────────────────────────
+function getEnumS(entries,hash){const e=findE(entries,hash);return(e&&e.type===6)?e.inlineRaw>>>0:0;}
+function setEnumS(entries,hash,val){const e=findE(entries,hash);if(e&&e.type===6)e.inlineRaw=val>>>0;}
+function getAny(entries,hash){const e=findE(entries,hash);return(e&&e.inlineRaw!==undefined)?e.inlineRaw>>>0:0;}
+function setAny(entries,hash,val){const e=findE(entries,hash);if(e&&e.inlineRaw!==undefined)e.inlineRaw=val>>>0;}
+function getWStr64At(entries,hash,idx){const e=findE(entries,hash);if(!e||e.type!==31||!e.payload||e.payload.length<4)return'';const c=new DataView(e.payload.buffer,e.payload.byteOffset,4).getUint32(0,true);if(idx<0||idx>=c)return'';const off=4+idx*128;if(off+128>e.payload.length)return'';return wstr(e.payload.subarray(off),64);}
+function setWStr64At(entries,hash,idx,val){const e=findE(entries,hash);if(!e||e.type!==31||!e.payload||e.payload.length<4)return;const c=new DataView(e.payload.buffer,e.payload.byteOffset,4).getUint32(0,true);if(idx<0||idx>=c)return;const off=4+idx*128;if(off+128>e.payload.length)return;setWstr(val,e.payload.subarray(off),64);}
+
+// ── Enum option tables ────────────────────────────────────────────────────────
+const CURRENCY_OPTS=[{v:0x7e3d1e46,l:'Invalid'},{v:0xce8d18e1,l:'Yen (\xa5)'},{v:0x2bef288a,l:'Dollar ($)'},{v:0x038c20a9,l:'Euro (€)'},{v:0x2f084465,l:'Pound (\xa3)'},{v:0x78915cbe,l:'HK$'},{v:0xd73beb47,l:'Won (₩)'},{v:0xaca685c9,l:'Yuan (\xa5)'},{v:0x4616c424,l:'Rouble (₽)'},{v:0xa60f72e0,l:'Peso (₱)'},{v:0x6362048b,l:'G$'}];
+const FEELING_OPTS=[{v:0xb6eede09,l:'None'},{v:0x390b012d,l:'Normal'},{v:0x62189afb,l:'Good'},{v:0xab185a53,l:'Irritate'},{v:0xabc36d9f,l:'Deject'},{v:0x86e2036f,l:'Careless'},{v:0xf3046534,l:'Angry'},{v:0xf54cf52e,l:'Depress'},{v:0x651b7edd,l:'Worry'}];
+const REGION_OPTS=[{v:H('Japan'),l:'Japan'},{v:H('Europe'),l:'Europe'},{v:H('NorthAmerica'),l:'North America'},{v:H('SouthAmericaN'),l:'S. America (N)'},{v:H('SouthAmericaS'),l:'S. America (S)'},{v:H('Australia'),l:'Australia / NZ'},{v:H('Asia'),l:'Asia (HK/TW/KR)'},{v:H('OthersN'),l:'Others (N)'},{v:H('OthersS'),l:'Others (S)'}];
+const LANG_OPTS=[{v:H('JPja'),l:'Japanese'},{v:H('USen'),l:'English (US)'},{v:H('EUen'),l:'English (EU)'},{v:H('EUfr'),l:'French'},{v:H('EUde'),l:'German'},{v:H('EUes'),l:'Spanish (EU)'},{v:H('USes'),l:'Spanish (US)'},{v:H('EUit'),l:'Italian'},{v:H('EUnl'),l:'Dutch'},{v:H('CNzh'),l:'Chinese (Simp)'},{v:H('KRko'),l:'Korean'},{v:H('TWzh'),l:'Chinese (Trad)'}];
+const PRONOUN_OPTS=[{v:H('He'),l:'He/Him'},{v:H('She'),l:'She/Her'},{v:H('They'),l:'They/Them'}];
+const GENDER_OPTS=[{v:H('Male'),l:'Male'},{v:H('Female'),l:'Female'},{v:H('Neuter'),l:'Other'}];
+const ISLAND_SIZES=[{v:1,l:'50\xd736'},{v:2,l:'70\xd750'},{v:3,l:'90\xd764'},{v:4,l:'120\xd780'}];
+const SKIN_COLORS=['#f6d9bd','#ecc19d','#d2a07a','#b07a54','#825533','#5a391c'];
 
 // ── State ────────────────────────────────────────────────────────────────────
 let savPlayer=null, savMii=null, savMiiSlot=0;
@@ -516,7 +520,7 @@ async function loadSave(which){
     const buf=await r.arrayBuffer();
     const sav=parseSav(buf);
     if(which==='player'){savPlayer=sav;renderPlayerFields();}
-    else{savMii=sav;renderMiiSlots();renderMiiFields();}
+    else{savMii=sav;renderMiiSlots();renderMiiFields();document.getElementById('btn-mii-import').disabled=false;document.getElementById('btn-mii-export').disabled=false;}
     document.getElementById('save-apply-'+which).disabled=false;
     setSaveStatus(which,'loaded','ok');
   }catch(e){setSaveStatus(which,'error: '+e.message,'err');}
@@ -533,27 +537,72 @@ async function applySave(which){
   }catch(e){setSaveStatus(which,'error: '+e.message,'err');}
 }
 
-// ── Player fields ─────────────────────────────────────────────────────────────
+// ── Player render ─────────────────────────────────────────────────────────────
+function edF(lbl,body){return`<div class="ed-field"><span class="ed-label">${lbl}</span>${body}</div>`;}
+function edSel(opts,cur,h,k,fn){let s=`<select class="ed-select" data-h="${h}" data-k="${k}" onchange="${fn}(event)">`;for(const o of opts)s+=`<option value="${o.v}"${(o.v>>>0)===(cur>>>0)?' selected':''}>${esc(o.l)}</option>`;return s+'</select>';}
+function edCard(t,body){return`<div class="ed-card"><div class="ed-card-title">${t}</div>${body}</div>`;}
+function edBar(pct){return`<div class="ed-bar"><div class="ed-bar-fill" style="width:${Math.min(100,Math.max(0,pct))}%"></div></div>`;}
+
 function renderPlayerFields(){
   if(!savPlayer)return;
   const e=savPlayer.entries;
-  let html='<table class="save-table"><tbody>';
-  for(const f of PLAYER_FIELDS){
-    let val=f.kind==='wstr32'?getWStr32(e,f.hash):getUInt(e,f.hash);
-    html+=`<tr><td class="save-label">${f.label}${f.hint?` <small>${f.hint}</small>`:''}</td><td class="save-val">`;
-    if(f.kind==='wstr32')html+=`<input type="text" class="save-input" data-h="${f.hash}" data-k="wstr32" value="${esc(String(val))}" maxlength="32">`;
-    else html+=`<input type="number" class="save-input" data-h="${f.hash}" data-k="uint" value="${val}"${f.min!=null?' min='+f.min:''}>`;
-    html+='</td></tr>';
-  }
-  html+='</tbody></table>';
-  const c=document.getElementById('save-fields-player');c.innerHTML=html;
-  c.querySelectorAll('.save-input').forEach(i=>i.addEventListener('change',onPlayerChange));
+  const hN=H('Player.Name'),hI=H('Player.IslandName');
+  const hHN=H('Player.HowToCallName'),hHI=H('Player.HowToCallIslandName');
+  const hSk=H('Player.SkinColorIndex');
+  const hMon=H('Player.Money'),hCur=H('Player.Currency'),hBoot=H('Player.BootNum');
+  const hReg=H('Player.Region'),hNL=H('Player.NameRegionLanguageID'),hIL=H('Player.IslandNameRegionLanguageID');
+  const hFnt=H('Liberation.FountainLevel');
+  const hBD=0xdb7786bb,hBM=0xc754bef3,hBY=0x11996629,hWs=0xa32f7e47,hSz=0x870a807c;
+
+  const skinV=getUInt(e,hSk);
+  const swatches=SKIN_COLORS.map((c,i)=>`<button class="ed-swatch${i===skinV?' active':''}" style="background:${c}" data-v="${i}" onclick="setSkin(${i})" title="Skin ${i+1}"></button>`).join('');
+  const sizeV=getAny(e,hSz);
+  const presets=ISLAND_SIZES.map(o=>`<button class="ed-preset${o.v===sizeV?' active':''}" data-v="${o.v}" onclick="setIslandSize(${o.v})">${o.l}</button>`).join('');
+
+  const pi=`<input class="ed-input" type="text" data-h="${hN}" data-k="wstr32" value="${esc(getWStr32(e,hN))}" maxlength="31" onchange="onPlayerChange(event)">`;
+  const ii=`<input class="ed-input" type="text" data-h="${hI}" data-k="wstr32" value="${esc(getWStr32(e,hI))}" maxlength="31" onchange="onPlayerChange(event)">`;
+  const pni=`<input class="ed-input" type="text" data-h="${hHN}" data-k="wstr32" value="${esc(getWStr32(e,hHN))}" maxlength="31" onchange="onPlayerChange(event)">`;
+  const pii=`<input class="ed-input" type="text" data-h="${hHI}" data-k="wstr32" value="${esc(getWStr32(e,hHI))}" maxlength="31" onchange="onPlayerChange(event)">`;
+
+  const identity=edCard('identity',
+    `<div class="ed-grid">${edF('Name',pi)}${edF('Island Name',ii)}${edF('Name Pronunciation',pni)}${edF('Island Pronunciation',pii)}</div>`+
+    `<div class="ed-field" style="margin-top:10px"><span class="ed-label">Skin Tone</span><div class="ed-swatches">${swatches}</div></div>`);
+
+  const ni=(h,min,max,v)=>`<input class="ed-input" type="number" data-h="${h}" data-k="any" value="${v}" min="${min}"${max!=null?' max="'+max+'"':''} onchange="onPlayerChange(event)">`;
+  const birthday=edCard('birthday',
+    `<div class="ed-bday">${edF('Day',ni(hBD,1,31,getAny(e,hBD)))}${edF('Month',ni(hBM,1,12,getAny(e,hBM)))}${edF('Year',ni(hBY,0,null,getAny(e,hBY)))}</div>`);
+
+  const settings=edCard('settings',
+    `<div class="ed-grid">${edF('Region',edSel(REGION_OPTS,getEnumS(e,hReg),hReg,'enum','onPlayerChange'))}${edF('Name Language',edSel(LANG_OPTS,getEnumS(e,hNL),hNL,'enum','onPlayerChange'))}${edF('Island Language',edSel(LANG_OPTS,getEnumS(e,hIL),hIL,'enum','onPlayerChange'))}</div>`);
+
+  const ni2=(h,v)=>`<input class="ed-input" type="number" data-h="${h}" data-k="any" value="${v}" min="0" onchange="onPlayerChange(event)">`;
+  const island=edCard('island',
+    `<div class="ed-field"><span class="ed-label">Island Size</span><div class="ed-presets">${presets}</div></div>`+
+    `<div class="ed-grid" style="margin-top:10px">${edF('Fountain Level',ni2(hFnt,getAny(e,hFnt)))}${edF('Wishes',ni2(hWs,getAny(e,hWs)))}</div>`);
+
+  const um=(h,v)=>`<input class="ed-input" type="number" data-h="${h}" data-k="uint" value="${v}" min="0" onchange="onPlayerChange(event)">`;
+  const economy=edCard('economy',
+    `<div class="ed-grid">${edF('Money',um(hMon,getUInt(e,hMon)))}${edF('Currency',edSel(CURRENCY_OPTS,getEnumS(e,hCur),hCur,'enum','onPlayerChange'))}${edF('Play Count',um(hBoot,getUInt(e,hBoot)))}</div>`);
+
+  document.getElementById('save-fields-player').innerHTML=identity+birthday+settings+island+economy;
+}
+function setSkin(val){
+  if(!savPlayer)return;
+  setAny(savPlayer.entries,H('Player.SkinColorIndex'),val);
+  document.querySelectorAll('.ed-swatch').forEach(b=>b.classList.toggle('active',parseInt(b.dataset.v)===val));
+}
+function setIslandSize(val){
+  if(!savPlayer)return;
+  setAny(savPlayer.entries,0x870a807c,val);
+  document.querySelectorAll('.ed-preset').forEach(b=>b.classList.toggle('active',parseInt(b.dataset.v)===val));
 }
 function onPlayerChange(ev){
   if(!savPlayer)return;
   const i=ev.target,h=parseInt(i.dataset.h),k=i.dataset.k;
   if(k==='wstr32')setWStr32(savPlayer.entries,h,i.value);
-  else if(k==='uint')setUInt(savPlayer.entries,h,parseInt(i.value)||0);
+  else if(k==='uint')setUInt(savPlayer.entries,h,parseInt(i.value)>>>0);
+  else if(k==='enum')setEnumS(savPlayer.entries,h,parseInt(i.value)>>>0);
+  else if(k==='any')setAny(savPlayer.entries,h,parseInt(i.value)>>>0);
 }
 
 // ── Mii slot list ─────────────────────────────────────────────────────────────
@@ -567,13 +616,13 @@ function renderMiiSlots(){
   for(let i=0;i<cnt;i++){
     const name=getWStr32At(savMii.entries,nh,i);
     if(!name)continue;
-    html+=`<button class="mii-slot-btn${i===savMiiSlot?' active':''}" onclick="selMiiSlot(${i})">${esc(name)}</button>`;
+    html+=`<button class="mii-slot-btn${i===savMiiSlot?' active':''}" data-slot="${i}" onclick="selMiiSlot(${i})">${esc(name)}</button>`;
   }
   c.innerHTML=html;
 }
 function selMiiSlot(idx){
   savMiiSlot=idx;
-  document.querySelectorAll('.mii-slot-btn').forEach((b,i)=>b.classList.toggle('active',i===idx));
+  document.querySelectorAll('.mii-slot-btn').forEach(b=>b.classList.toggle('active',parseInt(b.dataset.slot)===idx));
   renderMiiFields();
 }
 
@@ -581,22 +630,60 @@ function selMiiSlot(idx){
 function renderMiiFields(){
   if(!savMii)return;
   const e=savMii.entries,idx=savMiiSlot;
-  let html='<table class="save-table"><tbody>';
-  for(const f of MII_FIELDS){
-    let val;
-    if(f.kind==='wstr32a')val=getWStr32At(e,f.hash,idx);
-    else if(f.kind==='int'){val=getIntAt(e,f.hash,idx);if(f.dispOff)val+=f.dispOff;}
-    else if(f.kind==='uint')val=getUIntAt(e,f.hash,idx);
-    else if(f.kind==='enum')val=getEnumAt(e,f.hash,idx);
-    else val=0;
-    html+=`<tr><td class="save-label">${f.label}</td><td class="save-val">`;
-    if(f.kind==='wstr32a')html+=`<input type="text" class="save-input" data-h="${f.hash}" data-k="wstr32a" value="${esc(String(val))}" maxlength="32">`;
-    else html+=`<input type="number" class="save-input" data-h="${f.hash}" data-k="${f.kind}" value="${val}"${f.min!=null?' min='+f.min:''}${f.max!=null?' max='+f.max:''}${f.dispOff?' data-doff='+f.dispOff:''}>`;
-    html+='</td></tr>';
-  }
-  html+='</tbody></table>';
-  const c=document.getElementById('save-fields-mii');c.innerHTML=html;
-  c.querySelectorAll('.save-input').forEach(i=>i.addEventListener('change',onMiiChange));
+  const gi=getIntAt,gu=getUIntAt,ge=getEnumAt;
+  const mi=(h,k,v,mn,mx,do_)=>`<input class="ed-input" type="number" data-h="${h}" data-k="${k}" value="${v}"${mn!=null?' min="'+mn+'"':''}${mx!=null?' max="'+mx+'"':''}${do_?' data-doff="'+do_+'"':''} onchange="onMiiChange(event)">`;
+  const ms=(h,k,v,mx)=>`<input class="ed-input" type="text" data-h="${h}" data-k="${k}" value="${esc(v)}" maxlength="${mx}" onchange="onMiiChange(event)">`;
+  const msel=(opts,cur,h,k)=>edSel(opts,cur,h,k,'onMiiChange');
+
+  // identity
+  const hNm=H('Mii.Name.Name'),hGen=H('Mii.MiiMisc.FaceInfo.Gender'),hPrn=H('Mii.Name.PronounType');
+  const hNL=H('Mii.Name.NameRegionLanguageID'),h1P=H('Mii.Name.FirstPerson'),h1PL=H('Mii.Name.FirstPersonRegionLanguageID');
+  const identity=edCard('identity',`<div class="ed-grid">`+
+    edF('Name',ms(hNm,'wstr32a',getWStr32At(e,hNm,idx),31))+
+    edF('Gender',msel(GENDER_OPTS,ge(e,hGen,idx),hGen,'enuma'))+
+    edF('Pronoun',msel(PRONOUN_OPTS,ge(e,hPrn,idx),hPrn,'enuma'))+
+    edF('1st Person',ms(h1P,'wstr32a',getWStr32At(e,h1P,idx),31))+
+    edF('Name Lang',msel(LANG_OPTS,ge(e,hNL,idx),hNL,'enuma'))+
+    edF('1st Person Lang',msel(LANG_OPTS,ge(e,h1PL,idx),h1PL,'enuma'))+
+    `</div>`);
+
+  // level & money
+  const hLv=H('Mii.MiiMisc.SatisfyInfo.Level'),hMt=H('Mii.MiiMisc.SatisfyInfo.Meter'),hMn=H('Mii.Belongings.Money');
+  const lvV=gi(e,hLv,idx)+1,mtV=gi(e,hMt,idx);
+  const level=edCard('level &amp; money',`<div class="ed-grid">`+
+    edF('Level',mi(hLv,'int',lvV,1,null,1))+
+    edF('Level Meter',mi(hMt,'int',mtV,0,100,0)+edBar(mtV))+
+    edF('Money',mi(hMn,'uint',gu(e,hMn,idx),0,null,0))+
+    `</div>`);
+
+  // birthday
+  const hBD=H('Mii.MiiMisc.BirthdayInfo.Day'),hBM=H('Mii.MiiMisc.BirthdayInfo.Month'),hBY=H('Mii.MiiMisc.BirthdayInfo.Year');
+  const hDA=H('Mii.MiiMisc.BirthdayInfo.DirectAge'),hAT=H('Mii.MiiMisc.BirthdayInfo.AgeType');
+  const birthday=edCard('birthday',
+    `<div class="ed-bday">`+edF('Day',mi(hBD,'int',gi(e,hBD,idx),1,31,0))+edF('Month',mi(hBM,'int',gi(e,hBM,idx),1,12,0))+edF('Year',mi(hBY,'int',gi(e,hBY,idx),null,null,0))+`</div>`+
+    `<div class="ed-grid" style="margin-top:8px">`+edF('Direct Age',mi(hDA,'int',gi(e,hDA,idx),0,null,0))+edF('Age Type',mi(hAT,'enuma',ge(e,hAT,idx),0,null,0))+`</div>`);
+
+  // personality
+  const traits=[['Activeness','Mii.CharacterParam.Activeness'],['Audacity','Mii.CharacterParam.Audaciousness'],['Commonsense','Mii.CharacterParam.Commonsense'],['Gaiety','Mii.CharacterParam.Gaiety'],['Sociability','Mii.CharacterParam.Sociability']];
+  const personality=edCard('personality',`<div class="ed-grid">`+
+    traits.map(([l,n])=>edF(l,mi(H(n),'int',gi(e,H(n),idx),null,null,0))).join('')+`</div>`);
+
+  // mood
+  const hFe=H('Mii.Feeling.Type'),hBo=H('Mii.MiiMisc.BondInfo.Meter');
+  const boV=gi(e,hBo,idx);
+  const mood=edCard('mood',`<div class="ed-grid">`+
+    edF('Feeling',msel(FEELING_OPTS,ge(e,hFe,idx),hFe,'enuma'))+
+    edF('Bond Meter',mi(hBo,'int',boV,0,100,0)+edBar(boV))+
+    `</div>`);
+
+  // food
+  const hFu=H('Mii.MiiMisc.EatInfo.EatFullness');
+  const fuV=gi(e,hFu,idx);
+  const food=edCard('food',`<div class="ed-grid">`+
+    edF('Fullness',mi(hFu,'int',fuV,0,100,0)+edBar(fuV))+
+    `</div>`);
+
+  document.getElementById('save-fields-mii').innerHTML=identity+level+birthday+personality+mood+food;
 }
 function onMiiChange(ev){
   if(!savMii)return;
@@ -604,7 +691,7 @@ function onMiiChange(ev){
   if(k==='wstr32a')setWStr32At(savMii.entries,h,idx,i.value);
   else if(k==='int')setIntAt(savMii.entries,h,idx,(parseInt(i.value)||0)-do_);
   else if(k==='uint')setUIntAt(savMii.entries,h,idx,parseInt(i.value)>>>0);
-  else if(k==='enum')setEnumAt(savMii.entries,h,idx,parseInt(i.value)>>>0);
+  else if(k==='enuma')setEnumAt(savMii.entries,h,idx,parseInt(i.value)>>>0);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
