@@ -173,9 +173,35 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .mii-slot-btn{background:transparent;border:1px solid transparent;color:var(--muted);padding:5px 8px;border-radius:3px;cursor:pointer;text-align:left;font-size:.8rem;font-family:inherit;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:all .12s;width:100%}
 .mii-slot-btn:hover{color:var(--text)}
 .mii-slot-btn.active{border-color:var(--accent);color:var(--text);background:var(--surface2)}
-#save-fields-mii{flex:1;min-width:0;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:10px}
-#save-fields-mii::-webkit-scrollbar{width:4px}#save-fields-mii::-webkit-scrollbar-thumb{background:var(--border)}
-@media(max-width:600px){.save-mii-layout{flex-direction:column}.mii-slot-list{width:100%;flex-direction:row;flex-wrap:wrap;max-height:90px;border-right:none;border-bottom:1px solid var(--border)}}
+#save-fields-mii{padding:10px 12px;display:flex;flex-direction:column;gap:10px}
+.mii-right-panel{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+.mii-subtab-bar{display:flex;gap:3px;padding:5px 8px 0;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto}
+.mii-subtab{background:transparent;border:1px solid transparent;color:var(--muted);padding:3px 10px;border-radius:3px 3px 0 0;cursor:pointer;font-size:.78rem;font-family:inherit;transition:all .12s;white-space:nowrap}
+.mii-subtab:hover{color:var(--text)}.mii-subtab.active{border-color:var(--border);border-bottom:1px solid var(--bg);color:var(--accent);background:var(--bg)}
+.mii-content{flex:1;overflow-y:auto;min-height:0}.mii-content::-webkit-scrollbar{width:4px}.mii-content::-webkit-scrollbar-thumb{background:var(--border)}
+.mii-words-list{display:flex;flex-direction:column;gap:4px;padding:10px 12px}
+.mii-word-row{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:7px 10px;display:flex;gap:8px;align-items:flex-start}.mii-word-row.empty{opacity:.42}
+.mii-word-num{color:var(--muted);font-size:.75rem;min-width:18px;padding-top:6px;text-align:right}
+.mii-word-row-fields{display:flex;flex-direction:column;gap:5px;flex:1}
+.mii-word-row-line{display:flex;gap:6px;align-items:center}.mii-word-lbl{font-size:.7rem;color:var(--muted);min-width:32px}
+.mii-word-clear{background:transparent;border:none;color:var(--muted);cursor:pointer;padding:0 4px;font-size:1rem;flex-shrink:0;transition:color .12s;line-height:1}.mii-word-clear:hover{color:var(--err)}
+#mii-words-panel{padding:0;gap:0}
+.mii-tab-summary{padding:3px 12px;font-size:.72rem;color:var(--muted);background:var(--surface);border-bottom:1px solid var(--border)}
+.rel-list{display:flex;flex-direction:column;gap:6px;padding:10px 12px}
+.rel-row{background:var(--surface);border:1px solid var(--border);border-left-width:3px;border-radius:4px;padding:8px 10px}
+.rel-row-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.rel-row-name{color:var(--text);font-weight:600;font-size:.85rem}
+.rel-row-fields{display:flex;gap:8px;flex-wrap:wrap}.rel-row-col{display:flex;flex-direction:column;gap:4px;min-width:130px;flex:1}.rel-row-col-lbl{font-size:.72rem;color:var(--muted);margin-bottom:2px;font-weight:600}
+.rel-fixed-note{font-size:.68rem;color:var(--muted);font-style:italic}
+#mii-social-panel{padding:8px 0;display:flex;flex-direction:column;align-items:center;gap:6px;width:100%}
+#mii-social-canvas{background:#0a0a0a;border:1px solid var(--border);border-radius:4px;max-width:100%;touch-action:none}
+.social-legend{display:flex;flex-wrap:wrap;gap:4px 14px;padding:2px 12px;font-size:.72rem;width:100%;max-width:680px;box-sizing:border-box}
+.social-legend-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px;vertical-align:middle}
+.social-rel-list{display:flex;flex-direction:column;gap:3px;padding:4px 12px;width:100%;max-width:680px;box-sizing:border-box}
+.social-rel-row{display:flex;gap:8px;padding:4px 8px;background:var(--surface);border-radius:3px;font-size:.78rem;border-left:3px solid;align-items:center}
+.social-rel-name{font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.social-rel-meta{color:var(--muted);font-size:.72rem;white-space:nowrap}
+@media(max-width:600px){.save-mii-layout{flex-direction:column}.mii-slot-list{width:100%;flex-direction:row;flex-wrap:wrap;max-height:90px;border-right:none;border-bottom:1px solid var(--border)}.mii-subtab-bar{flex-wrap:wrap}}
 </style>
 </head>
 <body>
@@ -242,7 +268,18 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
   </div>
   <div class="save-mii-layout">
     <div id="mii-slots" class="mii-slot-list"></div>
-    <div id="save-fields-mii"></div>
+    <div class="mii-right-panel">
+      <div class="mii-subtab-bar">
+        <button class="mii-subtab active" onclick="switchMiiSubTab('stats',this)">stats</button>
+        <button class="mii-subtab" onclick="switchMiiSubTab('words',this)">words</button>
+        <button class="mii-subtab" onclick="switchMiiSubTab('rel',this)">relations</button>
+        <button class="mii-subtab" onclick="switchMiiSubTab('social',this)">social</button>
+      </div>
+      <div class="mii-content" id="mii-content-stats"><div id="save-fields-mii"></div></div>
+      <div class="mii-content" id="mii-content-words" style="display:none"><div id="mii-words-panel" class="mii-words-list"></div></div>
+      <div class="mii-content" id="mii-content-rel" style="display:none"><div id="mii-rel-panel" class="rel-list"></div></div>
+      <div class="mii-content" id="mii-content-social" style="display:none"><div id="mii-social-panel"></div></div>
+    </div>
   </div>
 </div>
 
@@ -285,7 +322,7 @@ async function loadList(){
   entries.forEach(e=>{
     const div=document.createElement('div');
     div.className='entry'+(selected&&selected.stem===e.stem?' active':'');
-    div.innerHTML='<span class="entry-name">'+e.stem+'</span>';
+    div.innerHTML='<span class="entry-name">'+(e.name||e.stem)+'</span>';
     div.onclick=()=>selectEntry(e);l.appendChild(div);
   });
   document.getElementById('hdr-count').textContent=entries.length+' textures';
@@ -299,9 +336,9 @@ async function selectEntry(e){
   document.getElementById('placeholder').style.display='none';
   document.getElementById('preview-img').style.display='none';
   document.getElementById('info-bar').textContent='';
-  setStatus('loading '+e.stem+'...','info');
+  setStatus('loading '+(e.name||e.stem)+'...','info');
   const img=document.getElementById('preview-img');
-  img.onload=()=>{img.style.display='block';document.getElementById('info-bar').textContent=e.stem+'   '+img.naturalWidth+' x '+img.naturalHeight+(e.hasCanvas?'   canvas':'');setStatus('','info');};
+  img.onload=()=>{img.style.display='block';document.getElementById('info-bar').textContent=(e.name||e.stem)+'   '+img.naturalWidth+' x '+img.naturalHeight+(e.hasCanvas?'   canvas':'');setStatus('','info');};
   img.onerror=()=>{img.style.display='none';document.getElementById('placeholder').style.display='';document.getElementById('placeholder').textContent='decode failed';setStatus('decode error','err');};
   img.src='/api/preview?stem='+encodeURIComponent(e.stem)+'&t='+Date.now();
 }
@@ -509,7 +546,32 @@ const ISLAND_SIZES=[{v:1,l:'50\xd736'},{v:2,l:'70\xd750'},{v:3,l:'90\xd764'},{v:
 const SKIN_COLORS=['#f6d9bd','#ecc19d','#d2a07a','#b07a54','#825533','#5a391c'];
 
 // ── State ────────────────────────────────────────────────────────────────────
-let savPlayer=null, savMii=null, savMiiSlot=0;
+let savPlayer=null, savMii=null, savMiiSlot=0, miiSubTab='stats';
+const WORD_KIND_OPTS=[
+  {v:H('Invalid'),l:'(empty)'},{v:H('TalkStart'),l:'Talk Start'},{v:H('TalkEnd'),l:'Talk End'},
+  {v:H('Phrase'),l:'Phrase'},{v:H('Happy'),l:'Happy'},{v:H('Sad'),l:'Sad'},{v:H('Angry'),l:'Angry'},
+  {v:H('Greeting'),l:'Greeting'},{v:H('TalkInSleep'),l:'Sleep Talk'},{v:H('ShoutToSea'),l:'Shout Sea'},{v:H('BeforeEat'),l:'Before Eat'},
+];
+const REL_OPTS=[
+  {v:0x0784a8dc,l:'Unknown'},{v:0x7e3d1e46,l:'Invalid'},
+  {v:0xba939a42,l:'Friend'},{v:0xc2d067a7,l:'Couple'},{v:0xb7ce0c18,l:'Lovers'},
+  {v:0x354a0515,l:'Knows'},{v:0x7783d4c3,l:'Ex'},{v:0xfe59f825,l:'Divorced'},{v:0xdcfc7603,l:'Parent'},
+  {v:0xe193c5a2,l:'Child'},{v:0x1918f808,l:'Sibling'},{v:0x3b1d200a,l:'Sibling (alt)'},
+  {v:0x2fd9785b,l:'Grandparent'},{v:0x7e3cd550,l:'Grandchild'},{v:0x804172f3,l:'Relative'},
+];
+const REL_COLOR_MAP={
+  0xba939a42:'#64C878',0xc2d067a7:'#FF96B4',0xb7ce0c18:'#FF6464',
+  0x354a0515:'#64AAFF',0x7783d4c3:'#A050A0',0xfe59f825:'#A03C3C',
+  0xdcfc7603:'#DC9650',0xe193c5a2:'#DC9650',
+  0x1918f808:'#DCC850',0x3b1d200a:'#DCC850',
+  0x2fd9785b:'#C8AA78',0x7e3cd550:'#C8AA78',0x804172f3:'#A0A0A0'
+};
+function relColor(v){return REL_COLOR_MAP[v>>>0]||'#555';}
+function relLabel(v){const o=REL_OPTS.find(r=>(r.v>>>0)===(v>>>0));return o?o.l:'?';}
+function isRelFixed(v){const t=v>>>0;return t===0x0784a8dc||t===0x7e3d1e46;}
+function getAnyEnumAt(entries,hash,idx){const e=findE(entries,hash);if(!e||!e.payload||e.payload.length<4)return 0;if(e.type!==7&&e.type!==21)return 0;const dv=arrDV(e),c=dv.getUint32(0,true);return(idx>=0&&idx<c)?dv.getUint32(4+idx*4,true):0;}
+function setAnyEnumAt(entries,hash,idx,val){const e=findE(entries,hash);if(!e||!e.payload||e.payload.length<4)return;if(e.type!==7&&e.type!==21)return;const dv=arrDV(e),c=dv.getUint32(0,true);if(idx>=0&&idx<c)dv.setUint32(4+idx*4,val>>>0,true);}
+function arrSize(entries,hash){const e=findE(entries,hash);if(!e||!e.payload||e.payload.length<4)return 0;return new DataView(e.payload.buffer,e.payload.byteOffset,4).getUint32(0,true);}
 
 // ── Load / apply ─────────────────────────────────────────────────────────────
 async function loadSave(which){
@@ -520,7 +582,7 @@ async function loadSave(which){
     const buf=await r.arrayBuffer();
     const sav=parseSav(buf);
     if(which==='player'){savPlayer=sav;renderPlayerFields();}
-    else{savMii=sav;renderMiiSlots();renderMiiFields();document.getElementById('btn-mii-import').disabled=false;document.getElementById('btn-mii-export').disabled=false;}
+    else{savMii=sav;renderMiiSlots();renderMiiSubTab();document.getElementById('btn-mii-import').disabled=false;document.getElementById('btn-mii-export').disabled=false;}
     document.getElementById('save-apply-'+which).disabled=false;
     setSaveStatus(which,'loaded','ok');
   }catch(e){setSaveStatus(which,'error: '+e.message,'err');}
@@ -623,7 +685,7 @@ function renderMiiSlots(){
 function selMiiSlot(idx){
   savMiiSlot=idx;
   document.querySelectorAll('.mii-slot-btn').forEach(b=>b.classList.toggle('active',parseInt(b.dataset.slot)===idx));
-  renderMiiFields();
+  renderMiiSubTab();
 }
 
 // ── Mii fields ────────────────────────────────────────────────────────────────
@@ -709,8 +771,8 @@ async function openSocialGraph(slot) {
 function closeSocialGraph() {
   document.getElementById('social-overlay').classList.remove('active');
 }
-function drawSocialCanvas(d) {
-  const cv = document.getElementById('social-canvas');
+function drawSocialCanvas(d, cv) {
+  cv = cv || document.getElementById('social-canvas');
   const ctx = cv.getContext('2d');
   const W = cv.width, H = cv.height;
   ctx.clearRect(0,0,W,H);
@@ -719,39 +781,257 @@ function drawSocialCanvas(d) {
     ctx.fillStyle='#666'; ctx.font='14px monospace'; ctx.textAlign='center';
     ctx.fillText('no relationships', W/2, H/2); return;
   }
-  const cx=W/2, cy=H/2;
-  const R = Math.min(W/2, H/2) - 80;
-  const n = edges.length;
-  // draw lines
-  edges.forEach((e,i)=>{
-    const a = -Math.PI/2 + 2*Math.PI*i/n;
-    const nx = cx + R*Math.cos(a), ny = cy + R*Math.sin(a);
-    ctx.strokeStyle = e.color+'cc'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(nx,ny); ctx.stroke();
-    // edge label
-    const lx=(cx+nx)/2, ly=(cy+ny)/2;
-    ctx.fillStyle=e.color; ctx.font='10px monospace'; ctx.textAlign='center';
-    ctx.fillText(e.outType, lx, ly-6);
-    ctx.fillStyle='#888'; ctx.fillText(e.outMeter, lx, ly+8);
-  });
-  // satellite nodes
-  edges.forEach((e,i)=>{
-    const a = -Math.PI/2 + 2*Math.PI*i/n;
-    const nx = cx + R*Math.cos(a), ny = cy + R*Math.sin(a);
-    const nw = n>10?68:82, nh = n>10?22:30;
-    ctx.fillStyle='#181818'; ctx.strokeStyle=e.color; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.roundRect(nx-nw/2,ny-nh/2,nw,nh,4); ctx.fill(); ctx.stroke();
-    ctx.fillStyle='#ddd'; ctx.font='11px monospace'; ctx.textAlign='center';
-    ctx.fillText(e.name||'?', nx, ny+4);
-  });
-  // center node
-  const cw=110, ch=38;
+  const cx=W/2, cy=H/2, n=edges.length;
+  // Adaptive node size
+  const nW=n<=6?94:n<=12?80:n<=22?68:n<=38?56:46;
+  const nH=n<=12?44:n<=26?36:28;
+  const cnW=120, cnH=38;
+  // Build concentric rings inner→outer
+  const maxR=Math.min(W/2-nW/2-6, H/2-nH/2-6);
+  let Rcur=Math.max(cnW/2+nW/2+16, 80);
+  const rings=[], pos=new Array(n);
+  let placed=0;
+  while(placed<n && Rcur<=maxR){
+    const s=(nW+8)/(2*Rcur);
+    const cap=s>=1?1:Math.max(1,Math.min(Math.floor(Math.PI/Math.asin(s)),n-placed));
+    rings.push({R:Rcur,first:placed,count:cap});
+    placed+=cap; Rcur+=nH+10;
+  }
+  for(const ring of rings){
+    for(let i=0;i<ring.count;i++){
+      const a=-Math.PI/2+2*Math.PI*i/ring.count;
+      pos[ring.first+i]={x:cx+ring.R*Math.cos(a),y:cy+ring.R*Math.sin(a)};
+    }
+  }
+  // Fit text to pixel width
+  function fitTxt(s,maxW){
+    if(!s)return'?';
+    let t=s;
+    while(t.length>1&&ctx.measureText(t).width>maxW)t=t.slice(0,-1);
+    if(t.length<s.length)t=(t.length>1?t.slice(0,-1):t)+'…';
+    return t;
+  }
+  // Edges
+  for(let i=0;i<placed;i++){
+    const e=edges[i],p=pos[i];
+    ctx.strokeStyle=e.color+'99'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(p.x,p.y); ctx.stroke();
+  }
+  // Center node (drawn early so satellites overlap it if needed)
   ctx.fillStyle='#c8a032'; ctx.strokeStyle='#fff'; ctx.lineWidth=2;
-  ctx.beginPath(); ctx.roundRect(cx-cw/2,cy-ch/2,cw,ch,5); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.roundRect(cx-cnW/2,cy-cnH/2,cnW,cnH,4); ctx.fill(); ctx.stroke();
   ctx.fillStyle='#111'; ctx.font='bold 12px monospace'; ctx.textAlign='center';
-  ctx.fillText(d.center.name||'?', cx, cy+4);
+  ctx.fillText(fitTxt(d.center.name||'?',cnW-10), cx, cy+4);
+  // Satellite nodes
+  for(let i=0;i<placed;i++){
+    const e=edges[i],p=pos[i];
+    ctx.fillStyle='rgba(0,0,0,.4)';
+    ctx.beginPath(); ctx.roundRect(p.x-nW/2+2,p.y-nH/2+2,nW,nH,3); ctx.fill();
+    ctx.fillStyle='#181818'; ctx.strokeStyle=e.color; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.roundRect(p.x-nW/2,p.y-nH/2,nW,nH,3); ctx.fill(); ctx.stroke();
+    ctx.fillStyle=e.color;
+    ctx.beginPath(); ctx.roundRect(p.x-nW/2,p.y-nH/2,3,nH,[3,0,0,3]); ctx.fill();
+    ctx.textAlign='center';
+    if(nH>=36){
+      ctx.fillStyle='#ddd'; ctx.font='11px monospace';
+      ctx.fillText(fitTxt(e.name||'?',nW-16),p.x+1,p.y-nH/4+4);
+      ctx.fillStyle=e.color; ctx.font='10px monospace';
+      ctx.fillText(e.outType,p.x+1,p.y+nH/4+3);
+    } else {
+      ctx.fillStyle='#ddd'; ctx.font='10px monospace';
+      ctx.fillText(fitTxt(e.name||'?',nW-8),p.x+1,p.y+4);
+    }
+  }
+  // Overflow indicator
+  if(placed<n){
+    ctx.fillStyle='#666'; ctx.font='11px monospace'; ctx.textAlign='right';
+    ctx.fillText('+'+(n-placed)+' more',W-8,H-8);
+  }
 }
 
+// ── Mii sub-tabs ──────────────────────────────────────────────────────────────
+function switchMiiSubTab(name,btn){
+  miiSubTab=name;
+  document.querySelectorAll('.mii-subtab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  ['stats','words','rel','social'].forEach(t=>{
+    const el=document.getElementById('mii-content-'+t);
+    if(el)el.style.display=(t===name?'':'none');
+  });
+  renderMiiSubTab();
+}
+function renderMiiSubTab(){
+  if(!savMii)return;
+  if(miiSubTab==='stats')renderMiiFields();
+  else if(miiSubTab==='words')renderMiiWords();
+  else if(miiSubTab==='rel')renderMiiRelations();
+  else if(miiSubTab==='social')renderMiiSocial();
+}
+// ── Words editor ──────────────────────────────────────────────────────────────
+function renderMiiWords(){
+  if(!savMii)return;
+  const e=savMii.entries,slot=savMiiSlot;
+  const hK=H('Mii.MiiMisc.WordInfo.WordArray.WordKind');
+  const hT=H('Mii.MiiMisc.WordInfo.WordArray.WordText');
+  const hP=H('Mii.MiiMisc.WordInfo.WordArray.WordHowToCall');
+  const hINV=H('Invalid');
+  let filled=0,rows='';
+  for(let i=0;i<12;i++){
+    const wIdx=slot*12+i;
+    const kind=getAnyEnumAt(e,hK,wIdx);
+    const text=getWStr64At(e,hT,wIdx);
+    const pron=getWStr64At(e,hP,wIdx);
+    const isEmpty=(kind===hINV||kind===0);
+    if(!isEmpty)filled++;
+    let kSel=`<select class="ed-select" data-widx="${wIdx}" data-wf="kind" onchange="onWordChange(event)">`;
+    for(const o of WORD_KIND_OPTS)kSel+=`<option value="${o.v>>>0}"${(o.v>>>0)===(kind>>>0)?' selected':''}>${esc(o.l)}</option>`;
+    kSel+='</select>';
+    rows+=`<div class="mii-word-row${isEmpty?' empty':''}" id="mii-wrow-${wIdx}">
+      <div class="mii-word-num">${i+1}</div>
+      <div class="mii-word-row-fields">
+        <div class="mii-word-row-line"><span class="mii-word-lbl">kind</span>${kSel}${!isEmpty?`<button class="mii-word-clear" data-widx="${wIdx}" data-wf="clear" onclick="onWordChange(event)" title="clear this word">&times;</button>`:''}</div>
+        <div class="mii-word-row-line"><span class="mii-word-lbl">text</span><input class="ed-input" type="text" data-widx="${wIdx}" data-wf="text" value="${esc(text)}" maxlength="63" onchange="onWordChange(event)"></div>
+        <div class="mii-word-row-line"><span class="mii-word-lbl">pron.</span><input class="ed-input" type="text" data-widx="${wIdx}" data-wf="pron" value="${esc(pron)}" maxlength="63" onchange="onWordChange(event)"></div>
+      </div>
+    </div>`;
+  }
+  document.getElementById('mii-words-panel').innerHTML=
+    `<div class="mii-tab-summary">${filled} / 12 words filled</div><div class="mii-words-list">${rows}</div>`;
+}
+function onWordChange(ev){
+  if(!savMii)return;
+  const el=ev.target,wIdx=parseInt(el.dataset.widx),field=el.dataset.wf;
+  const e=savMii.entries;
+  const hK=H('Mii.MiiMisc.WordInfo.WordArray.WordKind');
+  const hT=H('Mii.MiiMisc.WordInfo.WordArray.WordText');
+  const hP=H('Mii.MiiMisc.WordInfo.WordArray.WordHowToCall');
+  const hR=H('Mii.MiiMisc.WordInfo.WordArray.WordRegionLanguageID');
+  const hINV=H('Invalid'),hUSen=H('USen');
+  if(field==='kind'){
+    const val=parseInt(el.value)>>>0;
+    setAnyEnumAt(e,hK,wIdx,val);
+    if(val!==hINV&&getAnyEnumAt(e,hR,wIdx)===0)setAnyEnumAt(e,hR,wIdx,hUSen);
+  }else if(field==='text')setWStr64At(e,hT,wIdx,el.value);
+  else if(field==='pron')setWStr64At(e,hP,wIdx,el.value);
+  else if(field==='clear'){
+    setAnyEnumAt(e,hK,wIdx,hINV);
+    setWStr64At(e,hT,wIdx,'');
+    setWStr64At(e,hP,wIdx,'');
+    renderMiiWords();
+    return;
+  }
+  const row=document.getElementById('mii-wrow-'+wIdx);
+  if(row){const k=getAnyEnumAt(e,hK,wIdx);row.classList.toggle('empty',k===hINV||k===0);}
+}
+// ── Relations editor ──────────────────────────────────────────────────────────
+function renderMiiRelations(){
+  if(!savMii)return;
+  const e=savMii.entries,slot=savMiiSlot;
+  const H_IA=0xf7420afb,H_IB=0x4071f71c,H_BASE=0x8b41897e,H_METER=0x42c2fc2f;
+  const hName=H('Mii.Name.Name');
+  const pc=arrSize(e,H_IA);
+  let rows='',count=0;
+  const mkSel=(t,pid,side)=>{
+    let s=`<select class="ed-select" data-pi="${pid}" data-side="${side}" onchange="onRelChange(event)">`;
+    for(const o of REL_OPTS)s+=`<option value="${o.v>>>0}"${(o.v>>>0)===(t>>>0)?' selected':''}>${esc(o.l)}</option>`;
+    return s+'</select>';
+  };
+  for(let i=0;i<pc;i++){
+    const a=getIntAt(e,H_IA,i),b=getIntAt(e,H_IB,i);
+    if(a<0||b<0)continue;
+    if(a!==slot&&b!==slot)continue;
+    count++;
+    const selfA=(a===slot),other=selfA?b:a;
+    const outIdx=selfA?i*2:i*2+1,inIdx=selfA?i*2+1:i*2;
+    const outT=getAnyEnumAt(e,H_BASE,outIdx),outM=getIntAt(e,H_METER,outIdx);
+    const inT=getAnyEnumAt(e,H_BASE,inIdx),inM=getIntAt(e,H_METER,inIdx);
+    const oName=getWStr32At(e,hName,other)||'?';
+    const outFixed=isRelFixed(outT),inFixed=isRelFixed(inT);
+    const outCol=relColor(outT),inCol=relColor(inT);
+    rows+=`<div class="rel-row" style="border-left-color:${outCol}">
+      <div class="rel-row-head"><span class="rel-row-name">${esc(oName)}</span><span style="font-size:.72rem;color:var(--muted)">pair #${i+1} &middot; slot ${other+1}</span></div>
+      <div class="rel-row-fields">
+        <div class="rel-row-col">
+          <div class="rel-row-col-lbl" style="color:${outCol}">your view</div>
+          ${mkSel(outT,i,'out')}
+          <input class="ed-input" type="number" style="margin-top:4px" data-pi="${i}" data-side="out" value="${outM}" min="-100" max="100"${outFixed?' disabled':''} onchange="onRelChange(event)" oninput="this.nextElementSibling.firstChild.style.width=Math.min(100,Math.max(0,(+this.value+100)/2))+'%'">
+          <div class="ed-bar"><div class="ed-bar-fill" style="width:${Math.min(100,Math.max(0,(outM+100)/2))}%;background:${outCol}"></div></div>
+          ${outFixed?'<span class="rel-fixed-note">meter locked for this type</span>':''}
+        </div>
+        <div class="rel-row-col">
+          <div class="rel-row-col-lbl" style="color:${inCol}">their view</div>
+          ${mkSel(inT,i,'in')}
+          <input class="ed-input" type="number" style="margin-top:4px" data-pi="${i}" data-side="in" value="${inM}" min="-100" max="100"${inFixed?' disabled':''} onchange="onRelChange(event)" oninput="this.nextElementSibling.firstChild.style.width=Math.min(100,Math.max(0,(+this.value+100)/2))+'%'">
+          <div class="ed-bar"><div class="ed-bar-fill" style="width:${Math.min(100,Math.max(0,(inM+100)/2))}%;background:${inCol}"></div></div>
+          ${inFixed?'<span class="rel-fixed-note">meter locked for this type</span>':''}
+        </div>
+      </div>
+    </div>`;
+  }
+  const empty='<div style="padding:24px;color:var(--muted);text-align:center;font-size:.85rem">no relationships for this mii</div>';
+  document.getElementById('mii-rel-panel').innerHTML=
+    (count?`<div class="mii-tab-summary">${count} relation${count!==1?'s':''}</div>`:'') +
+    `<div class="rel-list">${count?rows:empty}</div>`;
+}
+function onRelChange(ev){
+  if(!savMii)return;
+  const el=ev.target,pi=parseInt(el.dataset.pi),side=el.dataset.side;
+  const e=savMii.entries;
+  const H_IA=0xf7420afb,H_BASE=0x8b41897e,H_METER=0x42c2fc2f;
+  const a=getIntAt(e,H_IA,pi),selfA=(a===savMiiSlot);
+  const outIdx=selfA?pi*2:pi*2+1,inIdx=selfA?pi*2+1:pi*2;
+  const arrIdx=(side==='out')?outIdx:inIdx;
+  if(el.tagName==='SELECT'){
+    setEnumAt(e,H_BASE,arrIdx,parseInt(el.value)>>>0);
+    renderMiiRelations();
+  } else {
+    setIntAt(e,H_METER,arrIdx,parseInt(el.value)||0);
+  }
+}
+// ── Social inline (client-side, reflects unsaved edits) ──────────────────────
+function renderMiiSocial(){
+  if(!savMii)return;
+  const e=savMii.entries,slot=savMiiSlot;
+  const H_IA=0xf7420afb,H_IB=0x4071f71c,H_BASE=0x8b41897e,H_METER=0x42c2fc2f;
+  const hName=H('Mii.Name.Name');
+  const centerName=getWStr32At(e,hName,slot)||'?';
+  const pc=arrSize(e,H_IA);
+  const edges=[];
+  for(let i=0;i<pc;i++){
+    const a=getIntAt(e,H_IA,i),b=getIntAt(e,H_IB,i);
+    if(a<0||b<0)continue;
+    if(a!==slot&&b!==slot)continue;
+    const selfA=(a===slot),other=selfA?b:a;
+    const outIdx=selfA?i*2:i*2+1,inIdx=selfA?i*2+1:i*2;
+    const outT=getAnyEnumAt(e,H_BASE,outIdx),outM=getIntAt(e,H_METER,outIdx);
+    const inT=getAnyEnumAt(e,H_BASE,inIdx),inM=getIntAt(e,H_METER,inIdx);
+    const oName=getWStr32At(e,hName,other)||'?';
+    edges.push({slot:other+1,name:oName,outType:relLabel(outT),outMeter:outM,inType:relLabel(inT),inMeter:inM,color:relColor(outT)});
+  }
+  // Sort by type for visual grouping (same type = same color cluster)
+  edges.sort((a,b)=>a.outType<b.outType?-1:a.outType>b.outType?1:0);
+  // Build legend from unique type+color pairs
+  const seen=new Map();
+  edges.forEach(ed=>{if(!seen.has(ed.outType))seen.set(ed.outType,ed.color);});
+  let legendHtml='';
+  seen.forEach((c,l)=>{legendHtml+=`<span style="display:flex;align-items:center;gap:3px"><span class="social-legend-dot" style="background:${c}"></span>${esc(l)}</span>`;});
+  // Connection list — full detail, scrollable
+  let listHtml='';
+  edges.forEach(ed=>{
+    listHtml+=`<div class="social-rel-row" style="border-left-color:${ed.color}">
+      <span class="social-rel-name">${esc(ed.name)}</span>
+      <span class="social-rel-meta">${esc(ed.outType)}&#8194;(${ed.outMeter}) &#8596; ${esc(ed.inType)}&#8194;(${ed.inMeter})</span>
+      <span style="color:var(--muted);font-size:.7rem;flex-shrink:0">slot ${ed.slot}</span>
+    </div>`;
+  });
+  const panel=document.getElementById('mii-social-panel');
+  // Canvas height 480: enough for 4 rings with up to 70 connections on a 680px wide canvas
+  panel.innerHTML='<canvas id="mii-social-canvas" width="680" height="480"></canvas>'
+    +(legendHtml?`<div class="social-legend">${legendHtml}</div>`:'')
+    +(edges.length?`<div style="color:var(--muted);font-size:.72rem;padding:2px 12px">${edges.length} connection${edges.length===1?'':'s'}</div>`:'')
+    +(listHtml?`<div class="social-rel-list">${listHtml}</div>`:'');
+  drawSocialCanvas({center:{slot:slot+1,name:centerName},edges},document.getElementById('mii-social-canvas'));
+}
 </script>
 </body>
 </html>
@@ -809,10 +1089,11 @@ static std::vector<uint8_t> EncodePng(const RgbaImage& img){
 }
 
 static void HandleList(int fd){
+    MiiManager::LoadUgcNames();
     auto entries=UgcScanner::Scan(s_ugcPath);
     SrvLog("WebUI: list ("+std::to_string(entries.size())+" textures)");
     std::string json="{\"entries\":[";
-    for(size_t i=0;i<entries.size();i++){if(i)json+=",";json+="{\"stem\":\""+entries[i].stem+"\",\"hasThumb\":"+(entries[i].hasThumb()?"true":"false")+",\"hasCanvas\":"+(entries[i].hasCanvas()?"true":"false")+"}";}
+    for(size_t i=0;i<entries.size();i++){if(i)json+=",";std::string nm=MiiManager::GetUgcName(entries[i].stem);std::string ne;for(char c:nm){if(c=='"')ne+="\\\"";else if(c=='\\')ne+="\\\\";else ne+=c;}json+="{\"stem\":\""+entries[i].stem+"\",\"name\":\""+ne+"\",\"hasThumb\":"+(entries[i].hasThumb()?"true":"false")+",\"hasCanvas\":"+(entries[i].hasCanvas()?"true":"false")+"}";}
     json+="]}";Send200(fd,"application/json",json);
 }
 static void HandlePreview(int fd,const std::string& query){
@@ -991,6 +1272,7 @@ static void HandleMiiSocial(int fd, const std::string& query) {
         return "#646464";
     };
     auto relName = [](uint32_t h) -> const char* {
+        if (h==0x0784a8dcu) return "Unknown";
         if (h==0xba939a42u) return "Friend";
         if (h==0xc2d067a7u) return "Couple";
         if (h==0xb7ce0c18u) return "Lovers";
@@ -1124,7 +1406,8 @@ static void ServerThreadFunc(void*){
 
 namespace HttpServer {
 void Start(int port,const std::string& ugcPath){
-    if(s_running)return;s_port=port;s_ugcPath=ugcPath;s_running=true;s_pendingCommit=false;
+    if(s_running) return;
+    s_port=port;s_ugcPath=ugcPath;s_running=true;s_pendingCommit=false;
     mutexInit(&s_mutex);mutexInit(&s_logMutex);mutexInit(&s_importMutex);
     s_logWrite=0;s_logRead=0;s_importState=ImportState::Idle;
     MkdirP("/switch/TomoToolNX");

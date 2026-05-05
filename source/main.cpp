@@ -106,14 +106,6 @@ static void DrawTextC(const std::string& text, int cx, int cy, SDL_Color col, Fo
     DrawText(text, cx-w/2, cy-h/2, col, f);
 }
 
-// Draw text right-aligned at (rx,y)
-static void DrawTextR(const std::string& text, int rx, int y, SDL_Color col, Font f=Font::Sm) {
-    if(text.empty()) return;
-    TTF_Font* font = GetFont(f);
-    int w,h; TTF_SizeUTF8(font, text.c_str(), &w, &h);
-    DrawText(text, rx-w, y-h/2, col, f);
-}
-
 static void FillRect(int x,int y,int w,int h,SDL_Color c){
     SDL_SetRenderDrawColor(gRen,c.r,c.g,c.b,c.a);
     SDL_Rect r{x,y,w,h};SDL_RenderFillRect(gRen,&r);
@@ -123,19 +115,7 @@ static void DrawRect(int x,int y,int w,int h,SDL_Color c){
     SDL_Rect r{x,y,w,h};SDL_RenderDrawRect(gRen,&r);
 }
 
-// Draw a filled+outlined box sized to fit text with padding, then draw the text.
-static int DrawTextBox(const std::string& text, int cx, int y, SDL_Color textCol,
-                        SDL_Color boxCol, int padX=18, int padY=8, Font f=Font::Sm) {
-    TTF_Font* font = GetFont(f);
-    int tw=0, th=0;
-    if (!text.empty() && font) TTF_SizeUTF8(font, text.c_str(), &tw, &th);
-    int bw = tw + padX*2, bh = th + padY*2;
-    int bx = cx - bw/2;
-    FillRect(bx, y, bw, bh, COL_PANEL);
-    DrawRect(bx, y, bw, bh, boxCol);
-    DrawText(text, bx+padX, y+padY, textCol, f);
-    return bh;
-}
+
 
 
 
@@ -192,8 +172,7 @@ static int gBrowseScroll = 0;
 
 // Mii state
 static std::vector<MiiManager::MiiSlot> gMiis;
-static int gMiiSel    = 0;
-static int gMiiScroll = 0;
+
 
 // ─── Touch / hitbox system ────────────────────────────────────────────────────
 // Function pointers avoid std::function overhead under -fno-exceptions/-fno-rtti.
@@ -221,9 +200,10 @@ static void TSetMode(int mode)  { gOnSwitchMode = (OnSwitchMode)mode; gOnSwitchM
 // Defined after their target globals are declared (forward refs below via lambdas are fine as fn ptrs)
 static void TSelUser (int idx);
 static void TSelUgc  (int idx);
-static void TSelMii  (int idx);
 static void TSelBrowse(int idx);
 static void TAdjust  (int delta); // encoded: negative=left, positive=right; |val| = scale
+static void TUndoNameLang(int);
+static void TUndoIslandLang(int);
 static void TSelPlayerField(int idx);
 static void TSetSkinTone(int idx);
 static void TSetIslandSize(int val);
@@ -261,6 +241,8 @@ static SDL_Color   gPlayerMsgCol = COL_TEXT, gMiiStatsMsgCol = COL_TEXT;
 // Undo state (single-step undo per field)
 static int32_t gPlayerUndoVal[16]   = {};
 static bool    gPlayerUndoValid[16] = {};
+static int32_t gNameLangUndo        = 0; static bool gNameLangUndoValid    = false;
+static int32_t gIslandLangUndo      = 0; static bool gIslandLangUndoValid  = false;
 static int32_t gMiiUndoVal[16]     = {};
 static bool    gMiiUndoValid[16]   = {};
 
@@ -356,10 +338,8 @@ static const SaveFieldDef PLAYER_FIELDS[] = {
     {"Fountain Lv",   "Liberation.FountainLevel",              0,           false, false, false, false, false, false, false, false, true,  0,   -1,  "Wishing fountain upgrade level."},
     {"Wishes",        "",                                      0xa32f7e47u, false, false, false, false, false, false, false, false, true,  0,   -1,  "Number of wishes made."},
     {"Region",        "Player.Region",                         0,           false, false, false, false, false, false, true,  false, false, 0,   -1,  "Player region (affects seasons and weather)."},
-    {"Name Lang",     "Player.NameRegionLanguageID",           0,           false, false, false, false, false, false, false, true,  false, 0,   -1,  "Language used for your player name pronunciation."},
-    {"Island Lang",   "Player.IslandNameRegionLanguageID",     0,           false, false, false, false, false, false, false, true,  false, 0,   -1,  "Language used for your island name pronunciation."},
 };
-static const int PLAYER_FIELD_COUNT = 15;
+static const int PLAYER_FIELD_COUNT = 13;
 
 // ─── Mii stats field table ─────────────────────────────────────────────────────
 struct MiiStatsDef {
@@ -467,7 +447,7 @@ static const char* CurrencyName(uint32_t hash) {
 
 // Relation.Info.DirectionalInfo.BaseRelationType enum hash → display name
 static const struct { uint32_t hash; const char* name; } RELATION_TYPE_NAMES[] = {
-    { 0x0784a8dcu, "Other"       }, { 0x7e3d1e46u, "Invalid"     },
+    { 0x0784a8dcu, "Unknown"     }, { 0x7e3d1e46u, "Invalid"     },
     { 0x354a0515u, "Know"        }, { 0xba939a42u, "Friend"      },
     { 0x535e93a8u, "Ex-Friend"   }, { 0xc2d067a7u, "Couple"      },
     { 0xb7ce0c18u, "Lover"       }, { 0x7783d4c3u, "Ex-Lover"    },
@@ -534,6 +514,8 @@ static bool           gSocialExpanded  = false;
 static int            gSocialScroll    = 0;
 static int            gMiiWordsSlotSel = 0;   // 0-11: selected word slot
 static int            gMiiRelSel       = 0;   // selected row in filtered relations list
+static int            gMiiRelScroll    = 0;   // first visible row in filtered relations list
+static int            gMiiRelCount     = 0;   // total filtered rows for the selected Mii (updated each draw)
 static int            gMiiRelPairIdx   = -1;  // actual pair array index (set during draw)
 static bool           gMiiRelSelfA     = true; // selected Mii is 'A' in the pair
 
@@ -577,7 +559,7 @@ static u64 NavRepeat(u64 kDown, u64 kHeld) {
 static void TSelUser(int idx) {
     if (idx>=0 && idx<(int)gUsers.size()) { gUserSel=idx; gSimKDown|=HidNpadButton_A; }
 }
-// TSelUgc / TSelMii defined after VISIBLE and LoadPreview are declared (below)
+// TSelUgc defined after VISIBLE and LoadPreview are declared (below)
 static void TSelBrowse(int idx) {
     if (idx>=0 && idx<(int)gBrowseEntries.size()) { gBrowseSel=idx; gSimKDown|=HidNpadButton_A; }
 }
@@ -605,7 +587,7 @@ static void TSetIslandSize(int val) {
     gPlayerSavDirty = true;
 }
 static void TSelMiiStatsMii(int idx) {
-    if (idx>=0 && idx<(int)gMiis.size()) gMiiStatsMiiSel=idx;
+    if (idx>=0 && idx<(int)gMiis.size()) { gMiiStatsMiiSel=idx; gMiiRelSel=0; gMiiRelScroll=0; }
 }
 static void TSelMiiStatsField(int idx) { gMiiStatsFieldSel=idx; }
 static void TSelMiiWordsSlot(int idx)  { gMiiWordsSlotSel=idx; gWordUndo.valid=false; }
@@ -1028,13 +1010,7 @@ static void TSelUgc(int idx) {
         LoadPreview(gEntries[gEntrySel]);
     }
 }
-static void TSelMii(int idx) {
-    if (idx>=0 && idx<(int)gMiis.size()) {
-        gMiiSel=idx;
-        if (gMiiSel>=gMiiScroll+VISIBLE) gMiiScroll=gMiiSel-VISIBLE+1;
-        if (gMiiSel<gMiiScroll) gMiiScroll=gMiiSel;
-    }
-}
+
 
 static const char* CONFIG_PATH = "/switch/TomoToolNX/config.ini";
 
@@ -1182,8 +1158,6 @@ static void DrawOnSwitch() {
                 int dw=(int)(tw*scale), dh=(int)(th*scale);
                 SDL_Rect dst{PREVIEW_X+(PREVIEW_W-dw)/2, imgY+(imgH-dh)/2, dw, dh};
                 SDL_RenderCopy(gRen,gPreviewTex,nullptr,&dst);
-                DrawTextC(std::to_string(tw)+"x"+std::to_string(th),
-                          PREVIEW_X+PREVIEW_W/2, imgY+imgH-8, COL_DIM);
             } else {
                 DrawTextC("no preview", PREVIEW_X+PREVIEW_W/2, imgY+imgH/2, COL_BORDER);
             }
@@ -1199,7 +1173,7 @@ static void DrawOnSwitch() {
                 DrawTextC("Y   export PNG", cx+btnGap/2+btnW/2, btnY+kBtnH/2, COL_GOLD, Font::Md);
             }
         }
-        DrawFooter("Up/Down  select    A  import PNG    Y  export PNG    -  export dir    L/R  tab    B/+  back");
+        DrawFooter("ZL/ZR  scroll    Up/Down  select    A  import PNG    Y  export PNG    -  export dir    L/R  tab    B/+  back");
     }
 
     // ── WebUI tab ─────────────────────────────────────────────────────────────
@@ -1382,12 +1356,6 @@ static void DrawPlayer() {
             for (int ri=0; ri<REGION_OPTION_COUNT; ri++)
                 if (SaveEditor::Hash(REGION_OPTIONS[ri].name)==ev) { val=REGION_OPTIONS[ri].label; break; }
             if (val.size()>12) val=val.substr(0,10)+"..";
-        } else if (fd.isLang) {
-            uint32_t ev = SaveEditor::GetEnum(gPlayerSav, fh);
-            val = "?";
-            for (int li=0; li<LANG_OPTION_COUNT; li++)
-                if (SaveEditor::Hash(LANG_OPTIONS[li].name)==ev) { val=LANG_OPTIONS[li].label; break; }
-            if (val.size()>12) val=val.substr(0,10)+"..";
         } else if (fd.isInt) {
             val = std::to_string((int32_t)SaveEditor::GetAnyScalar(gPlayerSav, fh));
         } else if (fd.isUInt) {
@@ -1424,11 +1392,38 @@ static void DrawPlayer() {
                             : nullptr;
         if (howName) {
             std::string how = SaveEditor::GetWStr32(gPlayerSav, SaveEditor::Hash(howName));
-            DrawTextC(how.empty()?"(same as name)":how.c_str(), cx, by+bh+16, how.empty()?COL_DIM:COL_TEXT, Font::Sm);
+            const std::string& dispHow = how.empty() ? val : how;
+            DrawTextC(dispHow.empty()?"(empty)":dispHow.c_str(), cx, by+bh+16, COL_TEXT, Font::Sm);
             int pbX=cx-bw/2, pbY=by+bh+32;
             HitAdd(pbX,pbY,bw,bh,TSimBtn,(int)HidNpadButton_X);
             FillRect(pbX,pbY,bw,bh,COL_SEL); DrawRect(pbX,pbY,bw,bh,COL_ACCENT);
             DrawTextC("X  edit pronunciation",cx,pbY+bh/2,COL_ACCENT,Font::Md);
+            // Language section
+            bool isNameField = strcmp(fd.fieldName,"Player.Name")==0;
+            const char* langFieldName = isNameField ? "Player.NameRegionLanguageID"
+                                                    : "Player.IslandNameRegionLanguageID";
+            uint32_t langEv = SaveEditor::GetEnum(gPlayerSav, SaveEditor::Hash(langFieldName));
+            const char* langLabel = "Unknown";
+            for (int li=0; li<LANG_OPTION_COUNT; li++)
+                if (SaveEditor::Hash(LANG_OPTIONS[li].name)==langEv) { langLabel=LANG_OPTIONS[li].label; break; }
+            int langY = pbY + bh + 28;
+            DrawTextC(langLabel, cx, langY, COL_TEXT, Font::Md);
+            const int lbW=130, lbH=36, lbGap=24;
+            int lbxL=cx-lbGap/2-lbW, lbxR=cx+lbGap/2, lbY=langY+22;
+            HitAdd(lbxL,lbY,lbW,lbH,TSimBtn,(int)HidNpadButton_Left);
+            FillRect(lbxL,lbY,lbW,lbH,COL_PANEL); DrawRect(lbxL,lbY,lbW,lbH,COL_BORDER);
+            DrawTextC("< Prev",lbxL+lbW/2,lbY+lbH/2,COL_DIM);
+            HitAdd(lbxR,lbY,lbW,lbH,TSimBtn,(int)HidNpadButton_Right);
+            FillRect(lbxR,lbY,lbW,lbH,COL_PANEL); DrawRect(lbxR,lbY,lbW,lbH,COL_BORDER);
+            DrawTextC("Next >",lbxR+lbW/2,lbY+lbH/2,COL_DIM);
+            DrawTextC("Left/Right  cycle language", cx, lbY+lbH+14, COL_DIM, Font::Sm);
+            bool canUndoLang = isNameField ? gNameLangUndoValid : gIslandLangUndoValid;
+            void (*undoLangFn)(int) = isNameField ? TUndoNameLang : TUndoIslandLang;
+            int ubW=100, ubH=44, ubX=cx-ubW/2, ubY=lbY+lbH+36;
+            HitAdd(ubX,ubY,ubW,ubH,undoLangFn,0);
+            FillRect(ubX,ubY,ubW,ubH,COL_PANEL);
+            DrawRect(ubX,ubY,ubW,ubH, canUndoLang?COL_GOLD:COL_BORDER);
+            DrawTextC("Undo",ubX+ubW/2,ubY+ubH/2, canUndoLang?COL_GOLD:COL_DIM, Font::Md);
         }
     } else if (fd.isEnum) {
         uint32_t ev = SaveEditor::GetEnum(gPlayerSav, ph);
@@ -1456,8 +1451,8 @@ static void DrawPlayer() {
             bool ssel = ((uint32_t)si == cur);
             HitAdd(sbx, sby, sw, sh, TSetSkinTone, si);
             FillRect(sbx, sby, sw, sh, SKIN_COLS[si]);
-            DrawRect(sbx, sby, sw, sh, ssel ? COL_GOLD : SDL_Color{80,80,80,255});
-            if (ssel) DrawRect(sbx+2, sby+2, sw-4, sh-4, COL_GOLD);
+            DrawRect(sbx, sby, sw, sh, ssel ? SDL_Color{255,255,255,255} : SDL_Color{80,80,80,255});
+            if (ssel) DrawRect(sbx+2, sby+2, sw-4, sh-4, SDL_Color{255,255,255,255});
             sbx += sw+sgap;
         }
         DrawTextC("Left/Right  cycle tone", cx, sby+sh+14, COL_DIM, Font::Sm);
@@ -1493,22 +1488,6 @@ static void DrawPlayer() {
         FillRect(bxR,btnY,btnW,btnH,COL_PANEL); DrawRect(bxR,btnY,btnW,btnH,COL_BORDER);
         DrawTextC("Next >", bxR+btnW/2, btnY+btnH/2, COL_DIM);
         DrawTextC("Left/Right  cycle region", cx, btnY+btnH+14, COL_DIM);
-    } else if (fd.isLang) {
-        uint32_t ev = SaveEditor::GetEnum(gPlayerSav, ph);
-        const char* llabel = "Unknown";
-        for (int li=0; li<LANG_OPTION_COUNT; li++) {
-            if (SaveEditor::Hash(LANG_OPTIONS[li].name)==ev) { llabel=LANG_OPTIONS[li].label; break; }
-        }
-        DrawTextC(llabel, cx, midY-36, COL_TEXT, Font::Lg);
-        const int btnW=140, btnH=36, btnGap=24;
-        int bxL=cx-btnGap/2-btnW, bxR=cx+btnGap/2, btnY=midY+22;
-        HitAdd(bxL,btnY,btnW,btnH, TSimBtn, (int)HidNpadButton_Left);
-        FillRect(bxL,btnY,btnW,btnH,COL_PANEL); DrawRect(bxL,btnY,btnW,btnH,COL_BORDER);
-        DrawTextC("< Prev", bxL+btnW/2, btnY+btnH/2, COL_DIM);
-        HitAdd(bxR,btnY,btnW,btnH, TSimBtn, (int)HidNpadButton_Right);
-        FillRect(bxR,btnY,btnW,btnH,COL_PANEL); DrawRect(bxR,btnY,btnW,btnH,COL_BORDER);
-        DrawTextC("Next >", bxR+btnW/2, btnY+btnH/2, COL_DIM);
-        DrawTextC("Left/Right  cycle language", cx, btnY+btnH+14, COL_DIM);
     } else {
         // Generic numeric: UInt, Int, RawEnum
         uint32_t rawV = fd.isUInt ? SaveEditor::GetUInt(gPlayerSav, ph) : SaveEditor::GetAnyScalar(gPlayerSav, ph);
@@ -1556,8 +1535,8 @@ static void DrawPlayer() {
     {
         bool hasPron = fd.isStr && (strcmp(fd.fieldName,"Player.Name")==0 || strcmp(fd.fieldName,"Player.IslandName")==0);
         DrawFooter(hasPron
-            ? "Up/Down  field    A  name    X  pronunciation    L/R  tab    B/+  back"
-            : "Up/Down  field    Left/Right  value    A  edit    X  undo    L/R  tab    B/+  back");
+            ? "ZL/ZR  field    A  name    X  pronunciation    Left/Right  language    L/R  tab    B/+  back"
+            : "ZL/ZR  field    Left/Right  value    A  edit    X  undo    L/R  tab    B/+  back");
     }
     SDL_RenderPresent(gRen);
 }
@@ -1673,7 +1652,7 @@ static void DrawMiiStats() {
             static const uint32_t H_MNAME_ML = 0x2499bfdau;
             int pairCount = SaveEditor::ArraySize(gMiiSav, H_IDA_ML);
             TTF_Font* fsm2 = GetFont(Font::Sm);
-            int row = 0, filtRow = 0;
+            int visRow = 0, filtRow = 0;
             gMiiRelPairIdx = -1;
             for (int pi = 0; pi < pairCount; pi++) {
                 int a = SaveEditor::GetIntAt(gMiiSav, H_IDA_ML, pi);
@@ -1687,27 +1666,32 @@ static void DrawMiiStats() {
                 SDL_Color tc = RelTypeColor(myType);
                 bool sel = (filtRow == gMiiRelSel);
                 if (sel) { gMiiRelPairIdx = pi; gMiiRelSelfA = selfA; }
-                int ry = SE_TOP_Y + 2 + row * 34;
-                if (ry + 34 > SCREEN_H - 32) break;
-                HitAdd(midX+1, ry, midW-2, 33, TSelMiiRelation, filtRow);
-                FillRect(midX+1, ry, midW-2, 33, sel?COL_SEL:COL_BG);
-                if (sel) DrawRect(midX+1, ry, midW-2, 33, COL_GOLD);
-                // Type label right-aligned (colored)
-                const char* tName = RelTypeName(myType);
-                int tw=0,th=0;
-                if (fsm2 && tName) TTF_SizeUTF8(fsm2, tName, &tw, &th);
-                DrawText(tName?tName:"?", midX+midW-tw-8, ry+(33-th)/2, tc);
-                // Other Mii name left
-                std::string oName = SaveEditor::GetWStr32At(gMiiSav, H_MNAME_ML, other);
-                int availRL = midW - tw - (tw?8:0) - 16;
-                std::string oFit = FitNodeName(oName.empty()?"?":oName, fsm2, availRL);
-                int rnw=0,rnh=0;
-                if (fsm2) TTF_SizeUTF8(fsm2, oFit.c_str(), &rnw, &rnh);
-                DrawText(oFit, midX+8, ry+(33-rnh)/2, sel?COL_TEXT:COL_DIM);
-                filtRow++; row++;
+                if (filtRow >= gMiiRelScroll) {
+                    int ry = SE_TOP_Y + 2 + visRow * 34;
+                    if (ry + 34 <= SCREEN_H - 32) {
+                        HitAdd(midX+1, ry, midW-2, 33, TSelMiiRelation, filtRow);
+                        FillRect(midX+1, ry, midW-2, 33, sel?COL_SEL:COL_BG);
+                        if (sel) DrawRect(midX+1, ry, midW-2, 33, COL_GOLD);
+                        // Type label right-aligned (colored)
+                        const char* tName = RelTypeName(myType);
+                        int tw=0,th=0;
+                        if (fsm2 && tName) TTF_SizeUTF8(fsm2, tName, &tw, &th);
+                        DrawText(tName?tName:"?", midX+midW-tw-8, ry+(33-th)/2, tc);
+                        // Other Mii name left
+                        std::string oName = SaveEditor::GetWStr32At(gMiiSav, H_MNAME_ML, other);
+                        int availRL = midW - tw - (tw?8:0) - 16;
+                        std::string oFit = FitNodeName(oName.empty()?"?":oName, fsm2, availRL);
+                        int rnw=0,rnh=0;
+                        if (fsm2) TTF_SizeUTF8(fsm2, oFit.c_str(), &rnw, &rnh);
+                        DrawText(oFit, midX+8, ry+(33-rnh)/2, sel?COL_TEXT:COL_DIM);
+                        visRow++;
+                    }
+                }
+                filtRow++;
             }
+            gMiiRelCount = filtRow;
             if (filtRow > 0 && gMiiRelSel >= filtRow) gMiiRelSel = filtRow-1;
-            if (row == 0)
+            if (filtRow == 0)
                 DrawTextC("no relations", midX+midW/2, SE_TOP_Y+80, COL_DIM);
         } else {
             // Stats fields list
@@ -1788,36 +1772,45 @@ static void DrawMiiStats() {
             int pairCount = SaveEditor::ArraySize(gMiiSav, H_ID_A);
 
             if (gSocialExpanded) {
-                // ── Global graph ─────────────────────────────────────────────────
+                // ── Global graph — multi-ring, handles up to 70 miis ─────────────
                 int gcx = panelX + panelW/2;
                 int gcy = panelTop + panelH/2;
                 int N   = (int)gMiis.size();
                 if (N == 0) {
                     DrawTextC("no miis", gcx, gcy, COL_DIM, Font::Md);
                 } else {
-                    // Node size scales with count
-                    int nW = N <= 8 ? 80 : N <= 14 ? 68 : 56;
-                    int nH = N <= 8 ? 30 : N <= 14 ? 26 : 22;
-                    // Radius: large enough that adjacent nodes don't overlap
-                    int defR = std::min(panelW/2, panelH/2) - nH/2 - 10;
-                    int R = defR;
-                    if (N > 1) {
-                        int minR = (int)((float)(nW + 6) / (2.0f * sinf((float)M_PI / N))) + 2;
-                        if (minR > R) R = minR;
-                    }
-                    // Clamp so nodes stay inside the panel
-                    int maxR = std::min(panelW/2 - nW/2 - 4, panelH/2 - nH/2 - 4);
-                    if (R > maxR) R = maxR;
-                    if (R < 40)  R = 40;
+                    // Adaptive node size: shrinks as count grows
+                    int nW = N<=8?80 : N<=14?70 : N<=22?60 : N<=34?50 : N<=50?44 : 40;
+                    int nH = N<=14?28 : N<=28?24 : N<=50?20 : 18;
 
-                    // Pre-compute node positions
-                    std::vector<int> nx_(N), ny_(N);
-                    for (int i = 0; i < N; i++) {
-                        float a = -(float)M_PI/2.f + (2.f*(float)M_PI*i)/N;
-                        nx_[i] = gcx + (int)((float)R * cosf(a));
-                        ny_[i] = gcy + (int)((float)R * sinf(a));
+                    // Build concentric rings (inner→outer) until all nodes placed
+                    int maxR = std::min(panelW/2 - nW/2 - 4, panelH/2 - nH/2 - 4);
+                    int Rcur = std::max(nH * 4, 70);
+
+                    struct GRing { int R, first, count; };
+                    std::vector<GRing> grings;
+                    int placed = 0;
+                    while (placed < N && Rcur <= maxR) {
+                        float s = (float)(nW + 6) / (2.f * (float)Rcur);
+                        int cap = (s >= 1.f) ? 1 : (int)((float)M_PI / asinf(s));
+                        cap = std::max(1, std::min(cap, N - placed));
+                        grings.push_back({Rcur, placed, cap});
+                        placed += cap;
+                        Rcur += nH + 8;
                     }
-                    // Edges first — colored, semi-transparent, no labels
+
+                    // Pre-compute node positions indexed by mii list order
+                    std::vector<int> nx_(N, -9999), ny_(N, -9999);
+                    for (auto& gr : grings) {
+                        for (int i = 0; i < gr.count; i++) {
+                            int j = gr.first + i;
+                            float a = -(float)M_PI/2.f + (2.f*(float)M_PI*i)/gr.count;
+                            nx_[j] = gcx + (int)((float)gr.R * cosf(a));
+                            ny_[j] = gcy + (int)((float)gr.R * sinf(a));
+                        }
+                    }
+
+                    // Edges first — colored, semi-transparent
                     for (int i = 0; i < pairCount; i++) {
                         int sa = SaveEditor::GetIntAt(gMiiSav, H_ID_A, i);
                         int sb = SaveEditor::GetIntAt(gMiiSav, H_ID_B, i);
@@ -1827,32 +1820,35 @@ static void DrawMiiStats() {
                             if (gMiis[j].slot-1 == sa) ai = j;
                             if (gMiis[j].slot-1 == sb) bi = j;
                         }
-                        if (ai < 0 || bi < 0) continue;
+                        if (ai < 0 || bi < 0 || nx_[ai] < -9990 || nx_[bi] < -9990) continue;
                         SDL_Color lc = RelTypeColor(SaveEditor::GetEnumAt(gMiiSav, H_BASE, i*2));
-                        SDL_SetRenderDrawColor(gRen, lc.r, lc.g, lc.b, 110);
+                        SDL_SetRenderDrawColor(gRen, lc.r, lc.g, lc.b, 100);
                         SDL_RenderDrawLine(gRen, nx_[ai], ny_[ai], nx_[bi], ny_[bi]);
                     }
+
                     // Nodes on top of edges
                     TTF_Font* fsm = GetFont(Font::Sm);
                     for (int i = 0; i < N; i++) {
+                        if (nx_[i] < -9990) continue;
                         bool isSel = (i == gMiiStatsMiiSel);
                         std::string raw = SaveEditor::GetWStr32At(gMiiSav, H_NAME, gMiis[i].slot-1);
-                        std::string name = FitNodeName(raw, fsm, nW - 10);
+                        std::string name = FitNodeName(raw, fsm, nW - 8);
                         SDL_Color fill   = isSel ? COL_ACCENT : COL_PANEL2;
                         SDL_Color border = isSel ? COL_GOLD   : COL_BORDER;
                         SDL_Color text   = isSel ? SDL_Color{10,10,10,255} : COL_TEXT;
-                        // Shadow
                         FillRect(nx_[i]-nW/2+2, ny_[i]-nH/2+2, nW, nH, {0,0,0,110});
                         HitAdd(nx_[i]-nW/2, ny_[i]-nH/2, nW, nH, TSelMiiStatsMii, i);
                         FillRect(nx_[i]-nW/2, ny_[i]-nH/2, nW, nH, fill);
-                        // Gold top strip for selected
                         if (isSel) FillRect(nx_[i]-nW/2, ny_[i]-nH/2, nW, 2, COL_GOLD);
                         DrawRect(nx_[i]-nW/2, ny_[i]-nH/2, nW, nH, border);
                         DrawTextC(name, nx_[i], ny_[i], text, Font::Sm);
                     }
+
+                    // Dim center label showing total count
+                    DrawTextC(std::to_string(N) + " miis", gcx, gcy, COL_DIM, Font::Sm);
                 }
             } else {
-                // ── Focus graph: selected mii at center, connections as satellites ─
+                // ── Focus graph: multi-ring radial, handles up to 70 connections ─
                 struct SRow { int other; uint32_t outT; int32_t outM; };
                 std::vector<SRow> rows;
                 for (int i = 0; i < pairCount; i++) {
@@ -1867,6 +1863,9 @@ static void DrawMiiStats() {
                     r.outM  = SaveEditor::GetIntAt(gMiiSav, H_METER, selfA ? i*2 : i*2+1);
                     rows.push_back(r);
                 }
+                // Group same relationship types together for visual clarity
+                std::sort(rows.begin(), rows.end(), [](const SRow& a, const SRow& b){ return a.outT < b.outT; });
+
                 int gcx = panelX + panelW/2;
                 int gcy = panelTop + panelH/2;
 
@@ -1874,52 +1873,81 @@ static void DrawMiiStats() {
                     DrawTextC("no relationships", gcx, gcy, COL_DIM, Font::Md);
                 } else {
                     int n   = (int)rows.size();
-                    int nW  = n > 10 ? 80 : 96, nH = 44;
                     int cnW = 120, cnH = 44;
-                    int R   = std::min(panelW/2, panelH/2) - nH/2 - 16;
-                    if (R < 80) R = 80;
+
+                    // Adaptive node size: shrinks gracefully as connections grow
+                    int nW = n<=6?94 : n<=12?80 : n<=22?68 : n<=38?56 : 46;
+                    int nH = n<=12?44 : n<=26?36 : 28;
+
+                    // Build concentric rings (inner→outer), each ring non-overlapping
+                    // Inner ring clears the center node with a margin
+                    int maxR = std::min(panelW/2 - nW/2 - 6, panelH/2 - nH/2 - 6);
+                    int Rcur = std::max(cnW/2 + nW/2 + 16, 80);
+
+                    struct SRing { int R, first, count; };
+                    std::vector<SRing> rings;
+                    int placed = 0;
+                    while (placed < n && Rcur <= maxR) {
+                        float s = (float)(nW + 8) / (2.f * (float)Rcur);
+                        int cap = (s >= 1.f) ? 1 : (int)((float)M_PI / asinf(s));
+                        cap = std::max(1, std::min(cap, n - placed));
+                        rings.push_back({Rcur, placed, cap});
+                        placed += cap;
+                        Rcur += nH + 10;
+                    }
+                    int hidden = n - placed;
 
                     TTF_Font* fsm = GetFont(Font::Sm);
+                    TTF_Font* fmd = GetFont(Font::Md);
                     std::string cName = SaveEditor::GetWStr32At(gMiiSav, H_NAME, miiSlotIdx);
-                    std::string cFit  = FitNodeName(cName.empty()?"?":cName, fsm, cnW - 14);
-
-                    // Pre-compute satellite positions
-                    std::vector<int> snx(n), sny(n);
-                    for (int i = 0; i < n; i++) {
-                        float angle = -(float)M_PI/2.f + (2.f*(float)M_PI*i)/n;
-                        snx[i] = gcx + (int)((float)R * cosf(angle));
-                        sny[i] = gcy + (int)((float)R * sinf(angle));
-                    }
+                    std::string cFit  = FitNodeName(cName.empty()?"?":cName, fmd, cnW - 14);
 
                     // 1. Edges (drawn under everything)
-                    for (int i = 0; i < n; i++) {
-                        SDL_Color lc = RelTypeColor(rows[i].outT);
-                        SDL_SetRenderDrawColor(gRen, lc.r, lc.g, lc.b, 180);
-                        SDL_RenderDrawLine(gRen, gcx, gcy, snx[i], sny[i]);
+                    for (auto& ring : rings) {
+                        for (int i = 0; i < ring.count; i++) {
+                            const SRow& row = rows[ring.first + i];
+                            SDL_Color lc = RelTypeColor(row.outT);
+                            float angle = -(float)M_PI/2.f + (2.f*(float)M_PI*i)/ring.count;
+                            int nx = gcx + (int)((float)ring.R * cosf(angle));
+                            int ny = gcy + (int)((float)ring.R * sinf(angle));
+                            SDL_SetRenderDrawColor(gRen, lc.r, lc.g, lc.b, 150);
+                            SDL_RenderDrawLine(gRen, gcx, gcy, nx, ny);
+                        }
                     }
 
-                    // 2. Center node (drawn before satellites so satellites overlap it)
+                    // 2. Center node
                     FillRect(gcx-cnW/2+2, gcy-cnH/2+2, cnW, cnH, {0,0,0,110});
                     FillRect(gcx-cnW/2, gcy-cnH/2, cnW, cnH, COL_ACCENT);
                     DrawRect(gcx-cnW/2, gcy-cnH/2, cnW, cnH, COL_TEXT);
                     DrawTextC(cFit, gcx, gcy, {10,10,10,255}, Font::Md);
 
-                    // 3. Satellite nodes
-                    for (int i = 0; i < n; i++) {
-                        SDL_Color lc = RelTypeColor(rows[i].outT);
-                        const char* relLbl = RelTypeName(rows[i].outT);
-                        std::string nn    = SaveEditor::GetWStr32At(gMiiSav, H_NAME, rows[i].other);
-                        std::string nFit  = FitNodeName(nn.empty()?"?":nn, fsm, nW - 16);
-                        // Shadow
-                        FillRect(snx[i]-nW/2+2, sny[i]-nH/2+2, nW, nH, {0,0,0,110});
-                        FillRect(snx[i]-nW/2, sny[i]-nH/2, nW, nH, COL_PANEL2);
-                        // Left accent bar (relationship color)
-                        FillRect(snx[i]-nW/2, sny[i]-nH/2, 3, nH, lc);
-                        DrawRect(snx[i]-nW/2, sny[i]-nH/2, nW, nH, lc);
-                        // Name (upper row)
-                        DrawTextC(nFit, snx[i]+2, sny[i]-11, COL_TEXT, Font::Sm);
-                        // Rel type (lower row, colored)
-                        DrawTextC(relLbl ? relLbl : "?", snx[i]+2, sny[i]+11, lc, Font::Sm);
+                    // 3. Satellite nodes (name + rel type, two lines when tall enough)
+                    for (auto& ring : rings) {
+                        for (int i = 0; i < ring.count; i++) {
+                            const SRow& row = rows[ring.first + i];
+                            SDL_Color lc = RelTypeColor(row.outT);
+                            const char* relLbl = RelTypeName(row.outT);
+                            float angle = -(float)M_PI/2.f + (2.f*(float)M_PI*i)/ring.count;
+                            int nx = gcx + (int)((float)ring.R * cosf(angle));
+                            int ny = gcy + (int)((float)ring.R * sinf(angle));
+                            std::string nn   = SaveEditor::GetWStr32At(gMiiSav, H_NAME, row.other);
+                            std::string nFit = FitNodeName(nn.empty()?"?":nn, fsm, nW - (nH>=36?16:8));
+                            FillRect(nx-nW/2+2, ny-nH/2+2, nW, nH, {0,0,0,110});
+                            FillRect(nx-nW/2,   ny-nH/2,   nW, nH, COL_PANEL2);
+                            FillRect(nx-nW/2,   ny-nH/2,   3,  nH, lc);
+                            DrawRect(nx-nW/2,   ny-nH/2,   nW, nH, lc);
+                            if (nH >= 36) {
+                                DrawTextC(nFit,                 nx+2, ny - nH/4, COL_TEXT, Font::Sm);
+                                DrawTextC(relLbl ? relLbl : "?", nx+2, ny + nH/4, lc, Font::Sm);
+                            } else {
+                                DrawTextC(nFit, nx+2, ny, COL_TEXT, Font::Sm);
+                            }
+                        }
+                    }
+
+                    if (hidden > 0) {
+                        std::string hstr = "+" + std::to_string(hidden) + " more";
+                        DrawTextC(hstr, panelX + panelW - 60, panelTop + panelH - 16, COL_DIM, Font::Sm);
                     }
                 }
             }
@@ -2069,22 +2097,23 @@ static void DrawMiiStats() {
             // Stats editor
             const auto& fd = MII_STATS_FIELDS[gMiiStatsFieldSel];
             int cx2 = editX + editW/2;
+            int midY2 = panelTop + panelH/2 - 20;
 
-            DrawTextC(fd.label, cx2, panelTop+48, COL_DIM, Font::Md);
-            DrawTextC(fd.desc, cx2, panelTop+76, COL_DIM, Font::Sm);
+            DrawTextC(fd.label, cx2, midY2-102 - (fd.isStr ? 30 : 0), COL_DIM, Font::Md);
+            DrawTextC(fd.desc, cx2, midY2-76 - (fd.isStr ? 30 : 0), COL_DIM, Font::Sm);
 
             if (fd.isStr) {
                 std::string val = SaveEditor::GetWStr32At(gMiiSav, SaveEditor::Hash(fd.fieldName), miiSlotIdx);
-                DrawTextC(val.empty()?"(empty)":val, cx2, panelTop+114, COL_TEXT, Font::Lg);
-                int bw=220, bh=46, bx=cx2-bw/2, by=panelTop+154;
+                DrawTextC(val.empty()?"(empty)":val, cx2, midY2-70, COL_TEXT, Font::Lg);
+                int bw=220, bh=46, bx=cx2-bw/2, by=midY2-20;
                 HitAdd(bx,by,bw,bh, TMiiStatsKbd, 0);
                 FillRect(bx,by,bw,bh,COL_SEL); DrawRect(bx,by,bw,bh,COL_ACCENT);
                 DrawTextC("keyboard", cx2, by+bh/2, COL_ACCENT, Font::Md);
                 {
                     static const uint32_t H_HOW_NAME = SaveEditor::Hash("Mii.Name.HowToCallName");
                     std::string how = SaveEditor::GetWStr64At(gMiiSav, H_HOW_NAME, miiSlotIdx);
-                    DrawTextC(how.empty()?"(same as name)":how.c_str(), cx2, panelTop+216, how.empty()?COL_DIM:COL_TEXT, Font::Sm);
-                    int pw=220,phh=42,px=cx2-pw/2,py=panelTop+232;
+                    DrawTextC(how.empty()?"(same as name)":how.c_str(), cx2, by+bh+16, how.empty()?COL_DIM:COL_TEXT, Font::Sm);
+                    int pw=220,phh=42,px=cx2-pw/2,py=by+bh+32;
                     HitAdd(px,py,pw,phh,TSimBtn,(int)HidNpadButton_X);
                     FillRect(px,py,pw,phh,COL_SEL); DrawRect(px,py,pw,phh,COL_ACCENT);
                     DrawTextC("X  edit pronunciation",cx2,py+phh/2,COL_ACCENT,Font::Sm);
@@ -2092,9 +2121,9 @@ static void DrawMiiStats() {
             } else if (fd.isEnum) {
                 uint32_t enumVal = SaveEditor::GetEnumAt(gMiiSav, SaveEditor::Hash(fd.fieldName), miiSlotIdx);
                 const char* lbl = FeelingName(enumVal);
-                DrawTextC(lbl ? lbl : ("?" + std::to_string(enumVal)).c_str(), cx2, panelTop+114, COL_TEXT, Font::Lg);
+                DrawTextC(lbl ? lbl : ("?" + std::to_string(enumVal)).c_str(), cx2, midY2-40, COL_TEXT, Font::Lg);
                 const int btnW=140, btnH=40, btnGap=24;
-                int bxL=cx2-btnGap/2-btnW, bxR=cx2+btnGap/2, btnY=panelTop+154;
+                int bxL=cx2-btnGap/2-btnW, bxR=cx2+btnGap/2, btnY=midY2+10;
                 HitAdd(bxL,btnY,btnW,btnH, TSimBtn, (int)HidNpadButton_Left);
                 FillRect(bxL,btnY,btnW,btnH,COL_PANEL); DrawRect(bxL,btnY,btnW,btnH,COL_BORDER);
                 DrawTextC("< Prev", bxL+btnW/2, btnY+btnH/2, COL_DIM);
@@ -2105,12 +2134,12 @@ static void DrawMiiStats() {
             } else {
                 int32_t rawVal = fd.isUInt ? (int32_t)SaveEditor::GetUIntAt(gMiiSav,SaveEditor::Hash(fd.fieldName),miiSlotIdx)
                                            : SaveEditor::GetIntAt(gMiiSav,SaveEditor::Hash(fd.fieldName),miiSlotIdx);
-                DrawTextC(std::to_string(rawVal + fd.dispOffset), cx2, panelTop+114, COL_TEXT, Font::Lg);
+                DrawTextC(std::to_string(rawVal + fd.dispOffset), cx2, midY2-40, COL_TEXT, Font::Lg);
 
                 static const int STEPS2[]={100,10,1};
                 int bw2=60, bh2=64, gap2=6;
                 int totalBW2=(3*(bw2+gap2))*2+16;
-                int bx2=cx2-totalBW2/2, by2=panelTop+154;
+                int bx2=cx2-totalBW2/2, by2=midY2+10;
                 int btn2Idx=0;
                 for (int s : STEPS2) {
                     bool focused=(gMiiBtnSel==btn2Idx);
@@ -2143,21 +2172,23 @@ static void DrawMiiStats() {
 
             // Import / Export .ltd section — only shown on Name field (str)
             if (fd.isStr && !gMiis.empty() && gMiiStatsMiiSel < (int)gMiis.size()) {
-                SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
-                SDL_RenderDrawLine(gRen, editX+12, panelTop+294, editX+editW-12, panelTop+294);
-                DrawTextC("Mii file", cx2, panelTop+316, COL_DIM, Font::Sm);
+                // Anchor to panel bottom so it stays fixed regardless of upper block position
                 int ibW=250,ibH=66,ibGap=20;
-                int ibxL=cx2-ibGap/2-ibW, ibxR=cx2+ibGap/2, ibY=panelTop+338;
+                int ibxL=cx2-ibGap/2-ibW, ibxR=cx2+ibGap/2;
+                int ibY = panelTop + panelH - ibH - 20;
+                SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
+                SDL_RenderDrawLine(gRen, editX+12, ibY-44, editX+editW-12, ibY-44);
+                DrawTextC("Mii file", cx2, ibY-22, COL_DIM, Font::Sm);
                 bool ltdImp = (gMiiLtdBtnSel == 0);
                 bool ltdExp = (gMiiLtdBtnSel == 1);
                 HitAdd(ibxL,ibY,ibW,ibH,TOpenImportBrowser,0);
                 FillRect(ibxL,ibY,ibW,ibH,ltdImp?COL_SEL:COL_PANEL);
-                DrawRect(ibxL,ibY,ibW,ibH,ltdImp?COL_GOLD:COL_BORDER);
-                DrawTextC("import .ltd",ibxL+ibW/2,ibY+ibH/2,ltdImp?COL_GOLD:COL_DIM,Font::Md);
+                DrawRect(ibxL,ibY,ibW,ibH,COL_ACCENT);
+                DrawTextC("import .ltd",ibxL+ibW/2,ibY+ibH/2,COL_ACCENT,Font::Lg);
                 HitAdd(ibxR,ibY,ibW,ibH,TDoMiiExport,0);
                 FillRect(ibxR,ibY,ibW,ibH,ltdExp?COL_SEL:COL_PANEL);
-                DrawRect(ibxR,ibY,ibW,ibH,ltdExp?COL_GOLD:COL_BORDER);
-                DrawTextC("export .ltd",ibxR+ibW/2,ibY+ibH/2,ltdExp?COL_GOLD:COL_DIM,Font::Md);
+                DrawRect(ibxR,ibY,ibW,ibH,COL_GOLD);
+                DrawTextC("export .ltd",ibxR+ibW/2,ibY+ibH/2,COL_GOLD,Font::Lg);
             }
 
             if (!gMiiStatsMsg.empty())
@@ -2214,7 +2245,7 @@ static void DrawAppletWarning() {
     FillRect(sxL, sY, sW, sH, {20, 28, 20, 255});
     DrawRect(sxL, sY, sW, sH, COL_RED);
     DrawTextC("Wrong way", sxL + sW/2, sY + 18, COL_RED, Font::Sm);
-    DrawTextC("Hold R  +  open Album", sxL + sW/2, sY + 44, COL_DIM, Font::Sm);
+    DrawTextC("open Album", sxL + sW/2, sY + 44, COL_DIM, Font::Sm);
 
     FillRect(sxR, sY, sW, sH, {16, 28, 16, 255});
     DrawRect(sxR, sY, sW, sH, COL_GREEN);
@@ -2274,6 +2305,7 @@ static void TAckBackYes(int) {
     gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
     gPlayerSavDirty=false; gMiiSavDirty=false; gUgcDirty=false;
     memset(gPlayerUndoValid, 0, sizeof(gPlayerUndoValid));
+    gNameLangUndoValid=false; gIslandLangUndoValid=false;
     memset(gMiiUndoValid,    0, sizeof(gMiiUndoValid));
     gWordUndo.valid = false;
     SaveMount::Unmount();
@@ -2287,6 +2319,7 @@ static void TAckBackNo(int) {
     gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
     gPlayerSavDirty=false; gMiiSavDirty=false; gUgcDirty=false;
     memset(gPlayerUndoValid, 0, sizeof(gPlayerUndoValid));
+    gNameLangUndoValid=false; gIslandLangUndoValid=false;
     memset(gMiiUndoValid,    0, sizeof(gMiiUndoValid));
     gWordUndo.valid = false;
     SaveMount::Unmount();
@@ -2361,12 +2394,24 @@ static void TUndoPlayer(int) {
     const auto& fd = PLAYER_FIELDS[gPlayerFieldSel];
     uint32_t h = PFHash(fd);
     uint32_t v = (uint32_t)gPlayerUndoVal[gPlayerFieldSel];
-    if (fd.isEnum)      SaveEditor::SetEnum(gPlayerSav, h, v);
+    if (fd.isEnum)          SaveEditor::SetEnum(gPlayerSav, h, v);
     else if (fd.isSkinTone) SaveEditor::SetUInt(gPlayerSav, h, v);
-    else if (fd.isUInt) SaveEditor::SetUInt(gPlayerSav, h, v);
-    else if (fd.isRegion || fd.isLang) SaveEditor::SetEnum(gPlayerSav, h, v);
-    else                SaveEditor::SetAnyScalar(gPlayerSav, h, v);
+    else if (fd.isUInt)     SaveEditor::SetUInt(gPlayerSav, h, v);
+    else if (fd.isRegion)   SaveEditor::SetEnum(gPlayerSav, h, v);
+    else                    SaveEditor::SetAnyScalar(gPlayerSav, h, v);
     gPlayerUndoValid[gPlayerFieldSel] = false;
+    gPlayerSavDirty = true;
+}
+[[maybe_unused]] static void TUndoNameLang(int) {
+    if (!gNameLangUndoValid || !gPlayerSav.loaded) return;
+    SaveEditor::SetEnum(gPlayerSav, SaveEditor::Hash("Player.NameRegionLanguageID"), (uint32_t)gNameLangUndo);
+    gNameLangUndoValid = false;
+    gPlayerSavDirty = true;
+}
+[[maybe_unused]] static void TUndoIslandLang(int) {
+    if (!gIslandLangUndoValid || !gPlayerSav.loaded) return;
+    SaveEditor::SetEnum(gPlayerSav, SaveEditor::Hash("Player.IslandNameRegionLanguageID"), (uint32_t)gIslandLangUndo);
+    gIslandLangUndoValid = false;
     gPlayerSavDirty = true;
 }
 static void TUndoMii(int) {
@@ -2551,7 +2596,7 @@ int main(int,char**) {
 
     if (appletGetAppletType() != AppletType_Application) {
         gScreen = Screen::AppletWarning;
-    }
+    } else {
 
     mkdir("/switch/TomoToolNX", 0777);
     // Two-step rename so exFAT (case-insensitive) picks up the capital E
@@ -2577,6 +2622,8 @@ int main(int,char**) {
         gError="No user accounts found.";
         gScreen=Screen::Error;
     }
+
+    } // end else (not applet mode)
 
     // Load avatar textures from JPEG data
     for (auto& u : gUsers) {
@@ -2851,7 +2898,7 @@ int main(int,char**) {
                 }
             } else if (gOnSwitchMode == OnSwitchMode::UGC) {
                 // Tab switch (cycle: UGC → MiiStats → Player → WebUI → UGC)
-                if (kDown&(HidNpadButton_R|HidNpadButton_ZR)){
+                if (kDown&HidNpadButton_R){
                     if (!gSaveWarningAcked) {
                         gSaveWarningTarget=OnSwitchMode::MiiStats; gShowSaveWarning=true; gSaveWarningCountdown=120; break;
                     }
@@ -2863,8 +2910,20 @@ int main(int,char**) {
                     }
                     gOnSwitchMsg=""; break;
                 }
-                if (kDown&(HidNpadButton_L|HidNpadButton_ZL)){
+                if (kDown&HidNpadButton_L){
                     gOnSwitchMode=OnSwitchMode::WebUI; gOnSwitchMsg=""; break;
+                }
+                if (kNav&HidNpadButton_ZL && !gEntries.empty()) {
+                    gEntrySel = (gEntrySel>0) ? gEntrySel-1 : (int)gEntries.size()-1;
+                    if(gEntrySel<gEntryScroll) gEntryScroll=gEntrySel;
+                    if(gEntrySel>=(int)gEntries.size()-1) gEntryScroll=std::max(0,(int)gEntries.size()-VISIBLE);
+                    LoadPreview(gEntries[gEntrySel]);
+                }
+                if (kNav&HidNpadButton_ZR && !gEntries.empty()) {
+                    gEntrySel = (gEntrySel+1<(int)gEntries.size()) ? gEntrySel+1 : 0;
+                    if(gEntrySel>=gEntryScroll+VISIBLE) gEntryScroll=gEntrySel-VISIBLE+1;
+                    if(gEntrySel==0) gEntryScroll=0;
+                    LoadPreview(gEntries[gEntrySel]);
                 }
                 if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp)){
                     if (!gEntries.empty()) {
@@ -2942,7 +3001,7 @@ int main(int,char**) {
                         gPlayerMsg = "Load error: " + err;
                 }
                 // Tab switch (changes stay in memory; prompt only on back/quit)
-                if (kDown&(HidNpadButton_L|HidNpadButton_ZL)){
+                if (kDown&HidNpadButton_L){
                     gOnSwitchMode=OnSwitchMode::MiiStats;
                     if (!gMiiSav.loaded) {
                         std::string err;
@@ -2951,13 +3010,13 @@ int main(int,char**) {
                     }
                     gOnSwitchMsg=""; break;
                 }
-                if (kDown&(HidNpadButton_R|HidNpadButton_ZR)){
+                if (kDown&HidNpadButton_R){
                     gOnSwitchMode=OnSwitchMode::WebUI; gOnSwitchMsg=""; break;
                 }
                 // Field navigation
-                if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))
+                if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp|HidNpadButton_ZL))
                     gPlayerFieldSel = (gPlayerFieldSel>0) ? gPlayerFieldSel-1 : PLAYER_FIELD_COUNT-1;
-                if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
+                if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown|HidNpadButton_ZR))
                     gPlayerFieldSel = (gPlayerFieldSel+1<PLAYER_FIELD_COUNT) ? gPlayerFieldSel+1 : 0;
                 // Edit via callbacks
                 if (gPlayerSav.loaded) {
@@ -3051,23 +3110,27 @@ int main(int,char**) {
                             gPlayerSavDirty=true;
                         }
                     }
-                    // Language enum cycle
-                    if (fd.isLang) {
-                        uint32_t cur = SaveEditor::GetEnum(gPlayerSav, h);
-                        int lidx = 0;
-                        for (int li=0; li<LANG_OPTION_COUNT; li++)
-                            if (SaveEditor::Hash(LANG_OPTIONS[li].name)==cur) { lidx=li; break; }
-                        if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft)) {
-                            if (!gPlayerUndoValid[gPlayerFieldSel]) { gPlayerUndoVal[gPlayerFieldSel]=(int32_t)cur; gPlayerUndoValid[gPlayerFieldSel]=true; }
-                            int nidx = (lidx-1+LANG_OPTION_COUNT) % LANG_OPTION_COUNT;
-                            SaveEditor::SetEnum(gPlayerSav, h, SaveEditor::Hash(LANG_OPTIONS[nidx].name));
-                            gPlayerSavDirty=true;
-                        }
-                        if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) {
-                            if (!gPlayerUndoValid[gPlayerFieldSel]) { gPlayerUndoVal[gPlayerFieldSel]=(int32_t)cur; gPlayerUndoValid[gPlayerFieldSel]=true; }
-                            int nidx = (lidx+1) % LANG_OPTION_COUNT;
-                            SaveEditor::SetEnum(gPlayerSav, h, SaveEditor::Hash(LANG_OPTIONS[nidx].name));
-                            gPlayerSavDirty=true;
+                    // Language cycle embedded in Name/Island str fields
+                    if (fd.isStr) {
+                        const char* lf = (strcmp(fd.fieldName,"Player.Name")==0)      ? "Player.NameRegionLanguageID"
+                                       : (strcmp(fd.fieldName,"Player.IslandName")==0) ? "Player.IslandNameRegionLanguageID"
+                                       : nullptr;
+                        if (lf) {
+                            bool isNameF = strcmp(fd.fieldName,"Player.Name")==0;
+                            uint32_t lh = SaveEditor::Hash(lf);
+                            uint32_t cur = SaveEditor::GetEnum(gPlayerSav, lh);
+                            int lidx = 0;
+                            for (int li=0; li<LANG_OPTION_COUNT; li++)
+                                if (SaveEditor::Hash(LANG_OPTIONS[li].name)==cur) { lidx=li; break; }
+                            auto cycleLang = [&](int dir) {
+                                if (isNameF) { if (!gNameLangUndoValid)   { gNameLangUndo  =(int32_t)cur; gNameLangUndoValid  =true; } }
+                                else         { if (!gIslandLangUndoValid) { gIslandLangUndo=(int32_t)cur; gIslandLangUndoValid=true; } }
+                                int nidx = (lidx+dir+LANG_OPTION_COUNT)%LANG_OPTION_COUNT;
+                                SaveEditor::SetEnum(gPlayerSav, lh, SaveEditor::Hash(LANG_OPTIONS[nidx].name));
+                                gPlayerSavDirty=true;
+                            };
+                            if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))   cycleLang(-1);
+                            if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) cycleLang(1);
                         }
                     }
                     // Skin tone cycle
@@ -3164,12 +3227,12 @@ int main(int,char**) {
                     auto prevMii = [&](){
                         gMiiStatsMiiSel = (gMiiStatsMiiSel>0) ? gMiiStatsMiiSel-1 : (int)gMiis.size()-1;
                         if (gMiiStatsMiiSel < gMiiStatsScroll) gMiiStatsScroll=gMiiStatsMiiSel;
-                        gWordUndo.valid = false;
+                        gWordUndo.valid = false; gMiiRelSel=0; gMiiRelScroll=0;
                     };
                     auto nextMii = [&](){
                         gMiiStatsMiiSel = (gMiiStatsMiiSel+1<(int)gMiis.size()) ? gMiiStatsMiiSel+1 : 0;
                         if (gMiiStatsMiiSel >= gMiiStatsScroll+mseVis2) gMiiStatsScroll=gMiiStatsMiiSel-mseVis2+1;
-                        gWordUndo.valid = false;
+                        gWordUndo.valid = false; gMiiRelSel=0; gMiiRelScroll=0;
                     };
                     if (kNav&HidNpadButton_ZL) prevMii();
                     if (kNav&HidNpadButton_ZR) nextMii();
@@ -3186,11 +3249,20 @@ int main(int,char**) {
                     if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
                         { gMiiWordsSlotSel = (gMiiWordsSlotSel<11) ? gMiiWordsSlotSel+1 : 0; gWordUndo.valid=false; }
                 } else if (gMiiStatsSubTab==MiiStatsSubTab::Relations) {
-                    if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))
-                        { if (gMiiRelSel > 0) gMiiRelSel--; }
-                    if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
-                        gMiiRelSel++;
-                    // gMiiRelSel clamped to valid range in draw phase
+                    const int REL_VIS = (SCREEN_H - 32 - (SE_TOP_Y + 2)) / 34;
+                    if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp)) {
+                        if (gMiiRelSel > 0) {
+                            gMiiRelSel--;
+                            if (gMiiRelSel < gMiiRelScroll) gMiiRelScroll = gMiiRelSel;
+                        }
+                    }
+                    if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown)) {
+                        if (gMiiRelSel+1 < gMiiRelCount) {
+                            gMiiRelSel++;
+                            if (gMiiRelSel >= gMiiRelScroll + REL_VIS) gMiiRelScroll = gMiiRelSel - REL_VIS + 1;
+                        }
+                    }
+                    // gMiiRelSel additionally clamped to valid range in draw phase
                 }
                 // Edit (Words sub-tab)
                 if (gMiiStatsSubTab==MiiStatsSubTab::Words && gMiiSav.loaded && !gMiis.empty() && gMiiStatsMiiSel<(int)gMiis.size()) {
@@ -3201,7 +3273,6 @@ int main(int,char**) {
                     static const uint32_t H_WREGION_I= SaveEditor::Hash("Mii.MiiMisc.WordInfo.WordArray.WordRegionLanguageID");
                     static const uint32_t H_WINV_I   = SaveEditor::Hash("Invalid");
                     static const uint32_t H_WUSEN_I  = SaveEditor::Hash("USen");
-                    static const uint32_t H_WJPJA_I  = SaveEditor::Hash("JPja");
                     int wIdx = miiIdx * 12 + gMiiWordsSlotSel;
                     uint32_t curKind = SaveEditor::GetAnyEnumAt(gMiiSav, H_WKIND_I, wIdx, H_WINV_I);
                     int kIdx = WordKindIndex(curKind);
@@ -3400,7 +3471,7 @@ int main(int,char**) {
                     LogOK("WebUI restarted");
                 }
                 // Tab switch
-                if (kDown&(HidNpadButton_L|HidNpadButton_ZL)){
+                if (kDown&HidNpadButton_L){
                     if (!gSaveWarningAcked) {
                         gSaveWarningTarget=OnSwitchMode::Player; gShowSaveWarning=true; gSaveWarningCountdown=120; break;
                     }
@@ -3412,7 +3483,7 @@ int main(int,char**) {
                     }
                     break;
                 }
-                if (kDown&(HidNpadButton_R|HidNpadButton_ZR)){
+                if (kDown&HidNpadButton_R){
                     gOnSwitchMode=OnSwitchMode::UGC; gOnSwitchMsg=""; break;
                 }
                 if (kDown&(HidNpadButton_B|HidNpadButton_Plus)){
