@@ -36,6 +36,12 @@ void ClearPendingCommit();
 bool HasPendingMiiRefresh();
 void ClearPendingMiiRefresh();
 
+// Set after a WebUI save upload so the main thread can reload the in-memory sav.
+bool HasPendingPlayerSavReload();
+void ClearPendingPlayerSavReload();
+bool HasPendingMiiSavReload();
+void ClearPendingMiiSavReload();
+
 // ── Import job (queued by server thread, executed by main thread) ───────────
 // The server thread must NOT call IMG_Load — it's not thread-safe on Atmosphere.
 // Instead it writes the upload to a temp file and queues an ImportJob.

@@ -34,8 +34,10 @@ static bool FileExists(const std::string& p){struct stat st;return stat(p.c_str(
 
 static Thread      s_thread;
 static bool        s_running       = false;
-static bool        s_pendingCommit    = false;
-static bool        s_pendingMiiRefresh = false;
+static bool        s_pendingCommit          = false;
+static bool        s_pendingMiiRefresh      = false;
+static bool        s_pendingPlayerSavReload = false;
+static bool        s_pendingMiiSavReload    = false;
 static int         s_port          = 8080;
 static std::string s_ugcPath;
 static Mutex       s_mutex;
@@ -182,7 +184,7 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 #nav-toggle-bar{display:flex;align-items:center;justify-content:center;height:16px;background:var(--surface);border-bottom:1px solid var(--border);cursor:pointer;flex-shrink:0;color:var(--muted);user-select:none}
 #nav-toggle-bar:hover{color:var(--text)}
 #nav-toggle-bar svg{transition:transform .2s}
-body.nav-collapsed header,body.nav-collapsed .tabs,body.nav-collapsed #save-warn,body.nav-collapsed #mii-subtab-bar-global{display:none!important}
+body.nav-collapsed header,body.nav-collapsed .tabs,body.nav-collapsed #save-warn,body.nav-collapsed #mii-subtab-bar-global,body.nav-collapsed #save-toolbar-player,body.nav-collapsed #save-toolbar-mii{display:none!important}
 body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
 .mii-content{flex:1;overflow-y:auto;min-height:0}.mii-content::-webkit-scrollbar{width:4px}.mii-content::-webkit-scrollbar-thumb{background:var(--border)}
 .mii-words-list{display:flex;flex-direction:column;gap:4px;padding:10px 12px}
@@ -278,8 +280,8 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
   </div>
   <div class="info-bar" id="info-bar"></div>
   <div class="toolbar" style="border-top:none;padding-bottom:9px">
-    <button class="btn btn-cyan" id="btn-import" disabled onclick="doImport()">import tex</button>
-    <button class="btn btn-gold" id="btn-export" disabled onclick="doExport()">export tex</button>
+    <button class="btn btn-cyan" id="btn-import" disabled onclick="doImport()">import pic</button>
+    <button class="btn btn-gold" id="btn-export" disabled onclick="doExport()">export pic</button>
     <button class="btn" onclick="loadList()">refresh</button>
     <div class="status info" id="status"></div>
   </div>
@@ -298,7 +300,7 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
 
 <!-- Player Panel -->
 <div class="panel" id="panel-player">
-  <div class="toolbar">
+  <div class="toolbar" id="save-toolbar-player">
     <button class="btn btn-primary" onclick="loadSave('player')">load Player.sav</button>
     <button class="btn btn-gold" id="save-apply-player" disabled onclick="applySave('player')">apply to Switch</button>
     <div class="status info" id="save-status-player"></div>
@@ -308,7 +310,7 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
 
 <!-- Mii Stats Panel -->
 <div class="panel" id="panel-miistats">
-  <div class="toolbar">
+  <div class="toolbar" id="save-toolbar-mii">
     <button class="btn btn-primary" onclick="loadSave('mii')">load Mii.sav</button>
     <button class="btn btn-gold" id="save-apply-mii" disabled onclick="applySave('mii')">apply to Switch</button>
     <div class="status info" id="save-status-mii"></div>
@@ -3667,7 +3669,11 @@ static void HandleSaveUpload(int fd, const Request& req) {
     if (!f) { Send500(fd,"Cannot write save"); return; }
     fwrite(req.body.data(),1,req.body.size(),f); fclose(f);
 
-    mutexLock(&s_mutex); s_pendingCommit=true; mutexUnlock(&s_mutex);
+    mutexLock(&s_mutex);
+    s_pendingCommit = true;
+    if (which == "player") s_pendingPlayerSavReload = true;
+    else if (which == "mii") { s_pendingMiiSavReload = true; s_pendingMiiRefresh = true; }
+    mutexUnlock(&s_mutex);
     SrvLog("Save upload OK: "+which+" ("+std::to_string(req.body.size())+" bytes)");
     Send200(fd,"application/json","{\"ok\":true}");
 }
@@ -3714,7 +3720,7 @@ static void ServerThreadFunc(void*){
 namespace HttpServer {
 void Start(int port,const std::string& ugcPath){
     if(s_running) return;
-    s_port=port;s_ugcPath=ugcPath;s_running=true;s_pendingCommit=false;
+    s_port=port;s_ugcPath=ugcPath;s_running=true;s_pendingCommit=false;s_pendingPlayerSavReload=false;s_pendingMiiSavReload=false;
     mutexInit(&s_mutex);mutexInit(&s_logMutex);mutexInit(&s_importMutex);
     s_logWrite=0;s_logRead=0;s_importState=ImportState::Idle;
     MkdirP("/switch/TomoToolNX");
@@ -3726,6 +3732,10 @@ bool HasPendingCommit(){mutexLock(&s_mutex);bool v=s_pendingCommit;mutexUnlock(&
 void ClearPendingCommit(){mutexLock(&s_mutex);s_pendingCommit=false;mutexUnlock(&s_mutex);}
 bool HasPendingMiiRefresh(){mutexLock(&s_mutex);bool v=s_pendingMiiRefresh;mutexUnlock(&s_mutex);return v;}
 void ClearPendingMiiRefresh(){mutexLock(&s_mutex);s_pendingMiiRefresh=false;mutexUnlock(&s_mutex);}
+bool HasPendingPlayerSavReload(){mutexLock(&s_mutex);bool v=s_pendingPlayerSavReload;mutexUnlock(&s_mutex);return v;}
+void ClearPendingPlayerSavReload(){mutexLock(&s_mutex);s_pendingPlayerSavReload=false;mutexUnlock(&s_mutex);}
+bool HasPendingMiiSavReload(){mutexLock(&s_mutex);bool v=s_pendingMiiSavReload;mutexUnlock(&s_mutex);return v;}
+void ClearPendingMiiSavReload(){mutexLock(&s_mutex);s_pendingMiiSavReload=false;mutexUnlock(&s_mutex);}
 bool HasPendingImport(){mutexLock(&s_importMutex);bool v=(s_importState==ImportState::Queued);mutexUnlock(&s_importMutex);return v;}
 ImportJob TakePendingImport(){mutexLock(&s_importMutex);ImportJob job=s_importJob;s_importState=ImportState::InProgress;mutexUnlock(&s_importMutex);return job;}
 void FinishImport(const std::string& result){mutexLock(&s_importMutex);s_importResult=result;s_importState=ImportState::Done;mutexUnlock(&s_importMutex);}
