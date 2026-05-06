@@ -314,6 +314,27 @@ void SetIntAt(SavFile& s, uint32_t h, int idx, int32_t v) {
 void SetUIntAt(SavFile& s, uint32_t h, int idx, uint32_t v) {
     ArrayWrite(FindMut(s,h), DT_UIntArray, idx, v);
 }
+uint64_t GetUInt64At(const SavFile& s, uint32_t h, int idx, uint64_t def) {
+    const Entry* e = Find(s, h);
+    if (!e || e->type != DT_UInt64Array || e->payload.size() < 4) return def;
+    uint32_t cnt = R32(e->payload.data());
+    if (idx < 0 || (uint32_t)idx >= cnt) return def;
+    size_t off = 4 + (size_t)idx * 8;
+    if (off + 8 > e->payload.size()) return def;
+    uint32_t lo = R32(e->payload.data() + off);
+    uint32_t hi = R32(e->payload.data() + off + 4);
+    return (uint64_t)lo | ((uint64_t)hi << 32);
+}
+void SetUInt64At(SavFile& s, uint32_t h, int idx, uint64_t v) {
+    Entry* e = FindMut(s, h);
+    if (!e || e->type != DT_UInt64Array || e->payload.size() < 4) return;
+    uint32_t cnt = R32(e->payload.data());
+    if (idx < 0 || (uint32_t)idx >= cnt) return;
+    size_t off = 4 + (size_t)idx * 8;
+    if (off + 8 > e->payload.size()) return;
+    W32(e->payload.data() + off,     (uint32_t)(v & 0xFFFFFFFFu));
+    W32(e->payload.data() + off + 4, (uint32_t)(v >> 32));
+}
 void SetEnumAt(SavFile& s, uint32_t h, int idx, uint32_t v) {
     ArrayWrite(FindMut(s,h), DT_EnumArray, idx, v);
 }

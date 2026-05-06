@@ -17,11 +17,13 @@
 #include "updater.h"
 
 #include "save_editor.h"
+#include "belongings_data.h"
 #include <string>
 #include <vector>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <cstring>
+#include <ctime>
 #include <algorithm>
 #include <cmath>
 
@@ -122,13 +124,14 @@ static void DrawRect(int x,int y,int w,int h,SDL_Color c){
 
 // ─── Screens ──────────────────────────────────────────────────────────────────
 
-enum class Screen { AppletWarning, UpdateCheck, UpdateAvailable, Downloading, UserPick, BackupPrompt, BackingUp, Mounting, OnSwitch, SaveFeedback, Error };
+enum class Screen { AppletWarning, UpdateCheck, UpdateAvailable, Downloading, UserPick, BackupPrompt, BackingUp, Mounting, OnSwitch, SaveFeedback, Error, Settings };
 
 static Screen      gScreen  = Screen::UpdateCheck;
 static std::string gError;
 static std::string gIP;
 static std::vector<SaveMount::UserInfo> gUsers;
-static int         gUserSel = 0;
+static int         gUserSel   = 0;
+static bool        gBackupFull = false;  // true when MAX_BACKUPS slots are used
 static std::vector<SDL_Texture*> gAvatarTextures;
 
 // ─── Log (WebUI screen) ───────────────────────────────────────────────────────
@@ -212,11 +215,14 @@ static void TSelMiiStatsField(int idx);
 static void TSelMiiWordsSlot(int idx);
 static void TSelMiiRelation(int idx);
 static void TRelMeterAdj(int delta);
+static void TRelDateKbd(int idx);
 static void TSetSocialView(int v);
+static void TBLSel(int idx);
 static void TAckSaveWarning(int);
 static void TPlayerKbd(int);
 static void TMiiStatsKbd(int);
 static void DrawSaveWarning();
+static void DrawFileBrowser();
 static void TUndoPlayer(int);
 static void TUndoMii(int);
 static void TUndoWords(int);
@@ -261,6 +267,8 @@ static int  gMiiBtnSel      = 2;     // 0-5 for 6 MiiStats numeric buttons
 static int  gMiiLtdBtnSel   = 0;     // 0=import .ltd  1=export .ltd (Name field)
 static bool gMiiNameKbdReq  = false; // touch-triggered open of name keyboard
 static bool gBtnTouchActive = false; // set by TAdjust (touch), cleared after use
+static bool gRelDateKbdReq  = false;
+static int  gRelDatePairIdx = -1;
 
 // Back-prompt state
 static bool gShowBackPrompt       = false;
@@ -276,6 +284,14 @@ static bool gSaveFeedbackQuit   = false;
 static bool gShowThumbTip      = false;
 static int  gThumbTipCountdown = 0;  // frames remaining before button enables
 static bool gThumbTipSeen      = false;
+static int  gMaxBackups        = 8;
+
+static int         gSettingsSel    = 0;
+static std::string gSettingsMsg;
+static SDL_Color   gSettingsMsgCol = COL_TEXT;
+
+static void TOpenSettings(int)      { gSettingsMsg = ""; gScreen = Screen::Settings; }
+static void TSelSettingsItem(int i) { gSettingsSel = i; }
 
 // ─── Player field table ───────────────────────────────────────────────────────
 struct SaveFieldDef {
@@ -508,10 +524,12 @@ static std::string FitNodeName(const std::string& s, TTF_Font* f, int maxW) {
 }
 
 // MiiStats sub-tab state
-enum class MiiStatsSubTab { Stats=0, Words=1, Relations=2, Social=3 };
+enum class MiiStatsSubTab { Stats=0, Belongings=1, Words=2, Relations=3, Social=4 };
 static MiiStatsSubTab gMiiStatsSubTab  = MiiStatsSubTab::Stats;
 static bool           gSocialExpanded  = false;
 static int            gSocialScroll    = 0;
+static int            gBlSel           = 0;   // selected item in Belongings (0–24)
+static int            gBlScroll        = 0;   // visual-row scroll for Belongings
 static int            gMiiWordsSlotSel = 0;   // 0-11: selected word slot
 static int            gMiiRelSel       = 0;   // selected row in filtered relations list
 static int            gMiiRelScroll    = 0;   // first visible row in filtered relations list
@@ -592,6 +610,7 @@ static void TSelMiiStatsMii(int idx) {
 static void TSelMiiStatsField(int idx) { gMiiStatsFieldSel=idx; }
 static void TSelMiiWordsSlot(int idx)  { gMiiWordsSlotSel=idx; gWordUndo.valid=false; }
 static void TSelMiiRelation(int idx)   { gMiiRelSel=idx; }
+static void TRelDateKbd(int idx)       { gRelDateKbdReq=true; gRelDatePairIdx=idx; }
 static void TRelMeterAdj(int delta) {
     if (gMiiRelPairIdx < 0 || !gMiiSav.loaded) return;
     static const uint32_t H_BASE_RA  = 0x8b41897eu;
@@ -614,6 +633,7 @@ static void TSetSocialView(int v) {
     gSocialScroll = 0;
     if (gMiiStatsSubTab != MiiStatsSubTab::Social) gSocialExpanded = false;
 }
+static void TBLSel(int idx) { gBlSel = idx; }
 static void TAckSaveWarning(int) {
     gSaveWarningAcked = true; gShowSaveWarning = false; SaveConfig();
     gOnSwitchMode = gSaveWarningTarget;
@@ -873,6 +893,78 @@ static void DrawDownloading() {
     SDL_RenderPresent(gRen);
 }
 
+static void DrawSettings() {
+    HitClear();
+    SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
+    SDL_RenderClear(gRen);
+
+    if (gShowFileBrowser) { DrawFileBrowser(); SDL_RenderPresent(gRen); return; }
+
+    DrawHeader("settings");
+
+    static const struct { const char* label; const char* desc; } ITEMS[] = {
+        { "Export Path",  "folder used when exporting textures" },
+        { "Max Backups",  "maximum number of save backups to keep (1–99)" },
+    };
+    static const int ITEM_COUNT = 2;
+
+    const int listW = 720, listX = (SCREEN_W - listW) / 2;
+    const int rowH  = 72,  rowGap = 6;
+    int listY = 72;
+
+    for (int i = 0; i < ITEM_COUNT; i++) {
+        bool sel = (i == gSettingsSel);
+        int ry = listY + i * (rowH + rowGap);
+        HitAdd(listX, ry, listW, rowH, TSelSettingsItem, i);
+        FillRect(listX, ry, listW, rowH, sel ? COL_SEL : COL_PANEL);
+        DrawRect(listX, ry, listW, rowH, sel ? COL_GOLD : COL_BORDER);
+
+        DrawText(ITEMS[i].label, listX + 16, ry + 12, sel ? COL_TEXT : COL_DIM, Font::Md);
+        DrawText(ITEMS[i].desc,  listX + 16, ry + 42, COL_DIM, Font::Sm);
+
+        if (i == 0) {
+            // Export path — show current path right-aligned, "A  change" hint
+            TTF_Font* fsm = GetFont(Font::Sm);
+            int vw = 0, vh = 0;
+            if (fsm) TTF_SizeUTF8(fsm, gExportPath.c_str(), &vw, &vh);
+            int maxValW = listW / 2 - 20;
+            std::string disp = gExportPath;
+            while (fsm && vw > maxValW && disp.size() > 4) {
+                disp = ".." + disp.substr(disp.size() - (disp.size() * 3 / 4));
+                TTF_SizeUTF8(fsm, disp.c_str(), &vw, &vh);
+            }
+            DrawText(disp, listX + listW - vw - 16, ry + 14, sel ? COL_ACCENT : COL_DIM, Font::Sm);
+            DrawText("A  change", listX + listW - 100, ry + 44, sel ? COL_GOLD : COL_DIM, Font::Sm);
+        } else if (i == 1) {
+            // Max backups — left/right number selector
+            const int arrowW = 36, numW = 48, ctrlH = 36;
+            int ctrlX = listX + listW - arrowW - numW - arrowW - 20;
+            int ctrlY = ry + (rowH - ctrlH) / 2;
+            // Left arrow
+            HitAdd(ctrlX, ctrlY, arrowW, ctrlH, TSimBtn, (int)HidNpadButton_Left);
+            FillRect(ctrlX, ctrlY, arrowW, ctrlH, COL_PANEL);
+            DrawRect(ctrlX, ctrlY, arrowW, ctrlH, sel ? COL_GOLD : COL_BORDER);
+            DrawTextC("<", ctrlX + arrowW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
+            // Number
+            FillRect(ctrlX + arrowW, ctrlY, numW, ctrlH, COL_PANEL);
+            DrawRect(ctrlX + arrowW, ctrlY, numW, ctrlH, sel ? COL_GOLD : COL_BORDER);
+            DrawTextC(std::to_string(gMaxBackups), ctrlX + arrowW + numW/2, ctrlY + ctrlH/2, sel ? COL_TEXT : COL_DIM, Font::Md);
+            // Right arrow
+            HitAdd(ctrlX + arrowW + numW, ctrlY, arrowW, ctrlH, TSimBtn, (int)HidNpadButton_Right);
+            FillRect(ctrlX + arrowW + numW, ctrlY, arrowW, ctrlH, COL_PANEL);
+            DrawRect(ctrlX + arrowW + numW, ctrlY, arrowW, ctrlH, sel ? COL_GOLD : COL_BORDER);
+            DrawTextC(">", ctrlX + arrowW + numW + arrowW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
+        }
+    }
+
+    if (!gSettingsMsg.empty())
+        DrawTextC(gSettingsMsg, SCREEN_W/2, listY + ITEM_COUNT*(rowH+rowGap) + 16,
+                  gSettingsMsgCol, Font::Sm);
+
+    DrawFooter("Up/Down  navigate    Left/Right  adjust    A  change path    B  back");
+    SDL_RenderPresent(gRen);
+}
+
 static void DrawUserPick() {
     HitClear();
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
@@ -931,7 +1023,16 @@ static void DrawUserPick() {
     if (scroll + MAX_VIS < n)
         DrawTextC(">", startX+totalW+18, startY+CARD_H/2, COL_DIM, Font::Md);
 
-    DrawFooter("Left/Right  navigate    A  select    +  quit");
+    // Settings button — bottom right
+    const int sBtnW = 170, sBtnH = 40;
+    int sBtnX = SCREEN_W - sBtnW - 14;
+    int sBtnY = SCREEN_H - 30 - sBtnH - 10;
+    HitAdd(sBtnX, sBtnY, sBtnW, sBtnH, TOpenSettings, 0);
+    FillRect(sBtnX, sBtnY, sBtnW, sBtnH, COL_PANEL);
+    DrawRect(sBtnX, sBtnY, sBtnW, sBtnH, COL_BORDER);
+    DrawTextC("X  Settings", sBtnX + sBtnW/2, sBtnY + sBtnH/2, COL_DIM, Font::Sm);
+
+    DrawFooter("Left/Right  navigate    A  select    X  settings    +  quit");
     SDL_RenderPresent(gRen);
 }
 
@@ -940,36 +1041,46 @@ static void DrawBackupPrompt() {
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
     SDL_RenderClear(gRen);
     DrawHeader("");
-    DrawTextC("previous backup found", SCREEN_W/2, 44, COL_DIM, Font::Md);
 
-    const int cw  = 300;
+    const int cw  = 460;
     const int ch  = 148;
     const int gap = 20;
-    const int cx  = SCREEN_W/2 - (3*cw + 2*gap)/2;
+    const int cx  = SCREEN_W/2 - (2*cw + gap)/2;
     const int cy  = SCREEN_H/2 - ch/2 + 10;
-    int x1=cx, x2=cx+cw+gap, x3=cx+(cw+gap)*2;
+    int x1=cx, x2=cx+cw+gap;
 
     HitAdd(x1,cy,cw,ch, TSimBtn, (int)HidNpadButton_A);
     HitAdd(x2,cy,cw,ch, TSimBtn, (int)HidNpadButton_B);
-    HitAdd(x3,cy,cw,ch, TSimBtn, (int)HidNpadButton_X);
 
+    int curCount = BackupService::CountBackups();
+    if (gBackupFull) {
+        char fullMsg[64];
+        snprintf(fullMsg, sizeof(fullMsg), "%d/%d backups — erase oldest to make room?", curCount, gMaxBackups);
+        DrawTextC(fullMsg, SCREEN_W/2, 44, COL_DIM, Font::Md);
+        FillRect(x1,cy,cw,ch,COL_PANEL); DrawRect(x1,cy,cw,ch,COL_RED);
+        DrawTextC("[A]",                    x1+cw/2, cy+36,  COL_RED,  Font::Lg);
+        DrawTextC("erase oldest + backup",  x1+cw/2, cy+86,  COL_TEXT, Font::Md);
+        DrawTextC("removes the oldest backup", x1+cw/2, cy+116, COL_DIM, Font::Sm);
+        DrawFooter("A  erase oldest + backup    B  skip    +  quit");
+    } else {
+        DrawTextC("backup save data?", SCREEN_W/2, 44, COL_DIM, Font::Md);
+        FillRect(x1,cy,cw,ch,COL_PANEL); DrawRect(x1,cy,cw,ch,COL_ACCENT);
+        DrawTextC("[A]",         x1+cw/2, cy+36,  COL_ACCENT, Font::Lg);
+        DrawTextC("backup now",  x1+cw/2, cy+86,  COL_TEXT,   Font::Md);
+        DrawTextC("creates a timestamped backup", x1+cw/2, cy+116, COL_DIM, Font::Sm);
+        DrawFooter("A  backup    B  skip    +  quit");
+    }
 
-    FillRect(x1,cy,cw,ch,COL_PANEL); DrawRect(x1,cy,cw,ch,COL_RED);
-    DrawTextC("[A]",                x1+cw/2, cy+36,  COL_RED,    Font::Lg);
-    DrawTextC("delete old backup",  x1+cw/2, cy+86,  COL_TEXT,   Font::Md);
-    DrawTextC("then make a new one",x1+cw/2, cy+116, COL_DIM,    Font::Sm);
+    FillRect(x2,cy,cw,ch,COL_PANEL); DrawRect(x2,cy,cw,ch,COL_RED);
+    DrawTextC("[B]",         x2+cw/2, cy+36,  COL_RED,  Font::Lg);
+    DrawTextC("skip backup", x2+cw/2, cy+86,  COL_TEXT, Font::Md);
+    DrawTextC("continue without backup", x2+cw/2, cy+116, COL_DIM, Font::Sm);
 
-    FillRect(x2,cy,cw,ch,COL_PANEL); DrawRect(x2,cy,cw,ch,COL_ACCENT);
-    DrawTextC("[B]",           x2+cw/2, cy+36,  COL_ACCENT, Font::Lg);
-    DrawTextC("skip backup",   x2+cw/2, cy+86,  COL_TEXT,   Font::Md);
-    DrawTextC("keep old as-is",x2+cw/2, cy+116, COL_DIM,    Font::Sm);
+    // tip: current / max backups
+    char tipBuf[32];
+    snprintf(tipBuf, sizeof(tipBuf), "%d / %d backups", curCount, gMaxBackups);
+    DrawTextC(tipBuf, SCREEN_W/2, cy+ch+18, COL_DIM, Font::Sm);
 
-    FillRect(x3,cy,cw,ch,COL_PANEL); DrawRect(x3,cy,cw,ch,COL_GOLD);
-    DrawTextC("[X]",                 x3+cw/2, cy+36,  COL_GOLD, Font::Lg);
-    DrawTextC("keep old + make new", x3+cw/2, cy+86,  COL_TEXT, Font::Md);
-    DrawTextC("saves both backups",  x3+cw/2, cy+116, COL_DIM,  Font::Sm);
-
-    DrawFooter("A  delete + new    B  skip    X  keep both    +  quit");
     SDL_RenderPresent(gRen);
 }
 
@@ -1029,6 +1140,7 @@ static void LoadConfig() {
         if (key == "export_path")      gExportPath      = val;
         if (key == "thumb_tip_seen")   gThumbTipSeen    = (val == "1");
         if (key == "save_warn_acked")  gSaveWarningAcked = (val == "1");
+        if (key == "max_backups")    { int v = atoi(val.c_str()); if (v >= 1 && v <= 99) gMaxBackups = v; }
     }
     fclose(f);
 }
@@ -1039,6 +1151,7 @@ static void SaveConfig() {
     fprintf(f, "export_path=%s\n",     gExportPath.c_str());
     fprintf(f, "thumb_tip_seen=%d\n",  gThumbTipSeen     ? 1 : 0);
     fprintf(f, "save_warn_acked=%d\n", gSaveWarningAcked ? 1 : 0);
+    fprintf(f, "max_backups=%d\n",     gMaxBackups);
     fclose(f);
 }
 
@@ -1544,6 +1657,75 @@ static void DrawPlayer() {
 // ─── Mii stats editor ─────────────────────────────────────────────────────────
 static const int MSE_LIST_W = 240; // mii selector on left
 
+// ── Belongings constants ───────────────────────────────────────────────────────
+static const uint32_t BL_H_CLOTH_OWN  = 0x84824827u;
+static const uint32_t BL_H_COORD_OWN  = 0x89ce9150u;
+static const uint32_t BL_H_GOODS_ID   = 0xe3d6005eu;
+static const uint32_t BL_H_GOODS_TIME = 0x48c3881au;
+static const uint32_t BL_H_GOODS_UGC  = 0x2115afb6u;
+static const int      BL_SLOTS_PER_MII    = 1200;
+static const int      BL_COORD_SLOTS_MII  = 400;
+static const int      BL_GOODS_SLOTS_MII  = 12;
+static const uint32_t BL_H_INVALID        = 0x7e3d1e46u;
+
+struct BlWornSlotDef { const char* name; uint32_t kh; uint32_t ch; const char* cat; bool addSocks; };
+static const BlWornSlotDef BL_WORN_DEFS[] = {
+    {"All",       0xb20fecedu, 0xee37f256u, "All",       false},
+    {"Topslong",  0x35256740u, 0x1124095du, "Topslong",  false},
+    {"Tops",      0xe81ee9c4u, 0x77cf0ff7u, "Tops",      false},
+    {"BottomsA",  0x15aea81du, 0xec5010fbu, "Bottoms",   false},
+    {"BottomsB",  0x7a1809d1u, 0x536dbec2u, "Bottoms",   true},
+    {"Headwear",  0x98cc9cccu, 0xc499cda5u, "Headwear",  false},
+    {"Shoes",     0x0a903d03u, 0xc0529e53u, "Shoes",     false},
+    {"Accessory", 0xc1094d9fu, 0x64af701au, "Accessory", false},
+};
+static const uint32_t BL_COORD_KH = 0xd5ee521au;
+static const uint32_t BL_COORD_CH = 0x763c97ccu;
+
+// Selectable rows in Belongings:
+//   0-7  : cloth worn slots (BL_WORN_DEFS[0-7])
+//   8    : coordinate worn slot
+//   9-20 : goods pocket slots 0-11
+//   21   : Unlock All Clothes
+//   22   : Lock All Clothes
+//   23   : Unlock All Coords
+//   24   : Lock All Coords
+static const int BL_SEL_MAX = 25;
+// Visual rows (includes section headers):
+//   vr 0        : "── WORN OUTFIT ──" header
+//   vr 1-9      : worn slots 0-8
+//   vr 10       : "── GOODS POCKET ──" header
+//   vr 11-22    : goods slots 0-11
+//   vr 23       : "── OWNERSHIP ──" header
+//   vr 24-27    : action rows 0-3
+static const int BL_VIS_ROWS  = 28;
+static const int BL_ROW_H     = 32;
+
+static int BlSelToVis(int sel) {
+    if (sel < 9)  return sel + 1;
+    if (sel < 21) return sel + 2;
+    return sel + 3;
+}
+
+static const char* BlClothLabel(uint32_t h) {
+    if (!h || h == BL_H_INVALID) return "(none)";
+    for (int i = 0; i < BL_CLOTH_COUNT; i++)
+        if (BL_CLOTH_ITEMS[i].nameHash == h) return BL_CLOTH_ITEMS[i].label;
+    return "?";
+}
+static const char* BlCoordLabel(uint32_t h) {
+    if (!h || h == BL_H_INVALID) return "(none)";
+    for (int i = 0; i < BL_COORD_COUNT; i++)
+        if (BL_COORD_ITEMS[i].keyHash == h) return BL_COORD_ITEMS[i].label;
+    return "?";
+}
+static const char* BlGoodsLabel(uint32_t h) {
+    if (!h) return "(empty)";
+    for (int i = 0; i < BL_GOODS_COUNT; i++)
+        if (BL_GOODS_ITEMS[i].nameHash == h) return BL_GOODS_ITEMS[i].label;
+    return "?";
+}
+
 static void DrawMiiStats() {
     HitClear();
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
@@ -1601,10 +1783,11 @@ static void DrawMiiStats() {
         DrawTextC("no miis", SE_LIST_X+MSE_LIST_W/2, SE_TOP_Y+80, COL_DIM);
     }
 
-    // Middle: field list for selected mii (hidden in Social tab — graph expands into its space)
+    // Middle: field list for selected mii (hidden in Social/Belongings — panel expands)
     int midX = SE_LIST_X + MSE_LIST_W + 12;
     int midW = 340;
-    if (gMiiStatsSubTab != MiiStatsSubTab::Social) {
+    bool midHidden = (gMiiStatsSubTab == MiiStatsSubTab::Social || gMiiStatsSubTab == MiiStatsSubTab::Belongings);
+    if (!midHidden) {
         FillRect(midX, SE_TOP_Y, midW, SCREEN_H-SE_TOP_Y-32, {8,8,8,255});
         DrawRect(midX, SE_TOP_Y, midW, SCREEN_H-SE_TOP_Y-32, COL_BORDER);
     }
@@ -1735,20 +1918,20 @@ static void DrawMiiStats() {
         }
     }
 
-    // Right: edit controls / social view
-    // In Social mode the panel extends left to cover the hidden middle panel
+    // Right: edit controls / social / belongings view
+    // Social and Belongings expand left to cover the hidden middle panel
     int editX = midX + midW + 8;
     int editW = SCREEN_W - editX - 8;
-    int panelX = (gMiiStatsSubTab == MiiStatsSubTab::Social) ? midX   : editX;
-    int panelW = (gMiiStatsSubTab == MiiStatsSubTab::Social) ? (SCREEN_W - midX - 8) : editW;
+    int panelX = midHidden ? midX   : editX;
+    int panelW = midHidden ? (SCREEN_W - midX - 8) : editW;
     FillRect(panelX, SE_TOP_Y, panelW, SCREEN_H-SE_TOP_Y-32, {6,6,6,255});
     DrawRect(panelX, SE_TOP_Y, panelW, SCREEN_H-SE_TOP_Y-32, COL_BORDER);
 
-    // Sub-tab bar: [Stats] [Words] [Relations] [Social]
+    // Sub-tab bar: [Stats] [Words] [Relations] [Social] [Belongings]
     {
-        int stW=100, stH=22, stGap=4, stX=editX+8, stY=SE_TOP_Y+6;
-        const char* stLabels[] = {"Stats","Words","Relations","Social"};
-        for (int ti=0; ti<4; ti++) {
+        int stW=88, stH=22, stGap=4, stX=editX+8, stY=SE_TOP_Y+6;
+        const char* stLabels[] = {"Stats","Belongings","Words","Relations","Social"};
+        for (int ti=0; ti<5; ti++) {
             bool sSel = ((int)gMiiStatsSubTab == ti);
             int sx = stX + ti*(stW+stGap);
             HitAdd(sx, stY, stW, stH, TSetSocialView, ti);
@@ -2092,7 +2275,131 @@ static void DrawMiiStats() {
                     }
                     DrawTextC("both directions set together", cx2, panelTop+514, COL_DIM, Font::Sm);
                 }
+                // ── Since (TypeSetTime) ───────────────────────────────────
+                {
+                    static const uint32_t H_TST_RP = 0x1a892e50u;
+                    int sinceY = fixed ? panelTop+428 : panelTop+530;
+                    SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
+                    SDL_RenderDrawLine(gRen, editX+12, sinceY, editX+editW-12, sinceY);
+                    uint64_t tst = SaveEditor::GetUInt64At(gMiiSav, H_TST_RP, gMiiRelPairIdx);
+                    char dateBuf[11] = "";
+                    if (tst > 0) {
+                        time_t t = (time_t)tst;
+                        struct tm* ti = localtime(&t);
+                        snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d",
+                                 ti->tm_year+1900, ti->tm_mon+1, ti->tm_mday);
+                    }
+                    DrawTextC("Since", cx2, sinceY+14, COL_DIM, Font::Sm);
+                    int rowH = 30, rowW = 150;
+                    int rowY = sinceY+28, rowX = cx2 - rowW/2;
+                    HitAdd(rowX, rowY, rowW, rowH, TRelDateKbd, gMiiRelPairIdx);
+                    FillRect(rowX, rowY, rowW, rowH, COL_PANEL);
+                    DrawRect(rowX, rowY, rowW, rowH, COL_BORDER);
+                    DrawTextC(dateBuf[0] ? dateBuf : "(not set)", rowX+rowW/2, rowY+rowH/2,
+                              dateBuf[0] ? COL_TEXT : COL_DIM, Font::Sm);
+                }
             }
+        } else if (gMiiStatsSubTab == MiiStatsSubTab::Belongings) {
+            // ── Belongings panel (expanded, uses panelX/panelW) ─────────────────
+            const int BL_VIS = panelH / BL_ROW_H;
+            // Clamp scroll so selected row is always visible
+            int selVis = BlSelToVis(gBlSel);
+            if (selVis < gBlScroll) gBlScroll = selVis;
+            if (selVis >= gBlScroll + BL_VIS) gBlScroll = selVis - BL_VIS + 1;
+            if (gBlScroll < 0) gBlScroll = 0;
+
+            const char* ACT_LABELS[] = {
+                "Unlock All Clothes (this Mii)",
+                "Lock All Clothes (this Mii)",
+                "Unlock All Coordinates (this Mii)",
+                "Lock All Coordinates (this Mii)",
+            };
+            TTF_Font* fsm = GetFont(Font::Sm);
+
+            for (int vr = gBlScroll; vr < BL_VIS_ROWS; vr++) {
+                int ry = panelTop + (vr - gBlScroll) * BL_ROW_H;
+                if (ry + BL_ROW_H > panelTop + panelH) break;
+
+                bool isHdr = (vr == 0 || vr == 10 || vr == 23);
+                int  itemSel = isHdr ? -1 :
+                               (vr <= 9)  ? (vr - 1) :
+                               (vr <= 22) ? (vr - 2) : (vr - 3);
+                bool sel = (!isHdr && itemSel == gBlSel);
+
+                if (isHdr) {
+                    const char* hdr = (vr == 0) ? "  WORN OUTFIT" :
+                                      (vr == 10) ? "  GOODS POCKET" : "  OWNERSHIP";
+                    FillRect(panelX+2, ry, panelW-4, BL_ROW_H-1, {28,28,28,255});
+                    DrawRect(panelX+2, ry, panelW-4, BL_ROW_H-1, COL_BORDER);
+                    int tw=0,th=0; if(fsm) TTF_SizeUTF8(fsm,hdr,&tw,&th);
+                    DrawText(hdr, panelX+10, ry+(BL_ROW_H-th)/2, COL_GOLD);
+                } else {
+                    FillRect(panelX+2, ry, panelW-4, BL_ROW_H-1, sel?COL_SEL:COL_BG);
+                    if (sel) DrawRect(panelX+2, ry, panelW-4, BL_ROW_H-1, COL_GOLD);
+                    if (!isHdr) HitAdd(panelX+2, ry, panelW-4, BL_ROW_H-1, TBLSel, itemSel);
+
+                    if (itemSel < 8) {
+                        // Cloth worn slot
+                        const auto& ws = BL_WORN_DEFS[itemSel];
+                        uint32_t ih = SaveEditor::GetAnyEnumAt(gMiiSav, ws.kh, miiSlotIdx, BL_H_INVALID);
+                        uint32_t ci = SaveEditor::GetUIntAt(gMiiSav, ws.ch, miiSlotIdx);
+                        int cc = 1;
+                        for (int k = 0; k < BL_CLOTH_COUNT; k++)
+                            if (BL_CLOTH_ITEMS[k].nameHash == ih) { cc = BL_CLOTH_ITEMS[k].colorCount; break; }
+                        std::string prefix = std::string("[") + ws.name + "]";
+                        int pw=0,ph=0; if(fsm) TTF_SizeUTF8(fsm,prefix.c_str(),&pw,&ph);
+                        DrawText(prefix, panelX+12, ry+(BL_ROW_H-ph)/2, sel?COL_GOLD:COL_DIM);
+                        const char* lbl = BlClothLabel(ih);
+                        int lw=0,lh=0; if(fsm) TTF_SizeUTF8(fsm,lbl,&lw,&lh);
+                        DrawText(lbl, panelX+14+pw, ry+(BL_ROW_H-lh)/2, sel?COL_TEXT:COL_DIM);
+                        std::string cv = "color " + std::to_string(ci+1) + "/" + std::to_string(cc);
+                        int vw=0,vh=0; if(fsm) TTF_SizeUTF8(fsm,cv.c_str(),&vw,&vh);
+                        DrawText(cv, panelX+panelW-vw-14, ry+(BL_ROW_H-vh)/2, sel?COL_ACCENT:COL_DIM);
+                    } else if (itemSel == 8) {
+                        // Coordinate worn slot
+                        uint32_t ih = SaveEditor::GetAnyEnumAt(gMiiSav, BL_COORD_KH, miiSlotIdx, BL_H_INVALID);
+                        uint32_t ci = SaveEditor::GetUIntAt(gMiiSav, BL_COORD_CH, miiSlotIdx);
+                        int cc = 1;
+                        for (int k = 0; k < BL_COORD_COUNT; k++)
+                            if (BL_COORD_ITEMS[k].keyHash == ih) { cc = BL_COORD_ITEMS[k].colorCount; break; }
+                        int pw=0,ph=0; const char* pfx = "[Coord]";
+                        if(fsm) TTF_SizeUTF8(fsm,pfx,&pw,&ph);
+                        DrawText(pfx, panelX+12, ry+(BL_ROW_H-ph)/2, sel?COL_GOLD:COL_DIM);
+                        const char* lbl = BlCoordLabel(ih);
+                        int lw=0,lh=0; if(fsm) TTF_SizeUTF8(fsm,lbl,&lw,&lh);
+                        DrawText(lbl, panelX+14+pw, ry+(BL_ROW_H-lh)/2, sel?COL_TEXT:COL_DIM);
+                        std::string cv = "color " + std::to_string(ci+1) + "/" + std::to_string(cc);
+                        int vw=0,vh=0; if(fsm) TTF_SizeUTF8(fsm,cv.c_str(),&vw,&vh);
+                        DrawText(cv, panelX+panelW-vw-14, ry+(BL_ROW_H-vh)/2, sel?COL_ACCENT:COL_DIM);
+                    } else if (itemSel < 21) {
+                        // Goods pocket slot
+                        int slot = itemSel - 9;
+                        int ai = miiSlotIdx * BL_GOODS_SLOTS_MII + slot;
+                        uint32_t sid = SaveEditor::GetUIntAt(gMiiSav, BL_H_GOODS_ID, ai);
+                        std::string pfx = "Pocket " + std::to_string(slot+1);
+                        int pw=0,ph=0; if(fsm) TTF_SizeUTF8(fsm,pfx.c_str(),&pw,&ph);
+                        DrawText(pfx, panelX+12, ry+(BL_ROW_H-ph)/2, sel?COL_GOLD:COL_DIM);
+                        const char* lbl = BlGoodsLabel(sid);
+                        int lw=0,lh=0; if(fsm) TTF_SizeUTF8(fsm,lbl,&lw,&lh);
+                        DrawText(lbl, panelX+14+pw, ry+(BL_ROW_H-lh)/2, sel?COL_TEXT:COL_DIM);
+                    } else {
+                        // Action row
+                        int act = itemSel - 21;
+                        const char* lbl = ACT_LABELS[act];
+                        int lw=0,lh=0; if(fsm) TTF_SizeUTF8(fsm,lbl,&lw,&lh);
+                        DrawText("▶ ", panelX+12, ry+(BL_ROW_H-lh)/2, sel?COL_GOLD:COL_DIM);
+                        DrawText(lbl, panelX+28, ry+(BL_ROW_H-lh)/2, sel?COL_TEXT:COL_DIM);
+                    }
+                }
+            }
+            // Scrollbar
+            if (BL_VIS_ROWS > BL_VIS) {
+                int sbH = panelH * BL_VIS / BL_VIS_ROWS;
+                int sbY = panelTop + panelH * gBlScroll / BL_VIS_ROWS;
+                FillRect(panelX+panelW-5, sbY, 3, sbH, COL_BORDER);
+            }
+            if (!gMiiStatsMsg.empty())
+                DrawTextC(gMiiStatsMsg, panelX+panelW/2, panelTop+panelH-22, gMiiStatsMsgCol, Font::Sm);
         } else {
             // Stats editor
             const auto& fd = MII_STATS_FIELDS[gMiiStatsFieldSel];
@@ -2204,6 +2511,8 @@ static void DrawMiiStats() {
             ? "ZL/ZR  mii    Up/Down  slot    Left/Right  kind    A  text    X  pronunciation    -  undo    Y  subtab    L/R  tab    B/+  back"
         : gMiiStatsSubTab==MiiStatsSubTab::Relations
             ? "ZL/ZR  mii    Up/Down  relation    Left/Right  type    Y  subtab    L/R  tab    B/+  back"
+        : gMiiStatsSubTab==MiiStatsSubTab::Belongings
+            ? "ZL/ZR  mii    Up/Down  item    A  cycle item    Left/Right  color    X  clear    Y  subtab    L/R  tab    B/+  back"
         : (gMiiStatsFieldSel==0
             ? "ZL/ZR  mii    Up/Down  field    Left/Right  select    A  confirm    X  pronunciation    Y  subtab    L/R  tab    B/+  back"
             : "ZL/ZR  mii    Up/Down  field    Left/Right  value    X  undo    Y  subtab    L/R  tab    B/+  back"));
@@ -2519,12 +2828,11 @@ static void ProcessTouch(int tx, int ty, u64& kDown) {
     }
 
     if (gScreen == Screen::BackupPrompt) {
-        const int cw=300, ch=148, gap=20;
-        const int bx = SCREEN_W/2 - (3*cw + 2*gap)/2;
+        const int cw=460, ch=148, gap=20;
+        const int bx = SCREEN_W/2 - (2*cw + gap)/2;
         const int by = SCREEN_H/2 - ch/2 + 10;
-        if      (hit(bx,            by, cw, ch)) kDown |= HidNpadButton_A;
-        else if (hit(bx+cw+gap,     by, cw, ch)) kDown |= HidNpadButton_B;
-        else if (hit(bx+(cw+gap)*2, by, cw, ch)) kDown |= HidNpadButton_X;
+        if      (hit(bx,        by, cw, ch)) kDown |= HidNpadButton_A;
+        else if (hit(bx+cw+gap, by, cw, ch)) kDown |= HidNpadButton_B;
         return;
     }
 
@@ -2726,6 +3034,7 @@ int main(int,char**) {
         case Screen::UserPick:
             if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))   { gUserSel = (gUserSel>0) ? gUserSel-1 : (int)gUsers.size()-1; }
             if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) { gUserSel = (gUserSel+1<(int)gUsers.size()) ? gUserSel+1 : 0; }
+            if (kDown&HidNpadButton_X) { TOpenSettings(0); break; }
             if (kDown&HidNpadButton_A) {
                 // Mount save first so we can check backup state
                 gScreen=Screen::Mounting;
@@ -2734,34 +3043,85 @@ int main(int,char**) {
                     std::string err=SaveMount::Mount(gUsers[gUserSel].uid);
                     if (!err.empty()){gError=err;gScreen=Screen::Error;break;}
                 }
-                // Now decide: backup prompt or straight to mode picker
-                if (BackupService::HasExistingBackup()) {
-                    gScreen=Screen::BackupPrompt;
-                } else {
-                    // No existing backup — start one immediately
-                    BackupService::StartFullBackup("tomodata:/");
-                    gScreen=Screen::BackingUp;
-                }
+                gBackupFull = (BackupService::CountBackups() >= gMaxBackups);
+                gScreen=Screen::BackupPrompt;
             }
             DrawUserPick();
             break;
 
+        case Screen::Settings:
+            if (gShowFileBrowser) {
+                int pvis = (SCREEN_H - 148) / 26;
+                if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp)) {
+                    if (gBrowseSel > 0) { gBrowseSel--; if (gBrowseSel < gBrowseScroll) gBrowseScroll = gBrowseSel; }
+                }
+                if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown)) {
+                    if (gBrowseSel+1 < (int)gBrowseEntries.size()) {
+                        gBrowseSel++;
+                        if (gBrowseSel >= gBrowseScroll+pvis) gBrowseScroll = gBrowseSel-pvis+1;
+                    }
+                }
+                if (kDown&HidNpadButton_A && !gBrowseEntries.empty()) {
+                    auto& entry = gBrowseEntries[gBrowseSel];
+                    if (entry.isDir) {
+                        std::string newPath;
+                        if (entry.name == "[..]") {
+                            size_t pos = gBrowseCurPath.rfind('/');
+                            newPath = (pos == 0) ? "/" : gBrowseCurPath.substr(0, pos);
+                        } else {
+                            newPath = gBrowseCurPath + "/" + entry.name;
+                        }
+                        BrowseRefresh(newPath);
+                    }
+                }
+                if (kDown&HidNpadButton_B && gBrowseCurPath != "/") {
+                    size_t pos = gBrowseCurPath.rfind('/');
+                    BrowseRefresh((pos == 0) ? "/" : gBrowseCurPath.substr(0, pos));
+                }
+                if (kDown&HidNpadButton_Y) {
+                    gExportPath = gBrowseCurPath;
+                    mkdir(gExportPath.c_str(), 0777);
+                    SaveConfig();
+                    gShowFileBrowser = false;
+                    gSettingsMsg = "Export path set to: " + gExportPath;
+                    gSettingsMsgCol = COL_GREEN;
+                }
+                if (kDown&HidNpadButton_X) { gShowFileBrowser = false; }
+            } else {
+                if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))
+                    gSettingsSel = std::max(0, gSettingsSel - 1);
+                if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
+                    gSettingsSel = std::min(1, gSettingsSel + 1);
+                if (gSettingsSel == 0 && kDown&HidNpadButton_A) {
+                    gBrowseForExportDir = true; gBrowseForMii = false;
+                    std::string sp = gExportPath;
+                    struct stat _st;
+                    if (stat(sp.c_str(),&_st)!=0||!S_ISDIR(_st.st_mode)) {
+                        size_t p=sp.rfind('/'); sp=(p&&p!=std::string::npos)?sp.substr(0,p):"/";
+                    }
+                    BrowseRefresh(sp); gShowFileBrowser = true;
+                }
+                if (gSettingsSel == 1) {
+                    if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft)) {
+                        gMaxBackups = std::max(1, gMaxBackups - 1); SaveConfig();
+                    }
+                    if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) {
+                        gMaxBackups = std::min(99, gMaxBackups + 1); SaveConfig();
+                    }
+                }
+                if (kDown&HidNpadButton_B) { gScreen = Screen::UserPick; }
+            }
+            DrawSettings();
+            break;
+
         case Screen::BackupPrompt:
             if (kDown&HidNpadButton_A) {
-                // Delete old, make new
-                BackupService::DeleteBackup();
+                if (gBackupFull) BackupService::DeleteOldestBackup();
                 BackupService::StartFullBackup("tomodata:/");
                 gScreen=Screen::BackingUp;
             }
             if (kDown&HidNpadButton_B) {
-                // Keep old, skip backup — go straight to mode picker
                 gScreen=Screen::OnSwitch;
-            }
-            if (kDown&HidNpadButton_X) {
-                // Keep old (rename save/ to save_old/), then make new save/
-                rename(BACKUP_SAVE, BACKUP_ROOT "/save_old");
-                BackupService::StartFullBackup("tomodata:/");
-                gScreen=Screen::BackingUp;
             }
             DrawBackupPrompt();
             break;
@@ -3218,7 +3578,7 @@ int main(int,char**) {
                     gOnSwitchMsg=""; break;
                 }
                 // Y cycles Stats → Words → Relations → Social → Stats
-                if (kDown&HidNpadButton_Y) { gMiiStatsSubTab=(MiiStatsSubTab)(((int)gMiiStatsSubTab+1)%4); gSocialScroll=0; if(gMiiStatsSubTab!=MiiStatsSubTab::Social) gSocialExpanded=false; }
+                if (kDown&HidNpadButton_Y) { gMiiStatsSubTab=(MiiStatsSubTab)(((int)gMiiStatsSubTab+1)%5); gSocialScroll=0; if(gMiiStatsSubTab!=MiiStatsSubTab::Social) gSocialExpanded=false; }
                 // X toggles global graph in Social sub-tab only
                 if (kDown&HidNpadButton_X && gMiiStatsSubTab==MiiStatsSubTab::Social) gSocialExpanded=!gSocialExpanded;
                 // ZL/ZR switch selected mii
@@ -3263,6 +3623,11 @@ int main(int,char**) {
                         }
                     }
                     // gMiiRelSel additionally clamped to valid range in draw phase
+                } else if (gMiiStatsSubTab==MiiStatsSubTab::Belongings) {
+                    if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))
+                        gBlSel = (gBlSel > 0) ? gBlSel - 1 : BL_SEL_MAX - 1;
+                    if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
+                        gBlSel = (gBlSel + 1 < BL_SEL_MAX) ? gBlSel + 1 : 0;
                 }
                 // Edit (Words sub-tab)
                 if (gMiiStatsSubTab==MiiStatsSubTab::Words && gMiiSav.loaded && !gMiis.empty() && gMiiStatsMiiSel<(int)gMiis.size()) {
@@ -3352,6 +3717,178 @@ int main(int,char**) {
                         };
                         if (kDown&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))   cycleType(-1);
                         if (kDown&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) cycleType(+1);
+                    }
+                    if (gRelDateKbdReq) {
+                        gRelDateKbdReq = false;
+                        static const uint32_t H_TST_KBD = 0x1a892e50u;
+                        uint64_t cur = SaveEditor::GetUInt64At(gMiiSav, H_TST_KBD, gRelDatePairIdx);
+                        char initBuf[11] = "";
+                        if (cur > 0) {
+                            time_t t = (time_t)cur;
+                            struct tm* ti = localtime(&t);
+                            snprintf(initBuf, sizeof(initBuf), "%04d-%02d-%02d",
+                                     ti->tm_year+1900, ti->tm_mon+1, ti->tm_mday);
+                        }
+                        std::string raw = ShowKeyboard("Since (YYYY-MM-DD)", initBuf, 10);
+                        int y=0, mo=0, d=0;
+                        if (sscanf(raw.c_str(), "%d-%d-%d", &y, &mo, &d)==3
+                            && y>1900 && mo>=1 && mo<=12 && d>=1 && d<=31) {
+                            struct tm t = {};
+                            t.tm_year = y-1900; t.tm_mon = mo-1; t.tm_mday = d; t.tm_hour = 12;
+                            time_t secs = mktime(&t);
+                            if (secs >= 0) {
+                                SaveEditor::SetUInt64At(gMiiSav, H_TST_KBD, gRelDatePairIdx, (uint64_t)secs);
+                                gMiiSavDirty = true;
+                            }
+                        }
+                    }
+                }
+                // Edit (Belongings sub-tab)
+                if (gMiiStatsSubTab==MiiStatsSubTab::Belongings && gMiiSav.loaded && !gMiis.empty() && gMiiStatsMiiSel<(int)gMiis.size()) {
+                    int miiIdx = gMiis[gMiiStatsMiiSel].slot - 1;
+                    int blSel  = gBlSel;
+
+                    // Helper: cycle color for worn slot (Left/Right)
+                    auto cycleColor = [&](int dir) {
+                        if (blSel < 8) {
+                            const auto& ws = BL_WORN_DEFS[blSel];
+                            uint32_t ih = SaveEditor::GetAnyEnumAt(gMiiSav, ws.kh, miiIdx, BL_H_INVALID);
+                            if (!ih || ih == BL_H_INVALID) return;
+                            int cc = 1;
+                            for (int k=0;k<BL_CLOTH_COUNT;k++) if(BL_CLOTH_ITEMS[k].nameHash==ih){cc=BL_CLOTH_ITEMS[k].colorCount;break;}
+                            uint32_t cur = SaveEditor::GetUIntAt(gMiiSav, ws.ch, miiIdx);
+                            SaveEditor::SetUIntAt(gMiiSav, ws.ch, miiIdx, (uint32_t)(((int)cur+dir+cc)%cc));
+                            gMiiSavDirty = true;
+                        } else if (blSel == 8) {
+                            uint32_t ih = SaveEditor::GetAnyEnumAt(gMiiSav, BL_COORD_KH, miiIdx, BL_H_INVALID);
+                            if (!ih || ih == BL_H_INVALID) return;
+                            int cc = 1;
+                            for (int k=0;k<BL_COORD_COUNT;k++) if(BL_COORD_ITEMS[k].keyHash==ih){cc=BL_COORD_ITEMS[k].colorCount;break;}
+                            uint32_t cur = SaveEditor::GetUIntAt(gMiiSav, BL_COORD_CH, miiIdx);
+                            SaveEditor::SetUIntAt(gMiiSav, BL_COORD_CH, miiIdx, (uint32_t)(((int)cur+dir+cc)%cc));
+                            gMiiSavDirty = true;
+                        }
+                    };
+
+                    // Helper: cycle item (A)
+                    auto cycleItem = [&](int dir) {
+                        if (blSel < 8) {
+                            const auto& ws = BL_WORN_DEFS[blSel];
+                            uint32_t cur = SaveEditor::GetAnyEnumAt(gMiiSav, ws.kh, miiIdx, BL_H_INVALID);
+                            // Build filtered list for this slot
+                            std::vector<uint32_t> filtered;
+                            filtered.push_back(BL_H_INVALID); // "none"
+                            for (int k=0;k<BL_CLOTH_COUNT;k++) {
+                                const char* cat = BL_CLOTH_ITEMS[k].category;
+                                if (strcmp(cat, ws.cat)==0 || (ws.addSocks && strcmp(cat,"Socks")==0))
+                                    filtered.push_back(BL_CLOTH_ITEMS[k].nameHash);
+                            }
+                            int pos = 0;
+                            for (int j=0;j<(int)filtered.size();j++) if(filtered[j]==cur){pos=j;break;}
+                            int newPos = (pos+dir+(int)filtered.size())%(int)filtered.size();
+                            SaveEditor::SetAnyEnumAt(gMiiSav, ws.kh, miiIdx, filtered[newPos]);
+                            gMiiSavDirty = true;
+                        } else if (blSel == 8) {
+                            uint32_t cur = SaveEditor::GetAnyEnumAt(gMiiSav, BL_COORD_KH, miiIdx, BL_H_INVALID);
+                            int pos = 0;
+                            for (int k=0;k<BL_COORD_COUNT;k++) if(BL_COORD_ITEMS[k].keyHash==cur){pos=k+1;break;}
+                            int total = BL_COORD_COUNT + 1;
+                            int newPos = (pos+dir+total)%total;
+                            uint32_t nh = (newPos==0) ? BL_H_INVALID : BL_COORD_ITEMS[newPos-1].keyHash;
+                            SaveEditor::SetAnyEnumAt(gMiiSav, BL_COORD_KH, miiIdx, nh);
+                            gMiiSavDirty = true;
+                        } else if (blSel >= 9 && blSel < 21) {
+                            int slot = blSel - 9;
+                            int ai = miiIdx * BL_GOODS_SLOTS_MII + slot;
+                            uint32_t cur = SaveEditor::GetUIntAt(gMiiSav, BL_H_GOODS_ID, ai);
+                            int pos = 0;
+                            for (int k=0;k<BL_GOODS_COUNT;k++) if(BL_GOODS_ITEMS[k].nameHash==cur){pos=k+1;break;}
+                            int total = BL_GOODS_COUNT + 1;
+                            int newPos = (pos+dir+total)%total;
+                            if (newPos == 0) {
+                                SaveEditor::SetUIntAt(gMiiSav, BL_H_GOODS_ID, ai, 0u);
+                                SaveEditor::SetUInt64At(gMiiSav, BL_H_GOODS_TIME, ai, 0ull);
+                                SaveEditor::SetIntAt(gMiiSav, BL_H_GOODS_UGC, ai, -1);
+                            } else {
+                                SaveEditor::SetUIntAt(gMiiSav, BL_H_GOODS_ID, ai, BL_GOODS_ITEMS[newPos-1].nameHash);
+                                uint64_t t = SaveEditor::GetUInt64At(gMiiSav, BL_H_GOODS_TIME, ai);
+                                if (!t) SaveEditor::SetUInt64At(gMiiSav, BL_H_GOODS_TIME, ai, 1735689600ull);
+                                SaveEditor::SetIntAt(gMiiSav, BL_H_GOODS_UGC, ai, -1);
+                            }
+                            gMiiSavDirty = true;
+                        }
+                    };
+
+                    // A = cycle item forward  |  Left/Right = cycle color
+                    if (kDown&HidNpadButton_A) cycleItem(+1);
+                    if (kDown&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))   cycleColor(-1);
+                    if (kDown&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) cycleColor(+1);
+
+                    // X = clear selected slot / run action
+                    if (kDown&HidNpadButton_X) {
+                        if (blSel < 8) {
+                            const auto& ws = BL_WORN_DEFS[blSel];
+                            SaveEditor::SetAnyEnumAt(gMiiSav, ws.kh, miiIdx, BL_H_INVALID);
+                            SaveEditor::SetUIntAt(gMiiSav, ws.ch, miiIdx, 0u);
+                            gMiiSavDirty = true;
+                        } else if (blSel == 8) {
+                            SaveEditor::SetAnyEnumAt(gMiiSav, BL_COORD_KH, miiIdx, BL_H_INVALID);
+                            SaveEditor::SetUIntAt(gMiiSav, BL_COORD_CH, miiIdx, 0u);
+                            gMiiSavDirty = true;
+                        } else if (blSel >= 9 && blSel < 21) {
+                            int ai = miiIdx * BL_GOODS_SLOTS_MII + (blSel - 9);
+                            SaveEditor::SetUIntAt(gMiiSav, BL_H_GOODS_ID, ai, 0u);
+                            SaveEditor::SetUInt64At(gMiiSav, BL_H_GOODS_TIME, ai, 0ull);
+                            SaveEditor::SetIntAt(gMiiSav, BL_H_GOODS_UGC, ai, -1);
+                            gMiiSavDirty = true;
+                        }
+                    }
+
+                    // Action rows (A to execute)
+                    if (kDown&HidNpadButton_A && blSel >= 21) {
+                        int act = blSel - 21;
+                        int total;
+                        if (act == 0) { // Unlock All Clothes
+                            total = SaveEditor::ArraySize(gMiiSav, BL_H_CLOTH_OWN);
+                            for (int i=0;i<BL_CLOTH_COUNT;i++) {
+                                int idx = miiIdx * BL_SLOTS_PER_MII + BL_CLOTH_ITEMS[i].index;
+                                if (idx < total) {
+                                    int cc = BL_CLOTH_ITEMS[i].colorCount;
+                                    uint32_t mask = (cc>=32) ? 0xFFFFFFFFu : ((1u<<cc)-1u);
+                                    SaveEditor::SetUIntAt(gMiiSav, BL_H_CLOTH_OWN, idx, mask);
+                                }
+                            }
+                            gMiiSavDirty = true;
+                            gMiiStatsMsg = "All clothes unlocked"; gMiiStatsMsgCol = COL_GREEN;
+                        } else if (act == 1) { // Lock All Clothes
+                            total = SaveEditor::ArraySize(gMiiSav, BL_H_CLOTH_OWN);
+                            for (int i=0;i<BL_SLOTS_PER_MII;i++) {
+                                int idx = miiIdx * BL_SLOTS_PER_MII + i;
+                                if (idx < total) SaveEditor::SetUIntAt(gMiiSav, BL_H_CLOTH_OWN, idx, 0u);
+                            }
+                            gMiiSavDirty = true;
+                            gMiiStatsMsg = "All clothes locked"; gMiiStatsMsgCol = COL_GREEN;
+                        } else if (act == 2) { // Unlock All Coords
+                            total = SaveEditor::ArraySize(gMiiSav, BL_H_COORD_OWN);
+                            for (int i=0;i<BL_COORD_COUNT;i++) {
+                                int idx = miiIdx * BL_COORD_SLOTS_MII + BL_COORD_ITEMS[i].saveIndex;
+                                if (idx < total) {
+                                    int cc = BL_COORD_ITEMS[i].colorCount;
+                                    uint32_t mask = (cc>=32) ? 0xFFFFFFFFu : ((1u<<cc)-1u);
+                                    SaveEditor::SetUIntAt(gMiiSav, BL_H_COORD_OWN, idx, mask);
+                                }
+                            }
+                            gMiiSavDirty = true;
+                            gMiiStatsMsg = "All coordinates unlocked"; gMiiStatsMsgCol = COL_GREEN;
+                        } else { // Lock All Coords
+                            total = SaveEditor::ArraySize(gMiiSav, BL_H_COORD_OWN);
+                            for (int i=0;i<BL_COORD_SLOTS_MII;i++) {
+                                int idx = miiIdx * BL_COORD_SLOTS_MII + i;
+                                if (idx < total) SaveEditor::SetUIntAt(gMiiSav, BL_H_COORD_OWN, idx, 0u);
+                            }
+                            gMiiSavDirty = true;
+                            gMiiStatsMsg = "All coordinates locked"; gMiiStatsMsgCol = COL_GREEN;
+                        }
                     }
                 }
                 // Edit field (Stats sub-tab only)

@@ -178,6 +178,12 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .mii-subtab-bar{display:flex;gap:3px;padding:5px 8px 0;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto}
 .mii-subtab{background:transparent;border:1px solid transparent;color:var(--muted);padding:3px 10px;border-radius:3px 3px 0 0;cursor:pointer;font-size:.78rem;font-family:inherit;transition:all .12s;white-space:nowrap}
 .mii-subtab:hover{color:var(--text)}.mii-subtab.active{border-color:var(--border);border-bottom:1px solid var(--bg);color:var(--accent);background:var(--bg)}
+#mii-subtab-bar-global{display:none}#mii-subtab-bar-global.visible{display:flex}
+#nav-toggle-bar{display:flex;align-items:center;justify-content:center;height:16px;background:var(--surface);border-bottom:1px solid var(--border);cursor:pointer;flex-shrink:0;color:var(--muted);user-select:none}
+#nav-toggle-bar:hover{color:var(--text)}
+#nav-toggle-bar svg{transition:transform .2s}
+body.nav-collapsed header,body.nav-collapsed .tabs,body.nav-collapsed #save-warn,body.nav-collapsed #mii-subtab-bar-global{display:none!important}
+body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
 .mii-content{flex:1;overflow-y:auto;min-height:0}.mii-content::-webkit-scrollbar{width:4px}.mii-content::-webkit-scrollbar-thumb{background:var(--border)}
 .mii-words-list{display:flex;flex-direction:column;gap:4px;padding:10px 12px}
 .mii-word-row{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:7px 10px;display:flex;gap:8px;align-items:flex-start}.mii-word-row.empty{opacity:.42}
@@ -201,6 +207,38 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .social-rel-row{display:flex;gap:8px;padding:4px 8px;background:var(--surface);border-radius:3px;font-size:.78rem;border-left:3px solid;align-items:center}
 .social-rel-name{font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .social-rel-meta{color:var(--muted);font-size:.72rem;white-space:nowrap}
+/* ── belongings panel ──────────────────────────────────────────────────────── */
+.bl-section{border:1px solid var(--border);border-radius:5px;overflow:hidden}
+.bl-section-head{font-size:.8rem;font-weight:bold;padding:7px 12px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.bl-section-caption{font-size:.72rem;color:var(--muted);padding:4px 12px 5px;background:var(--surface)}
+.bl-section-body{padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.bl-summary{font-size:.72rem;color:var(--muted);font-family:monospace;white-space:nowrap}
+.bl-worn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
+.bl-worn-slot{background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:7px 10px}
+.bl-worn-slot-lbl{font-size:.7rem;color:var(--muted);margin-bottom:4px}
+.bl-goods-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
+.bl-goods-slot{background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:7px 10px}
+.bl-goods-hd{font-size:.7rem;color:var(--muted);margin-bottom:4px;display:flex;justify-content:space-between;align-items:center}
+.bl-btns{display:flex;gap:5px;flex-wrap:wrap}
+.bl-btn-sm{background:transparent;border:1px solid var(--border);border-radius:3px;color:var(--muted);cursor:pointer;padding:2px 8px;font-size:.72rem;font-family:inherit;transition:all .12s}
+.bl-btn-sm:hover{color:var(--text);border-color:var(--accent)}
+.bl-filters{display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end}
+.bl-filters input,.bl-filters select{font-size:.78rem;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:3px 6px;font-family:inherit}
+.bl-filters label{font-size:.7rem;color:var(--muted);display:flex;flex-direction:column;gap:2px}
+.bl-bitmask-list{max-height:340px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;border:1px solid var(--border);border-radius:4px;padding:6px;background:var(--surface2)}
+.bl-bitmask-list::-webkit-scrollbar{width:3px}.bl-bitmask-list::-webkit-scrollbar-thumb{background:var(--border)}
+.bl-item-row{background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px 9px;display:flex;gap:8px;align-items:flex-start}
+.bl-item-row.owned{border-left:3px solid var(--accent)}
+.bl-item-info{flex:1;min-width:0}
+.bl-item-name{font-size:.8rem;font-weight:bold;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bl-item-meta{font-size:.7rem;color:var(--muted);margin-top:1px}
+.bl-item-colors{display:flex;flex-wrap:wrap;gap:3px;margin-top:5px}
+.bl-color-chip{width:24px;height:24px;border:2px solid var(--border);border-radius:3px;cursor:pointer;background:var(--surface2);font-size:.65rem;display:flex;align-items:center;justify-content:center;color:var(--muted);font-family:monospace;line-height:1;transition:all .1s}
+.bl-color-chip.owned{border-color:#f97316;box-shadow:0 0 0 1px rgba(249,115,22,.4);background:rgba(249,115,22,.1);color:#f97316;font-weight:bold}
+.bl-color-chip:hover{border-color:var(--accent);background:var(--surface)}
+.bl-no-results{padding:12px;color:var(--muted);font-size:.82rem;text-align:center}
+.bl-warn{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.4);border-radius:4px;padding:6px 10px;font-size:.75rem;color:#92400e}
+.bl-coord-pieces{font-size:.7rem;color:var(--muted);margin-top:3px}
 @media(max-width:600px){.save-mii-layout{flex-direction:column}.mii-slot-list{width:100%;flex-direction:row;flex-wrap:wrap;max-height:90px;border-right:none;border-bottom:1px solid var(--border)}.mii-subtab-bar{flex-wrap:wrap}}
 </style>
 </head>
@@ -218,6 +256,20 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 <!-- one-time tips -->
 <div id="save-warn"><b>Warning</b> — Modifying save data can break your game. Make sure you have a backup before editing.<button class="tip-close" onclick="dismissSaveWarn()">Got it</button></div>
 
+<!-- Mii sub-tabs (global, shown only when mii tab is active) -->
+<div class="mii-subtab-bar" id="mii-subtab-bar-global">
+  <button class="mii-subtab active" onclick="switchMiiSubTab('stats',this)">stats</button>
+  <button class="mii-subtab" onclick="switchMiiSubTab('belongings',this)">belongings</button>
+  <button class="mii-subtab" onclick="switchMiiSubTab('words',this)">words</button>
+  <button class="mii-subtab" onclick="switchMiiSubTab('rel',this)">relations</button>
+  <button class="mii-subtab" onclick="switchMiiSubTab('social',this)">social</button>
+</div>
+
+<!-- Nav collapse toggle -->
+<div id="nav-toggle-bar" onclick="document.body.classList.toggle('nav-collapsed')" title="toggle navigation">
+  <svg width="12" height="7" viewBox="0 0 12 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6L6 1L11 6"/></svg>
+</div>
+
 <!-- UGC Panel -->
 <div class="panel active" id="panel-ugc">
   <div class="preview-area checker">
@@ -226,8 +278,8 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
   </div>
   <div class="info-bar" id="info-bar"></div>
   <div class="toolbar" style="border-top:none;padding-bottom:9px">
-    <button class="btn btn-cyan" id="btn-import" disabled onclick="doImport()">import</button>
-    <button class="btn btn-gold" id="btn-export" disabled onclick="doExport()">export</button>
+    <button class="btn btn-cyan" id="btn-import" disabled onclick="doImport()">import tex</button>
+    <button class="btn btn-gold" id="btn-export" disabled onclick="doExport()">export tex</button>
     <button class="btn" onclick="loadList()">refresh</button>
     <div class="status info" id="status"></div>
   </div>
@@ -269,16 +321,11 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
   <div class="save-mii-layout">
     <div id="mii-slots" class="mii-slot-list"></div>
     <div class="mii-right-panel">
-      <div class="mii-subtab-bar">
-        <button class="mii-subtab active" onclick="switchMiiSubTab('stats',this)">stats</button>
-        <button class="mii-subtab" onclick="switchMiiSubTab('words',this)">words</button>
-        <button class="mii-subtab" onclick="switchMiiSubTab('rel',this)">relations</button>
-        <button class="mii-subtab" onclick="switchMiiSubTab('social',this)">social</button>
-      </div>
       <div class="mii-content" id="mii-content-stats"><div id="save-fields-mii"></div></div>
       <div class="mii-content" id="mii-content-words" style="display:none"><div id="mii-words-panel" class="mii-words-list"></div></div>
       <div class="mii-content" id="mii-content-rel" style="display:none"><div id="mii-rel-panel" class="rel-list"></div></div>
       <div class="mii-content" id="mii-content-social" style="display:none"><div id="mii-social-panel"></div></div>
+      <div class="mii-content" id="mii-content-belongings" style="display:none"><div id="mii-bl-panel" style="padding:10px 12px;display:flex;flex-direction:column;gap:10px"></div></div>
     </div>
   </div>
 </div>
@@ -309,6 +356,7 @@ function switchTab(name, btn) {
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   btn.classList.add('active');
   document.getElementById('panel-'+name).classList.add('active');
+  document.getElementById('mii-subtab-bar-global').classList.toggle('visible',name==='miistats');
   if(name==='player'||name==='miistats') initSaveWarn();
 }
 
@@ -522,6 +570,10 @@ function getIntAt(entries,hash,idx){const e=findE(entries,hash);if(!e||e.type!==
 function setIntAt(entries,hash,idx,val){const e=findE(entries,hash);if(!e||e.type!==3||!e.payload||e.payload.length<4)return;const dv=arrDV(e),c=dv.getUint32(0,true);if(idx>=0&&idx<c)dv.setInt32(4+idx*4,val,true);}
 function getUIntAt(entries,hash,idx){const e=findE(entries,hash);if(!e||e.type!==21||!e.payload||e.payload.length<4)return 0;const dv=arrDV(e),c=dv.getUint32(0,true);return(idx>=0&&idx<c)?dv.getUint32(4+idx*4,true):0;}
 function setUIntAt(entries,hash,idx,val){const e=findE(entries,hash);if(!e||e.type!==21||!e.payload||e.payload.length<4)return;const dv=arrDV(e),c=dv.getUint32(0,true);if(idx>=0&&idx<c)dv.setUint32(4+idx*4,val>>>0,true);}
+function getUInt64At(entries,hash,idx){const e=findE(entries,hash);if(!e||e.type!==25||!e.payload||e.payload.length<4)return null;const dv=arrDV(e),c=dv.getUint32(0,true);if(idx<0||idx>=c)return null;const off=4+idx*8;if(off+8>e.payload.length)return null;return BigInt(dv.getUint32(off,true))+BigInt(dv.getUint32(off+4,true))*0x100000000n;}
+function setUInt64At(entries,hash,idx,val){const e=findE(entries,hash);if(!e||e.type!==25||!e.payload||e.payload.length<4)return;const dv=arrDV(e),c=dv.getUint32(0,true);if(idx<0||idx>=c)return;const off=4+idx*8;if(off+8>e.payload.length)return;dv.setUint32(off,Number(val&0xFFFFFFFFn),true);dv.setUint32(off+4,Number((val>>32n)&0xFFFFFFFFn),true);}
+function u64ToDateLocal(secs){if(secs===null||secs<=0n)return'';const n=Number(secs);const d=new Date(n*1000);if(isNaN(d.getTime()))return'';const p=x=>x.toString().padStart(2,'0');return`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;}
+function dateLocalToU64(raw){const t=raw.trim();if(!t)return 0n;const d=new Date(t);if(isNaN(d.getTime()))return null;const s=Math.floor(d.getTime()/1000);if(!isFinite(s)||s<0)return null;return BigInt(s);}
 function getEnumAt(entries,hash,idx){const e=findE(entries,hash);if(!e||e.type!==7||!e.payload||e.payload.length<4)return 0;const dv=arrDV(e),c=dv.getUint32(0,true);return(idx>=0&&idx<c)?dv.getUint32(4+idx*4,true):0;}
 function setEnumAt(entries,hash,idx,val){const e=findE(entries,hash);if(!e||e.type!==7||!e.payload||e.payload.length<4)return;const dv=arrDV(e),c=dv.getUint32(0,true);if(idx>=0&&idx<c)dv.setUint32(4+idx*4,val>>>0,true);}
 function getUInt(entries,hash){const e=findE(entries,hash);return(e&&e.type===20)?e.inlineRaw>>>0:0;}
@@ -539,7 +591,7 @@ function setWStr64At(entries,hash,idx,val){const e=findE(entries,hash);if(!e||e.
 const CURRENCY_OPTS=[{v:0x7e3d1e46,l:'Invalid'},{v:0xce8d18e1,l:'Yen (\xa5)'},{v:0x2bef288a,l:'Dollar ($)'},{v:0x038c20a9,l:'Euro (€)'},{v:0x2f084465,l:'Pound (\xa3)'},{v:0x78915cbe,l:'HK$'},{v:0xd73beb47,l:'Won (₩)'},{v:0xaca685c9,l:'Yuan (\xa5)'},{v:0x4616c424,l:'Rouble (₽)'},{v:0xa60f72e0,l:'Peso (₱)'},{v:0x6362048b,l:'G$'}];
 const FEELING_OPTS=[{v:0xb6eede09,l:'None'},{v:0x390b012d,l:'Normal'},{v:0x62189afb,l:'Good'},{v:0xab185a53,l:'Irritate'},{v:0xabc36d9f,l:'Deject'},{v:0x86e2036f,l:'Careless'},{v:0xf3046534,l:'Angry'},{v:0xf54cf52e,l:'Depress'},{v:0x651b7edd,l:'Worry'}];
 const REGION_OPTS=[{v:H('Japan'),l:'Japan'},{v:H('Europe'),l:'Europe'},{v:H('NorthAmerica'),l:'North America'},{v:H('SouthAmericaN'),l:'S. America (N)'},{v:H('SouthAmericaS'),l:'S. America (S)'},{v:H('Australia'),l:'Australia / NZ'},{v:H('Asia'),l:'Asia (HK/TW/KR)'},{v:H('OthersN'),l:'Others (N)'},{v:H('OthersS'),l:'Others (S)'}];
-const LANG_OPTS=[{v:H('JPja'),l:'Japanese'},{v:H('USen'),l:'English (US)'},{v:H('EUen'),l:'English (EU)'},{v:H('EUfr'),l:'French'},{v:H('EUde'),l:'German'},{v:H('EUes'),l:'Spanish (EU)'},{v:H('USes'),l:'Spanish (US)'},{v:H('EUit'),l:'Italian'},{v:H('EUnl'),l:'Dutch'},{v:H('CNzh'),l:'Chinese (Simp)'},{v:H('KRko'),l:'Korean'},{v:H('TWzh'),l:'Chinese (Trad)'}];
+const LANG_OPTS=[{v:H('JPja'),l:'Japanese'},{v:H('USen'),l:'English (US)'},{v:H('USes'),l:'Spanish (US)'},{v:H('USfr'),l:'French (US)'},{v:H('USpt'),l:'Portuguese (US)'},{v:H('EUen'),l:'English (EU)'},{v:H('EUes'),l:'Spanish (EU)'},{v:H('EUfr'),l:'French (EU)'},{v:H('EUde'),l:'German'},{v:H('EUit'),l:'Italian'},{v:H('EUpt'),l:'Portuguese (EU)'},{v:H('EUnl'),l:'Dutch'},{v:H('EUru'),l:'Russian'},{v:H('KRko'),l:'Korean'},{v:H('CNzh'),l:'Chinese (Simp)'},{v:H('TWzh'),l:'Chinese (Trad)'}];
 const PRONOUN_OPTS=[{v:H('He'),l:'He/Him'},{v:H('She'),l:'She/Her'},{v:H('They'),l:'They/Them'}];
 const GENDER_OPTS=[{v:H('Male'),l:'Male'},{v:H('Female'),l:'Female'},{v:H('Neuter'),l:'Other'}];
 const ISLAND_SIZES=[{v:1,l:'50\xd736'},{v:2,l:'70\xd750'},{v:3,l:'90\xd764'},{v:4,l:'120\xd780'}];
@@ -849,12 +901,2198 @@ function drawSocialCanvas(d, cv) {
   }
 }
 
+
+// ── Belongings item data ──────────────────────────────────────────────────────
+// CLOTH_DATA[i]=[index,colorCount,nameHash,label,category]
+// COORD_DATA[i]=[saveIndex,keyHash,colorCount,label,category]
+// TREASURE_DATA[i]=[nameHash,label,type]
+// AUTO-GENERATED by gen_belongings_data.py
+const CLOTH_DATA=[
+[809,1,1950601345>>>0,"3D glasses","Headwear"],
+[685,6,514764273>>>0,"5-panel cap","Headwear"],
+[282,6,547176700>>>0,"ABC pants","Bottoms"],
+[114,6,4017161377>>>0,"ABC sweatshirt","Tops"],
+[1034,8,2383485124>>>0,"accent-lines polo shirt","Tops"],
+[319,4,4242315614>>>0,"accented socks","Socks"],
+[226,8,1216757586>>>0,"accordion skirt","Bottoms"],
+[655,6,2093493399>>>0,"acorn knit hat","Headwear"],
+[1022,8,1378495595>>>0,"aerobics leotard","Topslong"],
+[712,1,3348414936>>>0,"angel halo","Headwear"],
+[588,1,2942577504>>>0,"angel wings","Accessory"],
+[587,6,442047942>>>0,"animal badge","Accessory"],
+[959,3,3104250467>>>0,"animal mask","Headwear"],
+[384,8,2143162074>>>0,"animal shoes","Shoes"],
+[193,6,2267748920>>>0,"animal-print blouson","Tops"],
+[162,8,1310247598>>>0,"animal-print graphic tee","Tops"],
+[318,8,459248480>>>0,"ankle socks","Socks"],
+[164,8,148193635>>>0,"anorak jacket","Tops"],
+[380,2,2136121494>>>0,"antique boots","Shoes"],
+[611,6,1500332588>>>0,"antique brooch","Accessory"],
+[513,8,727392061>>>0,"ao dai","Topslong"],
+[912,8,3521221535>>>0,"ao gam","Tops"],
+[869,2,245408606>>>0,"apple hat","Headwear"],
+[83,8,545192342>>>0,"apron","Tops"],
+[264,8,4052190152>>>0,"Aran skirt","Bottoms"],
+[36,8,727785800>>>0,"Aran sweater","Tops"],
+[956,6,3932412449>>>0,"argyle socks","Socks"],
+[44,8,2421000878>>>0,"argyle vest","Tops"],
+[109,8,2516397323>>>0,"aristocratic clothes","Tops"],
+[486,8,2305789031>>>0,"aristocratic dress","Topslong"],
+[274,8,937544400>>>0,"aristocratic pants","Bottoms"],
+[745,2,1131599358>>>0,"astronaut helmet","Headwear"],
+[534,2,4291421801>>>0,"astronaut suit","All"],
+[182,1,1943465699>>>0,"asymmetric coat","Tops"],
+[563,1,3401408146>>>0,"avocado suit","All"],
+[889,3,1552616275>>>0,"axe","Accessory"],
+[139,3,692337148>>>0,"B-3 jacket","Tops"],
+[708,8,3657913525>>>0,"baby bonnet","Headwear"],
+[541,8,4256761951>>>0,"baby snapsuit","All"],
+[324,6,703714986>>>0,"back-ribbon socks","Socks"],
+[930,8,3438904718>>>0,"backward beret","Headwear"],
+[692,6,3923554186>>>0,"backward cap","Headwear"],
+[1069,4,1584610179>>>0,"baggy jeans","Bottoms"],
+[1073,8,1107967352>>>0,"baggy striped long-sleeve tee","Tops"],
+[511,8,2569657352>>>0,"baji jeogori","Topslong"],
+[498,8,1717653662>>>0,"ballet dress","Topslong"],
+[393,8,2111382138>>>0,"ballet shoes","Shoes"],
+[564,8,3265246519>>>0,"ballet suit","All"],
+[166,6,4111896614>>>0,"balmacaan coat","Tops"],
+[684,8,501482052>>>0,"bandanna","Headwear"],
+[167,8,996326596>>>0,"bandanna tube top","Tops"],
+[489,6,894803010>>>0,"baseball attire","Topslong"],
+[699,6,1170179181>>>0,"baseball cap","Headwear"],
+[147,8,2229679860>>>0,"baseball shirt","Tops"],
+[800,8,652620259>>>0,"basic 5-panel cap","Headwear"],
+[680,6,3452803129>>>0,"basic bandanna","Headwear"],
+[40,8,3246642562>>>0,"basic camisole","Tops"],
+[718,8,1222132018>>>0,"basic cap","Headwear"],
+[436,8,75783276>>>0,"basic dress","Topslong"],
+[92,6,4040153684>>>0,"basic dress shirt","Tops"],
+[856,8,180661938>>>0,"basic hood","Headwear"],
+[336,8,3444999483>>>0,"basic knee-highs","Socks"],
+[719,8,2596488367>>>0,"basic knit beanie","Headwear"],
+[326,8,1189843370>>>0,"basic leggings","Socks"],
+[25,8,1156574582>>>0,"basic long-sleeve tee","Tops"],
+[813,8,3373631732>>>0,"basic mask","Headwear"],
+[87,8,1348519763>>>0,"basic pullover hoodie","Tops"],
+[358,8,3094980873>>>0,"basic pumps","Shoes"],
+[647,8,3809436911>>>0,"basic scarf","Accessory"],
+[0,6,1547733327>>>0,"basic short-sleeve dress shirt","Tops"],
+[233,8,665887396>>>0,"basic shorts","Bottoms"],
+[359,8,1658351900>>>0,"basic sneakers","Shoes"],
+[8,8,1938590662>>>0,"basic sweatshirt","Tops"],
+[4,8,2017831794>>>0,"basic tee","Tops"],
+[122,8,4013664287>>>0,"basic turtleneck","Tops"],
+[1041,8,2283807722>>>0,"basic vest","Tops"],
+[238,8,533863343>>>0,"basic wide-leg pants","Bottoms"],
+[287,8,2656453190>>>0,"basketball shorts","Bottoms"],
+[134,8,2629612815>>>0,"basketball tank top","Tops"],
+[501,8,3220477018>>>0,"bath towel","Topslong"],
+[439,6,1138035632>>>0,"bathrobe","Topslong"],
+[1046,6,959917929>>>0,"batting helmet","Headwear"],
+[602,8,2523235381>>>0,"bead necklace","Accessory"],
+[953,6,3975833537>>>0,"beaded slip-ons","Shoes"],
+[660,8,1538460596>>>0,"beanie","Headwear"],
+[819,8,505678400>>>0,"bear backpack","Accessory"],
+[703,5,2550777210>>>0,"bear hood","Headwear"],
+[394,6,3767324855>>>0,"bear slippers","Shoes"],
+[539,5,3166904040>>>0,"bear suit","All"],
+[617,5,2736180673>>>0,"bear tail","Accessory"],
+[654,6,2725084625>>>0,"bear-ear beanie","Headwear"],
+[727,1,757520334>>>0,"bee hat","Headwear"],
+[607,1,2029618863>>>0,"bee stinger","Accessory"],
+[533,1,1733823838>>>0,"bee suit","All"],
+[595,1,1072147011>>>0,"bee wings","Accessory"],
+[481,8,415023919>>>0,"belted coat","Topslong"],
+[1072,8,2860105351>>>0,"belted gingham dress","Topslong"],
+[653,8,3541684910>>>0,"beret","Headwear"],
+[746,6,1544700541>>>0,"big lace ribbon","Headwear"],
+[691,8,3449726916>>>0,"big ribbon","Headwear"],
+[90,8,619563152>>>0,"big-number jersey","Tops"],
+[615,8,1635606019>>>0,"bijou necklace","Accessory"],
+[377,4,2583246114>>>0,"bijou sandals","Shoes"],
+[698,6,2533866202>>>0,"bike helmet","Headwear"],
+[117,6,2273265869>>>0,"biker jacket","Tops"],
+[853,4,147119969>>>0,"biker's leathers","Topslong"],
+[255,8,643010696>>>0,"bikini bottoms","Bottoms"],
+[91,8,3598411164>>>0,"bikini top","Tops"],
+[644,6,2832835092>>>0,"bird brooch","Accessory"],
+[714,8,3839223659>>>0,"bird hood","Headwear"],
+[548,8,537717678>>>0,"bird suit","All"],
+[1011,1,2561331484>>>0,"bird's-nest hat","Headwear"],
+[794,3,3537116776>>>0,"birthday hat","Headwear"],
+[69,6,3100641684>>>0,"blazer with bow","Tops"],
+[68,6,571940275>>>0,"blazer with necktie","Tops"],
+[321,4,2544772669>>>0,"block-checkered socks","Socks"],
+[86,6,1595749774>>>0,"blouse with bow","Tops"],
+[105,8,4072447165>>>0,"boa-fleece jacket","Tops"],
+[216,8,1587874396>>>0,"board shorts","Bottoms"],
+[410,6,1305529655>>>0,"boat shoes","Shoes"],
+[532,8,3671188191>>>0,"bodysuit","All"],
+[736,8,464974776>>>0,"bodysuit cap","Headwear"],
+[598,8,1795436112>>>0,"bolo tie","Accessory"],
+[26,3,2624038219>>>0,"bomber jacket","Tops"],
+[291,8,932005653>>>0,"border pants","Bottoms"],
+[268,8,4284131371>>>0,"botanical-print board shorts","Bottoms"],
+[730,6,1347933988>>>0,"botanical-print outdoor hat","Headwear"],
+[204,4,4236085806>>>0,"botanical-print skirt","Bottoms"],
+[945,6,2047027478>>>0,"botanical-print slip-ons","Shoes"],
+[606,6,2921716270>>>0,"boutonniere","Accessory"],
+[941,4,2125081698>>>0,"bow","Accessory"],
+[828,8,4160675523>>>0,"bow tie","Accessory"],
+[409,8,2871026896>>>0,"bow-tie boots","Shoes"],
+[364,6,4038215769>>>0,"bow-tie pumps","Shoes"],
+[374,8,804404183>>>0,"bow-tie sandals","Shoes"],
+[408,8,1443824937>>>0,"bow-tie strappy pumps","Shoes"],
+[672,6,664242414>>>0,"bowler hat","Headwear"],
+[155,8,3032837040>>>0,"box-logo tee","Tops"],
+[230,6,1012551100>>>0,"boxing trunks","Bottoms"],
+[768,8,3811030656>>>0,"bright cap","Headwear"],
+[395,8,3250369526>>>0,"bright sneakers","Shoes"],
+[625,8,1839873951>>>0,"bright-bead necklace","Accessory"],
+[793,8,207521732>>>0,"brimmed woolly hat","Headwear"],
+[1010,3,2277753892>>>0,"bubble-tea suit","All"],
+[664,8,857598453>>>0,"bucket hat","Headwear"],
+[399,8,2836320757>>>0,"buckle loafers","Shoes"],
+[1005,6,2437487400>>>0,"bug antennae","Headwear"],
+[919,2,2527600669>>>0,"building suit","All"],
+[1076,8,163979161>>>0,"bunny ears","Headwear"],
+[591,6,531123935>>>0,"bunny tail","Accessory"],
+[796,8,4195694338>>>0,"bunny-ear ribbon","Headwear"],
+[385,4,1986711534>>>0,"business shoes","Shoes"],
+[99,8,973543449>>>0,"business-suit jacket","Tops"],
+[57,5,2679476275>>>0,"business-suit jacket and tie","Tops"],
+[850,6,1588255188>>>0,"butterfly backpack","Accessory"],
+[806,8,3996250939>>>0,"butterfly hair clip","Headwear"],
+[637,6,4150445148>>>0,"butterfly wings","Accessory"],
+[271,8,3688000540>>>0,"button-up skirt","Bottoms"],
+[1013,3,280419864>>>0,"cake suit","All"],
+[609,6,460223966>>>0,"cameo brooch","Accessory"],
+[427,8,1640982266>>>0,"camisole dress","Topslong"],
+[41,8,3557764649>>>0,"camisole-layered tee","Tops"],
+[816,6,1976789693>>>0,"camo cap","Headwear"],
+[143,3,928142809>>>0,"camo jacket","Tops"],
+[293,6,471311373>>>0,"camo shorts","Bottoms"],
+[294,6,1999234152>>>0,"camo skirt","Bottoms"],
+[981,6,2668275261>>>0,"cap with badges","Headwear"],
+[290,8,987437502>>>0,"capri pants","Bottoms"],
+[572,8,1011836029>>>0,"car suit","All"],
+[755,2,1474171617>>>0,"cardboard-box mask","Headwear"],
+[554,1,1025058493>>>0,"cardboard-box suit","All"],
+[948,1,2292237692>>>0,"cardboard-robot suit","All"],
+[202,6,2634353412>>>0,"cargo pants","Bottoms"],
+[235,6,2604627458>>>0,"cargo shorts","Bottoms"],
+[522,8,3905801128>>>0,"casual coveralls","Topslong"],
+[520,6,2836139438>>>0,"casual kimono","Topslong"],
+[715,8,3853455784>>>0,"cat hood","Headwear"],
+[343,8,2500500837>>>0,"cat knee-highs","Socks"],
+[549,8,485233608>>>0,"cat suit","All"],
+[581,8,3172004413>>>0,"cat tail","Accessory"],
+[1055,8,4020442113>>>0,"cat-ear cap","Headwear"],
+[804,8,3352349559>>>0,"cat-ear knit hat","Headwear"],
+[1047,6,1896634283>>>0,"catcher attire","Topslong"],
+[1063,6,3506820617>>>0,"catcher's mask","Headwear"],
+[961,3,1101490058>>>0,"caterpillar suit","All"],
+[851,6,2754900685>>>0,"Catrina dress","Topslong"],
+[452,4,64449402>>>0,"caveman attire","Topslong"],
+[962,2,4145960792>>>0,"celestial lights","Accessory"],
+[629,2,3437457786>>>0,"chain","Accessory"],
+[1040,8,1826867746>>>0,"chain cargo pants","Bottoms"],
+[915,6,1207600791>>>0,"charro suit","Topslong"],
+[881,8,2301180555>>>0,"checkered ankle socks","Socks"],
+[681,6,2008114672>>>0,"checkered beret","Headwear"],
+[309,6,865930327>>>0,"checkered cargo pants","Bottoms"],
+[818,8,2351240949>>>0,"checkered pencil skirt","Bottoms"],
+[897,8,2178384870>>>0,"checkered scarf","Accessory"],
+[278,6,1344708525>>>0,"checkered shorts","Bottoms"],
+[305,8,3390917208>>>0,"checkered slacks","Bottoms"],
+[284,6,3102983115>>>0,"checkered wide-leg pants","Bottoms"],
+[247,6,4026864695>>>0,"checkered-hem pants","Bottoms"],
+[485,8,2268973986>>>0,"cheerleader attire","Topslong"],
+[58,8,4087139300>>>0,"chef clothing","Tops"],
+[679,8,1017536733>>>0,"chef hat","Headwear"],
+[488,8,3790869489>>>0,"cheongsam","Topslong"],
+[1007,1,1314854879>>>0,"chicken hood","Headwear"],
+[924,1,2993613911>>>0,"chicken suit","All"],
+[925,1,1946801655>>>0,"chicken tail","Accessory"],
+[695,3,2727733173>>>0,"children's hat","Headwear"],
+[508,8,552315951>>>0,"chima jeogori","Topslong"],
+[531,1,2155398393>>>0,"china poblana","Topslong"],
+[209,6,2307067311>>>0,"chino pants","Bottoms"],
+[221,8,1183886154>>>0,"chino shorts","Bottoms"],
+[438,1,3583396438>>>0,"chiton dress","Topslong"],
+[583,8,3631792689>>>0,"city backpack","Accessory"],
+[524,6,1408947446>>>0,"classic-maid attire","Topslong"],
+[443,8,4179764308>>>0,"classical dress","Topslong"],
+[418,8,1152694630>>>0,"cleats","Shoes"],
+[669,6,2001914141>>>0,"cloche hat","Headwear"],
+[1035,4,1131344255>>>0,"clown mask","Headwear"],
+[10,6,1094296037>>>0,"coach jacket","Tops"],
+[441,6,3926805812>>>0,"coat dress","Topslong"],
+[1061,1,3042807387>>>0,"coin slot","Accessory"],
+[42,8,2113365848>>>0,"collarless button-down","Tops"],
+[137,8,814154275>>>0,"collarless coat","Tops"],
+[5,6,573131339>>>0,"color-blocked tee","Tops"],
+[351,8,3248333617>>>0,"colored tights","Socks"],
+[1062,8,466253115>>>0,"colorful dress","Topslong"],
+[219,8,1506640676>>>0,"colorful pants","Bottoms"],
+[674,6,3589236040>>>0,"combat cap","Headwear"],
+[392,6,510048046>>>0,"comfy backless sandals","Shoes"],
+[181,8,1371692564>>>0,"compression shirt","Tops"],
+[744,1,1126789431>>>0,"conical hat","Headwear"],
+[887,8,90102493>>>0,"corduroy cap","Headwear"],
+[169,6,3678029129>>>0,"corduroy jacket","Tops"],
+[210,6,727414592>>>0,"corduroy pants","Bottoms"],
+[1026,2,1893530424>>>0,"corncob suit","All"],
+[758,6,62473344>>>0,"cosmic antennae","Headwear"],
+[709,6,4124912592>>>0,"Cossack hat","Headwear"],
+[432,8,1533833604>>>0,"coveralls","Topslong"],
+[764,4,830636081>>>0,"cow hood","Headwear"],
+[560,4,1488673541>>>0,"cow suit","All"],
+[623,4,228407546>>>0,"cow tail","Accessory"],
+[3,6,2906578962>>>0,"Cowichan sweater","Tops"],
+[974,1,1933019474>>>0,"crab hood","Headwear"],
+[118,6,2064713396>>>0,"crazy-color shirt","Tops"],
+[149,8,3957033629>>>0,"cropped knit camisole","Tops"],
+[237,8,2311797583>>>0,"cropped pants","Bottoms"],
+[1060,8,1230878509>>>0,"cropped tank top","Tops"],
+[194,8,1702773338>>>0,"cropped tee","Tops"],
+[286,8,1314093434>>>0,"cropped wide-leg pants","Bottoms"],
+[725,8,1153916704>>>0,"crossed hairpins","Headwear"],
+[1037,3,345519128>>>0,"crow mask","Headwear"],
+[735,2,2181277386>>>0,"crown","Headwear"],
+[586,6,240092174>>>0,"cute badge","Accessory"],
+[759,6,379246605>>>0,"cyberpunk helmet","Headwear"],
+[557,6,2416014609>>>0,"cyberpunk suit","All"],
+[1070,6,3011488780>>>0,"cyberpunk sunglasses","Headwear"],
+[982,8,2725478458>>>0,"cyberpunk wings","Accessory"],
+[454,6,2305483182>>>0,"cycling attire","Topslong"],
+[1077,8,3007436101>>>0,"daisy hairpin","Headwear"],
+[576,8,1388355493>>>0,"Daruma suit","All"],
+[717,8,3258898108>>>0,"decorative hair clip","Headwear"],
+[470,8,3117962217>>>0,"denim dress","Topslong"],
+[111,4,1270030502>>>0,"denim jacket","Tops"],
+[236,4,2755588237>>>0,"denim maxi skirt","Bottoms"],
+[303,6,2705788502>>>0,"denim miniskirt","Bottoms"],
+[923,6,1169423231>>>0,"denim pencil skirt","Bottoms"],
+[693,3,3775192561>>>0,"detective hat","Headwear"],
+[726,6,3830236941>>>0,"devil hood","Headwear"],
+[536,6,1875013302>>>0,"devil suit","All"],
+[590,6,17783112>>>0,"devil tail","Accessory"],
+[582,6,1071331798>>>0,"devil wings","Accessory"],
+[808,8,2140729923>>>0,"diner hat","Headwear"],
+[963,6,2406893194>>>0,"dinosaur backpack","Accessory"],
+[734,8,2726036733>>>0,"dinosaur hood","Headwear"],
+[280,8,1532656082>>>0,"dinosaur pants","Bottoms"],
+[553,8,253871735>>>0,"dinosaur suit","All"],
+[597,8,1095678151>>>0,"dinosaur tail","Accessory"],
+[502,6,465487552>>>0,"disco jumpsuit","Topslong"],
+[447,3,1978549308>>>0,"disco-star jumpsuit","Topslong"],
+[616,8,1025948659>>>0,"display-only sunglasses","Accessory"],
+[946,1,3599832200>>>0,"disposable diaper","Bottoms"],
+[186,8,2765622946>>>0,"distressed sweater","Tops"],
+[320,1,119294542>>>0,"distressed tights","Socks"],
+[802,3,1749683047>>>0,"diving helmet","Headwear"],
+[574,3,1589086781>>>0,"diving suit","All"],
+[732,8,672790090>>>0,"dog hood","Headwear"],
+[555,8,3888151648>>>0,"dog suit","All"],
+[603,8,41792460>>>0,"dog tail","Accessory"],
+[820,8,3786463554>>>0,"dog-logo jacket","Tops"],
+[840,8,2488354613>>>0,"dog-logo pants","Bottoms"],
+[440,8,4184030566>>>0,"dolly dress","Topslong"],
+[130,8,179796884>>>0,"dolly shirt","Tops"],
+[1043,8,125593728>>>0,"dotera","Tops"],
+[281,8,4250007861>>>0,"dotted pumpkin pants","Bottoms"],
+[61,6,3829134816>>>0,"dotted shirt","Tops"],
+[297,8,3974635954>>>0,"dotted shorts","Bottoms"],
+[248,6,2687994820>>>0,"dotted skirt","Bottoms"],
+[325,8,3994035866>>>0,"double-striped socks","Socks"],
+[954,6,3332593158>>>0,"down boots","Shoes"],
+[37,8,3435580463>>>0,"down jacket","Tops"],
+[276,8,858203400>>>0,"down pants","Bottoms"],
+[906,8,1983743551>>>0,"dragon hood","Headwear"],
+[907,8,3745066025>>>0,"dragon suit","All"],
+[908,8,3534576492>>>0,"dragon tail","Accessory"],
+[909,8,2248680785>>>0,"dragon wings","Accessory"],
+[296,6,3550696885>>>0,"draped skirt","Bottoms"],
+[1075,6,2909917445>>>0,"dreamy dress","Topslong"],
+[56,5,3426580016>>>0,"dreamy jacket","Tops"],
+[152,6,2463787785>>>0,"dreamy unicorn sweatshirt","Tops"],
+[53,8,4033339637>>>0,"dress shirt and cardigan","Tops"],
+[50,8,3878146066>>>0,"dress shirt and sweater","Tops"],
+[112,5,3256670895>>>0,"dress shirt with vest","Tops"],
+[979,6,490065800>>>0,"drinking straw","Headwear"],
+[642,1,3390196754>>>0,"DSLR camera","Accessory"],
+[39,6,1076695309>>>0,"duffle coat","Tops"],
+[687,8,2969812086>>>0,"earflap hat","Headwear"],
+[893,1,558455117>>>0,"egg-sushi suit","All"],
+[559,2,368522185>>>0,"eggplant suit","All"],
+[723,8,3869634249>>>0,"eggshell hat","Headwear"],
+[505,8,3800220522>>>0,"elegant dress","Topslong"],
+[993,6,2172493569>>>0,"elephant-print maxi skirt","Bottoms"],
+[300,8,2953380671>>>0,"elephant-print wide-leg pants","Bottoms"],
+[138,8,1762121847>>>0,"embroidered blouse","Tops"],
+[467,6,2124955884>>>0,"embroidered dress","Topslong"],
+[634,1,4176808188>>>0,"emergency button","Accessory"],
+[354,3,3279643893>>>0,"engineer boots","Shoes"],
+[177,8,250839715>>>0,"exercise tank top","Tops"],
+[780,4,3664533803>>>0,"explorer hat","Headwear"],
+[472,4,1860235757>>>0,"explorer's attire","Topslong"],
+[971,8,643109700>>>0,"eye mask","Headwear"],
+[805,3,3966805763>>>0,"eye patch","Headwear"],
+[494,8,1977160495>>>0,"fairy dress","Topslong"],
+[618,8,3720982365>>>0,"fairy wings","Accessory"],
+[729,8,1146149933>>>0,"fancy hat","Headwear"],
+[540,6,2249247336>>>0,"far-future suit","All"],
+[976,8,2152387206>>>0,"faux-fur boots","Shoes"],
+[484,8,2720468120>>>0,"faux-fur coat dress","Topslong"],
+[1054,8,2291225098>>>0,"faux-fur hood","Headwear"],
+[874,8,4216577366>>>0,"faux-fur muffler","Accessory"],
+[622,4,1822847138>>>0,"feather brooch","Accessory"],
+[901,6,260824361>>>0,"festival tee","Tops"],
+[499,8,1605912294>>>0,"figure-skating dress","Topslong"],
+[146,8,1592297641>>>0,"figure-skating top","Tops"],
+[457,4,926334985>>>0,"firefighter attire","Topslong"],
+[810,4,2363729576>>>0,"firefighter helmet","Headwear"],
+[791,8,3195608690>>>0,"fish hood","Headwear"],
+[571,8,1750146320>>>0,"fish-folk suit","All"],
+[927,8,1043686662>>>0,"fisherman beanie","Headwear"],
+[340,3,706667243>>>0,"fishnet tights","Socks"],
+[989,6,3918074925>>>0,"flames tee","Tops"],
+[21,6,4283054895>>>0,"flannel shirt","Tops"],
+[905,8,2678183461>>>0,"flapper dress","Topslong"],
+[842,8,3846829372>>>0,"flapper hairpin","Headwear"],
+[208,6,809294503>>>0,"flared miniskirt","Bottoms"],
+[295,8,2158960206>>>0,"flared skirt","Bottoms"],
+[604,2,1832940481>>>0,"flashy medallion","Accessory"],
+[807,6,906562000>>>0,"fleece hat","Headwear"],
+[916,5,1550552330>>>0,"flight-attendant hat","Headwear"],
+[831,5,2872922489>>>0,"flight-attendant top","Tops"],
+[362,8,906829256>>>0,"flip-flops","Shoes"],
+[422,8,318485422>>>0,"flippers","Shoes"],
+[631,6,882841445>>>0,"floating feathers","Accessory"],
+[1019,8,323046971>>>0,"floral dress","Topslong"],
+[1074,8,3287475525>>>0,"floral jumpsuit","Topslong"],
+[349,6,615363090>>>0,"floral leggings","Socks"],
+[269,8,2552015651>>>0,"floral palazzo pants","Bottoms"],
+[250,4,1669116507>>>0,"floral skirt","Bottoms"],
+[125,8,2707649416>>>0,"floral sweater","Tops"],
+[323,6,1668845615>>>0,"floral-embroidered tights","Socks"],
+[733,8,4133178457>>>0,"flower cap","Headwear"],
+[852,8,2927398540>>>0,"flower garland","Accessory"],
+[722,8,1299861948>>>0,"flower hair clip","Headwear"],
+[973,8,2859847432>>>0,"flower hairpin","Headwear"],
+[700,8,4131537876>>>0,"flower hat","Headwear"],
+[1065,8,2603720659>>>0,"flower hood","Headwear"],
+[610,6,2761003263>>>0,"flower necklace","Accessory"],
+[379,6,3343062428>>>0,"flower sandals","Shoes"],
+[790,8,3217763229>>>0,"flower sunglasses","Headwear"],
+[458,6,270802630>>>0,"football attire","Topslong"],
+[782,6,3542670565>>>0,"football helmet","Headwear"],
+[483,6,3426218694>>>0,"formal dress with jacket","Topslong"],
+[839,6,393546735>>>0,"formal suspenders getup","Topslong"],
+[876,1,2696757212>>>0,"fried-egg suit","All"],
+[578,1,2837369880>>>0,"fried-shrimp suit","All"],
+[48,3,1099055984>>>0,"frilled blouse","Tops"],
+[244,6,2889872834>>>0,"frilled skirt","Bottoms"],
+[466,8,738490936>>>0,"frilly dress","Topslong"],
+[706,1,309703067>>>0,"frog hood","Headwear"],
+[545,1,721158021>>>0,"frog suit","All"],
+[890,1,614986115>>>0,"fruit hat","Headwear"],
+[31,6,3968195937>>>0,"fruit-print tee","Tops"],
+[159,8,1291323480>>>0,"garden-gnome shirt","Tops"],
+[783,6,3516916190>>>0,"gas mask","Headwear"],
+[201,8,2403201708>>>0,"gaucho pants","Bottoms"],
+[80,6,300105080>>>0,"gaudy suit jacket","Tops"],
+[211,4,53717116>>>0,"geometric skirt","Bottoms"],
+[35,4,803893597>>>0,"geometric-print tee","Tops"],
+[838,4,1650075521>>>0,"geta","Shoes"],
+[871,4,1601417820>>>0,"giant sword","Accessory"],
+[999,8,2010072321>>>0,"gingham dress","Topslong"],
+[17,8,4040988483>>>0,"gingham shirt","Tops"],
+[970,2,2083375943>>>0,"gladiator armor","Tops"],
+[969,2,771571618>>>0,"gladiator helmet","Headwear"],
+[371,4,1786418638>>>0,"gladiator sandals","Shoes"],
+[292,6,3851003506>>>0,"glen plaid shorts","Bottoms"],
+[966,2,1918669867>>>0,"Gobelin skirt","Bottoms"],
+[900,2,3261804439>>>0,"goggles","Headwear"],
+[142,4,161032606>>>0,"goldfish tee","Tops"],
+[516,4,743236401>>>0,"gothic dress","Topslong"],
+[213,4,682394434>>>0,"gradation skirt","Bottoms"],
+[639,8,2775045672>>>0,"grade-schooler backpack","Accessory"],
+[918,8,333524893>>>0,"gradient sweater","Tops"],
+[682,4,2603913549>>>0,"graduate cap","Headwear"],
+[70,4,1278754865>>>0,"graduation robe","Tops"],
+[967,4,283457676>>>0,"guapi mao","Headwear"],
+[131,8,1479431208>>>0,"guayabera","Tops"],
+[951,6,1765879900>>>0,"guitar case","Accessory"],
+[1002,8,1374399297>>>0,"gym attire","Topslong"],
+[763,6,3943749040>>>0,"hair clip","Headwear"],
+[762,6,2373758248>>>0,"hair roller","Headwear"],
+[779,8,147277407>>>0,"half helmet and goggles","Headwear"],
+[85,8,3430103558>>>0,"half-zip fleece pullover","Tops"],
+[986,1,3008817017>>>0,"hamburger suit","All"],
+[778,6,4234350642>>>0,"hamster hood","Headwear"],
+[562,6,757654338>>>0,"hamster suit","All"],
+[140,6,1032058255>>>0,"happi jacket","Tops"],
+[640,4,837088885>>>0,"happy flowers","Accessory"],
+[613,8,1099836935>>>0,"happy hearts","Accessory"],
+[648,8,2098703173>>>0,"headphones","Accessory"],
+[1021,8,1018014852>>>0,"heart apron","Tops"],
+[949,8,1230265552>>>0,"heart hood","Headwear"],
+[605,6,3392650540>>>0,"heart pendant","Accessory"],
+[1023,8,847666663>>>0,"heart staff","Accessory"],
+[792,8,1182177787>>>0,"heart sunglasses","Headwear"],
+[172,8,605855157>>>0,"heart sweater","Tops"],
+[59,8,3859498309>>>0,"heart tee","Tops"],
+[283,6,2657028240>>>0,"heart-buckle skirt","Bottoms"],
+[742,8,792461361>>>0,"heart-print cap","Headwear"],
+[187,6,3795848941>>>0,"heart-print sweater","Tops"],
+[330,7,1866435693>>>0,"heart-print tights","Socks"],
+[579,2,436055744>>>0,"heavy-metal suit","All"],
+[528,8,2972645874>>>0,"hemp-leaf yukata","Topslong"],
+[739,8,1478180607>>>0,"hero helmet","Headwear"],
+[872,8,1516261321>>>0,"hero scarf","Accessory"],
+[551,8,3460287557>>>0,"hero suit","All"],
+[702,6,2929645449>>>0,"hibiscus hairpin","Headwear"],
+[15,4,4243322753>>>0,"hibiscus-print shirt","Tops"],
+[388,8,1595605055>>>0,"high-tops","Shoes"],
+[514,8,1273848587>>>0,"high-waist pinafore dress","Topslong"],
+[373,6,2994129589>>>0,"hiking shoes","Shoes"],
+[207,8,532610580>>>0,"hiking shorts","Bottoms"],
+[225,6,3234749489>>>0,"hippie pants","Bottoms"],
+[812,1,3662965769>>>0,"hockey mask","Headwear"],
+[352,8,3535262637>>>0,"holey socks","Socks"],
+[459,1,3571375562>>>0,"holiday-tree dress","Topslong"],
+[980,3,2861775228>>>0,"holographic cap","Headwear"],
+[530,8,477929188>>>0,"hoodie dress","Topslong"],
+[766,8,3634814611>>>0,"horn","Headwear"],
+[932,6,3703920945>>>0,"horse hood","Headwear"],
+[931,6,272970900>>>0,"horse suit","All"],
+[933,6,2208327664>>>0,"horse tail","Accessory"],
+[711,1,2221550242>>>0,"hot-dog hood","Headwear"],
+[547,1,1449833305>>>0,"hot-dog suit","All"],
+[465,6,920296918>>>0,"houndstooth dress","Topslong"],
+[203,4,116673044>>>0,"houndstooth skirt","Bottoms"],
+[665,8,874780554>>>0,"hunting cap","Headwear"],
+[415,2,2815411953>>>0,"ice skates","Shoes"],
+[102,6,3056724115>>>0,"ice-cream tee","Tops"],
+[920,6,2162036218>>>0,"ice-hockey attire","Topslong"],
+[1052,6,474581187>>>0,"ice-hockey helmet","Headwear"],
+[363,8,301206449>>>0,"indoor shoes","Shoes"],
+[756,4,2304445660>>>0,"jack-o'-lantern mask","Headwear"],
+[543,4,4069010746>>>0,"jack-o'-lantern suit","All"],
+[243,6,2262104846>>>0,"jacquard shorts","Bottoms"],
+[345,6,3240034310>>>0,"jacquard socks","Socks"],
+[421,8,599222381>>>0,"Japanese bathroom sandals","Shoes"],
+[728,8,2999951277>>>0,"Japanese hair ornament","Headwear"],
+[671,4,2031745212>>>0,"Japanese mesh cap","Headwear"],
+[412,8,2169870162>>>0,"Japanese sandals","Shoes"],
+[821,6,717333554>>>0,"Japanese-pattern pants","Bottoms"],
+[205,4,3515743883>>>0,"jeans","Bottoms"],
+[376,8,7555035>>>0,"jelly sandals","Shoes"],
+[781,4,2015528027>>>0,"jester hat","Headwear"],
+[570,4,1955314101>>>0,"jester suit","All"],
+[866,6,963083454>>>0,"jet pack","Accessory"],
+[504,8,3968107439>>>0,"jinbei","Topslong"],
+[880,8,2293944358>>>0,"jockey attire","Tops"],
+[1032,8,2840159586>>>0,"jockey cap","Headwear"],
+[98,6,1615573050>>>0,"jogging jacket","Tops"],
+[260,4,1456670026>>>0,"jorts","Bottoms"],
+[448,6,3280431654>>>0,"jumpsuit","Topslong"],
+[815,1,2913451985>>>0,"kaffiyeh and agal","Headwear"],
+[518,6,3211791123>>>0,"kandora","Topslong"],
+[891,8,2351627186>>>0,"kanji tee","Tops"],
+[450,4,2234573000>>>0,"karate gi","Topslong"],
+[636,6,2511941975>>>0,"katana","Accessory"],
+[658,8,1019417092>>>0,"kerchief","Headwear"],
+[1006,4,2630898995>>>0,"key ring","Headwear"],
+[407,8,2390331668>>>0,"kid sneakers","Shoes"],
+[787,6,1988356439>>>0,"kitsune mask","Headwear"],
+[638,8,2502091803>>>0,"knapsack","Accessory"],
+[348,8,3546784531>>>0,"knee guards","Socks"],
+[977,6,777035857>>>0,"kneepad pants","Bottoms"],
+[738,4,2917824179>>>0,"knight helmet","Headwear"],
+[612,4,3489772495>>>0,"knight sword","Accessory"],
+[451,8,743793651>>>0,"knit dress","Topslong"],
+[740,8,905074308>>>0,"knit earflap hat","Headwear"],
+[220,6,3443244231>>>0,"knit pants","Bottoms"],
+[803,1,3620478588>>>0,"koala hood","Headwear"],
+[573,1,3074094739>>>0,"koala suit","All"],
+[419,8,2443337992>>>0,"Korean flower shoes","Shoes"],
+[128,6,362191549>>>0,"kung-fu shirt","Tops"],
+[414,6,998390250>>>0,"kung-fu shoes","Shoes"],
+[914,8,3382915000>>>0,"kurta","Tops"],
+[76,1,1004023599>>>0,"lab coat","Tops"],
+[270,6,3987080918>>>0,"lace pencil skirt","Bottoms"],
+[184,8,3509977504>>>0,"lace top","Tops"],
+[495,8,459248604>>>0,"lace-overlay dress","Topslong"],
+[356,5,3988865312>>>0,"lace-up boots","Shoes"],
+[1050,5,518869358>>>0,"laced loafers","Shoes"],
+[329,6,815326435>>>0,"lacy socks","Socks"],
+[334,3,4161335656>>>0,"lacy stockings","Socks"],
+[1004,3,349980141>>>0,"latte suit","All"],
+[185,8,952649019>>>0,"layered button-down","Tops"],
+[895,8,4016771175>>>0,"layered heart tee","Tops"],
+[23,6,2137899351>>>0,"layered tee","Tops"],
+[355,4,462219822>>>0,"leather boots","Shoes"],
+[124,6,3423938802>>>0,"leather coat","Tops"],
+[885,8,3675740945>>>0,"leather helmet","Headwear"],
+[275,6,963292684>>>0,"leather miniskirt","Bottoms"],
+[262,6,44456043>>>0,"leather rocker pants","Bottoms"],
+[307,4,2853507052>>>0,"leather shorts","Bottoms"],
+[234,4,1391820474>>>0,"lemon-print skirt","Bottoms"],
+[837,6,4193413561>>>0,"leopard tee","Tops"],
+[229,3,122675352>>>0,"leopard-print maxi skirt","Bottoms"],
+[228,6,2054020835>>>0,"leopard-print miniskirt","Bottoms"],
+[894,6,1516962982>>>0,"leopard-print pants","Bottoms"],
+[367,3,1884499222>>>0,"leopard-print pumps","Shoes"],
+[145,4,610332365>>>0,"lettered tee","Tops"],
+[760,2,1032550589>>>0,"lion hood","Headwear"],
+[561,2,1065093096>>>0,"lion suit","All"],
+[368,8,954146901>>>0,"loafers","Shoes"],
+[477,4,1158048128>>>0,"long denim dress","Topslong"],
+[165,8,3366425418>>>0,"long knit cardigan","Tops"],
+[239,8,3241240589>>>0,"long pencil skirt","Bottoms"],
+[471,6,2963737135>>>0,"long pinafore dress","Topslong"],
+[1064,8,3328638189>>>0,"long track shorts","Bottoms"],
+[263,8,1367085663>>>0,"long wraparound skirt","Bottoms"],
+[132,8,249393116>>>0,"long-sleeve crop top","Tops"],
+[94,8,1589232431>>>0,"long-sleeve deck-striped tee","Tops"],
+[170,8,1811075797>>>0,"long-sleeve grunge shirt","Tops"],
+[32,5,403057123>>>0,"long-sleeve logo sweatshirt","Tops"],
+[1042,8,1620775838>>>0,"long-sleeve shirt with tie","Tops"],
+[93,8,4177900223>>>0,"long-sleeve striped tee","Tops"],
+[903,8,3149797202>>>0,"luchador mask","Headwear"],
+[957,6,2854334200>>>0,"luxury coat","Topslong"],
+[628,3,4127702234>>>0,"magic staff","Accessory"],
+[921,6,1448817977>>>0,"magic symbol","Accessory"],
+[490,8,882031918>>>0,"magical attire","Topslong"],
+[1068,8,1925981774>>>0,"magical pendant","Accessory"],
+[442,6,1282312164>>>0,"maid attire","Topslong"],
+[785,2,1335130076>>>0,"maid headdress","Headwear"],
+[1028,1,2556780067>>>0,"marionette control bar","Headwear"],
+[775,8,3044967472>>>0,"masquerade mask","Headwear"],
+[879,4,2254475238>>>0,"mawashi","Bottoms"],
+[614,3,501238789>>>0,"medal","Accessory"],
+[991,8,2685381632>>>0,"medical face mask","Headwear"],
+[507,8,1887645057>>>0,"mermaid dress","Topslong"],
+[651,6,95552008>>>0,"mesh cap","Headwear"],
+[1024,8,4222879089>>>0,"metallic pants","Bottoms"],
+[952,6,888782540>>>0,"metallic sneakers","Shoes"],
+[668,8,518792206>>>0,"metro hat","Headwear"],
+[829,8,893300662>>>0,"mid-length dotted skirt","Bottoms"],
+[626,8,1405492464>>>0,"mini backpack","Accessory"],
+[689,8,3572928270>>>0,"mini top hat","Headwear"],
+[902,1,3908858348>>>0,"mini-UFO hat","Headwear"],
+[1039,6,3204701857>>>0,"moccasins","Shoes"],
+[757,6,3135598778>>>0,"monkey hood","Headwear"],
+[558,6,2018100596>>>0,"monkey suit","All"],
+[619,6,3723126582>>>0,"monkey tail","Accessory"],
+[491,6,1494706421>>>0,"monogram-print dress","Topslong"],
+[784,8,2057306255>>>0,"monster hood","Headwear"],
+[843,6,3306156314>>>0,"monster socks","Socks"],
+[556,8,1616428890>>>0,"monster suit","All"],
+[620,8,1653350715>>>0,"monster tail","Accessory"],
+[425,4,2678746669>>>0,"morning-glory yukata","Topslong"],
+[2,8,3711964117>>>0,"mountain parka","Tops"],
+[258,6,782634100>>>0,"mouton miniskirt","Bottoms"],
+[261,8,3617815791>>>0,"multicolored shorts","Bottoms"],
+[346,8,4209231008>>>0,"multicolored striped socks","Socks"],
+[474,8,1752460802>>>0,"multistriped dress","Topslong"],
+[217,6,757637747>>>0,"multistriped pants","Bottoms"],
+[157,8,3107667101>>>0,"multistriped shirt","Tops"],
+[71,4,2374025900>>>0,"multistriped sweater","Tops"],
+[173,8,4079637771>>>0,"multistriped tee","Tops"],
+[799,1,2396912140>>>0,"mummy hat","Headwear"],
+[537,1,1778258589>>>0,"mummy suit","All"],
+[497,8,3651988833>>>0,"muscle suit","Topslong"],
+[1044,8,3966661970>>>0,"mushroom hat","Headwear"],
+[1045,8,385995139>>>0,"mushroom suit","All"],
+[863,2,3166071406>>>0,"musical notes","Accessory"],
+[599,6,2309804937>>>0,"name tag","Accessory"],
+[593,8,2347962242>>>0,"name-tag lanyard","Accessory"],
+[469,8,1156407536>>>0,"natural-fiber dress","Topslong"],
+[938,8,989158582>>>0,"neck pouch","Accessory"],
+[832,8,4206383710>>>0,"neck towel","Accessory"],
+[673,8,4241799650>>>0,"newsboy cap","Headwear"],
+[476,6,477348423>>>0,"nightgown","Topslong"],
+[464,8,3462143662>>>0,"ninja attire","Topslong"],
+[731,8,3215182422>>>0,"ninja hood","Headwear"],
+[978,8,3644372543>>>0,"no-show socks","Socks"],
+[347,8,2750863934>>>0,"Nordic socks","Socks"],
+[28,4,3209821556>>>0,"Nordic sweater","Tops"],
+[398,6,2725325045>>>0,"nubuck boots","Shoes"],
+[983,3,4015965767>>>0,"nurse attire","Topslong"],
+[984,3,3615434275>>>0,"nurse cap","Headwear"],
+[178,3,771196954>>>0,"nurse top","Tops"],
+[493,6,1051471110>>>0,"ocean-motif dress","Topslong"],
+[129,8,3274172458>>>0,"office-uniform top","Tops"],
+[509,8,653587343>>>0,"old-fashioned dress","Topslong"],
+[811,4,2674972176>>>0,"oni mask","Headwear"],
+[835,4,1608009989>>>0,"oni suit","All"],
+[7,6,1686748003>>>0,"open-collar shirt","Tops"],
+[190,8,3791807760>>>0,"open-school-uniform top","Tops"],
+[659,8,3368591742>>>0,"outdoor hat","Headwear"],
+[390,8,4108405951>>>0,"outdoor sandals","Shoes"],
+[84,8,773003638>>>0,"outdoor work shirt","Tops"],
+[913,6,2219520790>>>0,"outdoorsy backpack","Accessory"],
+[873,8,2675865253>>>0,"over-sized sweater","Tops"],
+[434,6,705533904>>>0,"over-the-top dress","Topslong"],
+[453,4,3450414694>>>0,"overalls","Topslong"],
+[163,8,831910685>>>0,"oversized tee","Tops"],
+[939,6,2414775778>>>0,"oxygen tank","Accessory"],
+[463,5,723806854>>>0,"painter coveralls","Topslong"],
+[259,4,3072916380>>>0,"painter pants","Bottoms"],
+[49,3,7343248>>>0,"paisley jacket","Tops"],
+[267,8,4116626439>>>0,"pajama pants","Bottoms"],
+[104,8,3270080096>>>0,"pajama shirt","Tops"],
+[299,6,91517364>>>0,"palm-tree shorts","Bottoms"],
+[670,4,2034517826>>>0,"Panama hat","Headwear"],
+[878,1,2893725636>>>0,"paper-bag mask","Headwear"],
+[424,7,2706823528>>>0,"party dress","Topslong"],
+[720,8,2380072843>>>0,"party hat","Headwear"],
+[148,8,2743029011>>>0,"pastel jacket","Tops"],
+[227,6,402230839>>>0,"patchwork maxi skirt","Bottoms"],
+[285,6,888548848>>>0,"patchy sweatpants","Bottoms"],
+[1025,8,966609278>>>0,"patterned fleece jacket","Tops"],
+[19,6,1745738151>>>0,"patterned shirt","Tops"],
+[136,6,2370525009>>>0,"patterned sweater","Tops"],
+[1067,8,3911842843>>>0,"patterned tank top","Tops"],
+[199,6,1514544551>>>0,"patterned vest","Tops"],
+[46,6,3303444779>>>0,"peacoat","Tops"],
+[624,2,3740168045>>>0,"pearl brooch","Accessory"],
+[798,6,1982059537>>>0,"pearl hair clip","Headwear"],
+[601,2,2900788129>>>0,"pearl necklace","Accessory"],
+[365,6,1306973848>>>0,"pearl pumps","Shoes"],
+[242,8,3465984567>>>0,"pencil miniskirt","Bottoms"],
+[240,8,507928970>>>0,"pencil skirt","Bottoms"],
+[584,6,3687613426>>>0,"pendant","Accessory"],
+[825,4,3597749678>>>0,"penguin hood","Headwear"],
+[824,4,534874554>>>0,"penguin suit","All"],
+[947,4,1178741203>>>0,"pepper suit","All"],
+[934,2,1190710853>>>0,"phantom-thief attire","Tops"],
+[987,5,814963162>>>0,"phantom-thief mask","Headwear"],
+[884,2,1905938961>>>0,"pharaoh attire","Topslong"],
+[868,1,3659999237>>>0,"pharaoh headdress","Headwear"],
+[47,2,3743066631>>>0,"photo-print tee","Tops"],
+[883,1,4054205063>>>0,"pig hood","Headwear"],
+[882,1,381473162>>>0,"pig suit","All"],
+[886,1,782685276>>>0,"pig tail","Accessory"],
+[795,8,3653064160>>>0,"pillbox hat","Headwear"],
+[188,5,2500240932>>>0,"pilot jacket","Tops"],
+[492,6,271922234>>>0,"pinafore dress","Topslong"],
+[1003,8,3919264193>>>0,"pinafore school attire","Topslong"],
+[786,1,1366374255>>>0,"pineapple hat","Headwear"],
+[568,1,2197179716>>>0,"pineapple suit","All"],
+[79,4,1553385874>>>0,"pirate coat","Tops"],
+[696,1,1220896424>>>0,"pirate hat","Headwear"],
+[789,6,235328230>>>0,"pixel sunglasses","Headwear"],
+[826,8,1172200073>>>0,"plaid apron","Tops"],
+[192,8,914795746>>>0,"plaid coat","Tops"],
+[473,6,452787145>>>0,"plaid dress","Topslong"],
+[154,8,3254279993>>>0,"plaid jacket","Tops"],
+[675,6,2804633901>>>0,"plaid newsboy cap","Headwear"],
+[55,4,4282459356>>>0,"plaid-flannel shirt","Tops"],
+[312,8,213673050>>>0,"plain socks","Socks"],
+[904,4,2940643787>>>0,"playing-card suit","All"],
+[306,8,956842186>>>0,"pleated skirt","Bottoms"],
+[74,8,2472794373>>>0,"pocket tee","Tops"],
+[772,8,1066344289>>>0,"pointed hat","Headwear"],
+[743,1,2445587277>>>0,"police hat","Headwear"],
+[161,3,1141464545>>>0,"police officer vest","Tops"],
+[1033,1,2768469159>>>0,"police-car suit","All"],
+[468,8,1829172787>>>0,"polka-dot dress","Topslong"],
+[328,8,4098235553>>>0,"polka-dot leggings","Socks"],
+[478,6,801708130>>>0,"polo dress","Topslong"],
+[9,8,1110801154>>>0,"polo shirt","Tops"],
+[482,6,1646288866>>>0,"pom-pom dress","Topslong"],
+[667,8,3019785147>>>0,"pom-pom knit beanie","Headwear"],
+[500,8,1343476750>>>0,"pop-idol dress","Topslong"],
+[801,8,3998024523>>>0,"pop-idol hat","Headwear"],
+[830,6,2944067922>>>0,"pop-out glasses","Headwear"],
+[814,2,175969047>>>0,"pot","Headwear"],
+[1031,6,1974856379>>>0,"price tag","Headwear"],
+[690,3,2465963963>>>0,"prince crown","Headwear"],
+[66,6,751925404>>>0,"princely attire","Tops"],
+[429,8,131288141>>>0,"princess dress","Topslong"],
+[405,8,3631734162>>>0,"princess shoes","Shoes"],
+[1053,8,2355577924>>>0,"printed-design face mask","Headwear"],
+[643,6,499618643>>>0,"professional backpack","Accessory"],
+[241,8,96321088>>>0,"professional skirt","Bottoms"],
+[998,1,162173188>>>0,"propeller cap","Headwear"],
+[121,8,2750755652>>>0,"puff-sleeve blouse","Tops"],
+[168,8,1424324215>>>0,"puffy vest","Tops"],
+[265,8,950751816>>>0,"pumpkin pants","Bottoms"],
+[406,6,2482502261>>>0,"punk boots","Shoes"],
+[487,8,2975830307>>>0,"qipao","Topslong"],
+[224,8,2845189914>>>0,"quad-button skirt","Bottoms"],
+[101,6,1581593190>>>0,"quilted jacket","Tops"],
+[704,6,3757172210>>>0,"rabbit hood","Headwear"],
+[544,6,2687574692>>>0,"rabbit suit","All"],
+[517,8,2664252727>>>0,"race-driver attire","Topslong"],
+[737,8,796046280>>>0,"racing helmet","Headwear"],
+[277,4,2875765419>>>0,"rad jeans","Bottoms"],
+[456,3,1403367724>>>0,"ragged dress","Topslong"],
+[304,3,2266877600>>>0,"ragged pants","Bottoms"],
+[171,3,2338897551>>>0,"ragged shirt","Tops"],
+[72,8,3960922217>>>0,"raglan long-sleeve tee","Tops"],
+[107,8,1978961670>>>0,"raglan pullover sweatshirt","Tops"],
+[360,6,804876606>>>0,"rain boots","Shoes"],
+[338,4,3186768592>>>0,"rainbow knee-highs","Socks"],
+[52,4,2217037229>>>0,"raincoat","Tops"],
+[713,1,2811072496>>>0,"reindeer hood","Headwear"],
+[550,1,48763805>>>0,"reindeer suit","All"],
+[88,8,3830223616>>>0,"restaurateur clothing","Tops"],
+[322,6,1121262294>>>0,"retro checkered socks","Socks"],
+[437,6,665035547>>>0,"retro dress","Topslong"],
+[435,4,2922284219>>>0,"retro floral dress","Topslong"],
+[496,6,2691531282>>>0,"retro gown","Topslong"],
+[195,8,3991078950>>>0,"retro polo shirt","Tops"],
+[503,8,834710177>>>0,"retro swimsuit","Topslong"],
+[1071,6,2415541999>>>0,"rhinestone cap","Headwear"],
+[975,6,2421973260>>>0,"rhinestone sunglasses","Headwear"],
+[342,8,3866614902>>>0,"ribbed leggings","Socks"],
+[701,8,826946153>>>0,"ribbon","Headwear"],
+[350,8,3379378353>>>0,"ribbon tights","Socks"],
+[600,2,2257908172>>>0,"ring pendant","Accessory"],
+[24,6,4092313585>>>0,"ringer tee","Tops"],
+[859,8,4127957883>>>0,"robe","Topslong"],
+[942,6,3774376924>>>0,"rock-band tee","Tops"],
+[212,4,1962228595>>>0,"rocker jeans","Bottoms"],
+[176,3,3469924323>>>0,"rodeo-rider duds","Tops"],
+[311,3,2814873756>>>0,"rodeo-rider pants","Bottoms"],
+[592,8,1378717409>>>0,"rose corsage","Accessory"],
+[1018,8,2530184730>>>0,"rose-patterned shirt","Tops"],
+[632,8,2406484379>>>0,"rosette","Accessory"],
+[594,8,1750719003>>>0,"rosette pin","Accessory"],
+[1001,8,1290467038>>>0,"round-toe pumps","Shoes"],
+[515,2,699700461>>>0,"royal attire","Topslong"],
+[910,8,1678998351>>>0,"rubber-ducky hat","Headwear"],
+[369,8,3581331702>>>0,"rubber-toe high-tops","Shoes"],
+[387,8,4083301701>>>0,"rubber-toe sneakers","Shoes"],
+[335,4,320566165>>>0,"ruffled socks","Socks"],
+[867,8,19361958>>>0,"rugby attire","Tops"],
+[12,6,485425370>>>0,"rugby shirt","Tops"],
+[899,2,342552421>>>0,"rumba dress","Topslong"],
+[847,2,3136102500>>>0,"rumba suit","Topslong"],
+[972,8,3647313882>>>0,"running shoes","Shoes"],
+[249,8,3407616889>>>0,"running shorts","Bottoms"],
+[183,8,3800180778>>>0,"running singlet","Tops"],
+[413,6,2109624740>>>0,"sabot sandals","Shoes"],
+[716,5,1368175867>>>0,"safety helmet","Headwear"],
+[175,6,1899904174>>>0,"safety vest","Tops"],
+[750,8,4002837216>>>0,"sailor beret","Headwear"],
+[678,1,1726128457>>>0,"sailor cap","Headwear"],
+[433,5,2385364207>>>0,"sailor dress","Topslong"],
+[252,8,4254245636>>>0,"sailor skirt","Bottoms"],
+[30,4,3084129746>>>0,"sailor-uniform top","Tops"],
+[950,8,421140439>>>0,"samba feathers","Accessory"],
+[943,8,1570799456>>>0,"samba headdress","Headwear"],
+[944,8,2828702231>>>0,"samba suit","Topslong"],
+[198,6,1403038411>>>0,"samurai armor","Tops"],
+[823,6,2679001433>>>0,"samurai helmet","Headwear"],
+[822,6,816011893>>>0,"samurai shin guards","Shoes"],
+[375,1,1714573989>>>0,"Santa boots","Shoes"],
+[78,1,1236324933>>>0,"Santa coat","Tops"],
+[426,1,426158209>>>0,"Santa dress","Topslong"],
+[652,1,2803084354>>>0,"Santa hat","Headwear"],
+[245,1,2599747038>>>0,"Santa pants","Bottoms"],
+[1056,1,1867433239>>>0,"sarashi","Tops"],
+[523,8,253712706>>>0,"sari","Topslong"],
+[641,8,754283587>>>0,"satchel","Accessory"],
+[1008,8,1036060606>>>0,"satin dress","Topslong"],
+[898,6,1232108753>>>0,"scarf with fringe","Accessory"],
+[589,8,322452336>>>0,"scattered roses","Accessory"],
+[253,6,2058018336>>>0,"school skirt","Bottoms"],
+[254,6,4224504591>>>0,"school slacks","Bottoms"],
+[67,1,2082527179>>>0,"school-uniform top","Tops"],
+[1020,1,118504579>>>0,"scythe","Accessory"],
+[1051,6,2873737687>>>0,"seashell hairpin","Headwear"],
+[538,2,327195978>>>0,"seaweed suit","All"],
+[526,8,1220117876>>>0,"semi-formal kimono","Topslong"],
+[858,6,2809488861>>>0,"sensible sneakers","Shoes"],
+[404,8,4203656072>>>0,"sequin pumps","Shoes"],
+[917,8,3515859878>>>0,"sequin skirt","Bottoms"],
+[1000,8,3395617930>>>0,"sequined hat","Headwear"],
+[688,3,614810184>>>0,"shampoo-bubbles hat","Headwear"],
+[389,8,1433444896>>>0,"shearling boots","Shoes"],
+[765,4,435285760>>>0,"sheep hood","Headwear"],
+[569,4,3973105196>>>0,"sheep suit","All"],
+[314,6,2275288453>>>0,"sheer dotted socks","Socks"],
+[875,8,2147095778>>>0,"sheer layered top","Tops"],
+[1066,2,79511195>>>0,"shield sunglasses","Headwear"],
+[423,8,2276979323>>>0,"shirtdress","Topslong"],
+[997,8,2692793374>>>0,"shoes with colorful socks","Shoes"],
+[996,8,521183801>>>0,"shoes with slouchy socks","Shoes"],
+[1049,8,716255204>>>0,"shoes with striped socks","Shoes"],
+[231,8,4118120897>>>0,"short shorts","Bottoms"],
+[75,6,1304442107>>>0,"short-sleeve cardigan","Tops"],
+[151,6,4281303010>>>0,"short-sleeve grunge shirt","Tops"],
+[120,6,3562282900>>>0,"short-sleeve shirt with bow","Tops"],
+[119,6,3438026128>>>0,"short-sleeve shirt with necktie","Tops"],
+[844,8,1367013040>>>0,"shorts","Bottoms"],
+[935,8,3681477877>>>0,"shoulder-wrap cardigan","Accessory"],
+[372,6,2323077363>>>0,"shower sandals","Shoes"],
+[645,1,2411514717>>>0,"shrimp tail","Accessory"],
+[565,1,3359622243>>>0,"shrimp-sushi suit","All"],
+[833,1,1255091553>>>0,"shrine maiden's garb","Topslong"],
+[888,2,2142182050>>>0,"shuriken","Accessory"],
+[797,8,1089275098>>>0,"shutter shades","Headwear"],
+[357,4,3158667908>>>0,"side-gore ankle boots","Shoes"],
+[391,8,3740611751>>>0,"side-stripe sneakers","Shoes"],
+[449,8,1975621693>>>0,"silk dress","Topslong"],
+[861,6,4150137895>>>0,"silk scarf","Accessory"],
+[769,8,3246402895>>>0,"silk sleeping cap","Headwear"],
+[461,8,1062892281>>>0,"simple dress","Topslong"],
+[126,6,1795433053>>>0,"simple parka","Tops"],
+[777,8,2002050875>>>0,"skateboard helmet","Headwear"],
+[552,4,3324299888>>>0,"skeleton suit","All"],
+[710,6,379684068>>>0,"ski hat and goggles","Headwear"],
+[65,6,1125139401>>>0,"ski jacket","Tops"],
+[251,6,3399540660>>>0,"ski pants","Bottoms"],
+[34,6,2790637773>>>0,"skipper-collar shirt","Tops"],
+[753,4,1078443803>>>0,"skull mask","Headwear"],
+[596,3,1717623304>>>0,"skull necklace","Accessory"],
+[62,4,1773626338>>>0,"skull tee","Tops"],
+[721,8,4062577328>>>0,"skullcap","Headwear"],
+[232,6,628479018>>>0,"slacks","Bottoms"],
+[144,6,3782690808>>>0,"sleek cyberpunk jacket","Tops"],
+[301,6,2935747356>>>0,"sleek cyberpunk pants","Bottoms"],
+[754,8,808368479>>>0,"sleeping cap","Headwear"],
+[113,6,1214388702>>>0,"sleeveless denim shirt","Tops"],
+[27,8,1804747377>>>0,"sleeveless hoodie","Tops"],
+[82,8,1432475195>>>0,"sleeveless knit top","Tops"],
+[855,8,3837531985>>>0,"sleeveless pullover sweatshirt","Tops"],
+[63,6,2278929110>>>0,"sleeveless shirt","Tops"],
+[431,1,1113028199>>>0,"sleeveless shirtdress","Topslong"],
+[179,8,3091927042>>>0,"sleeveless striped shirt","Tops"],
+[1,6,3144033748>>>0,"sleeveless turtleneck shirt","Tops"],
+[506,8,125034677>>>0,"slip dress","Topslong"],
+[381,6,234169939>>>0,"slip-on sandals","Shoes"],
+[353,8,3977055575>>>0,"slip-ons","Shoes"],
+[361,8,651360961>>>0,"slippers","Shoes"],
+[302,8,619770059>>>0,"slit pants","Bottoms"],
+[761,8,2516326763>>>0,"slouch beanie","Headwear"],
+[45,4,753420222>>>0,"smock","Tops"],
+[817,8,2181794498>>>0,"smocked blouse","Tops"],
+[697,8,2976601082>>>0,"snap clip","Headwear"],
+[649,8,2555884989>>>0,"snood","Accessory"],
+[988,8,2166518590>>>0,"snorkel","Headwear"],
+[397,8,4227734154>>>0,"snow boots","Shoes"],
+[705,1,4115177997>>>0,"snowman hood","Headwear"],
+[546,1,96600242>>>0,"snowman suit","All"],
+[135,8,3220440165>>>0,"soccer jersey","Tops"],
+[288,8,3504073670>>>0,"soccer shorts","Bottoms"],
+[566,8,1439298552>>>0,"soft-drink suit","All"],
+[767,8,331402802>>>0,"soft-serve hat","Headwear"],
+[864,1,2075411720>>>0,"soft-serve suit","All"],
+[747,6,3467153379>>>0,"sombrero","Headwear"],
+[308,6,3760998556>>>0,"spacey shorts","Bottoms"],
+[416,6,2187151027>>>0,"spacey sneakers","Shoes"],
+[133,3,2035634373>>>0,"spacey sweater","Tops"],
+[857,6,2930271096>>>0,"spacey tights","Socks"],
+[992,6,2311366720>>>0,"sparkling dress","Topslong"],
+[621,6,2980942985>>>0,"sparkling stars","Accessory"],
+[841,8,652911669>>>0,"spats","Socks"],
+[331,8,3448203948>>>0,"spiderweb tights","Socks"],
+[411,8,2277286281>>>0,"sport sandals","Shoes"],
+[22,6,2542904167>>>0,"sports bra","Tops"],
+[479,6,3283485449>>>0,"sports-logo dress","Topslong"],
+[694,1,3523385027>>>0,"sprout hat","Headwear"],
+[836,8,2786507651>>>0,"square-motif hat","Headwear"],
+[940,1,3199915367>>>0,"stag-beetle hood","Headwear"],
+[707,1,2572018868>>>0,"star hood","Headwear"],
+[635,8,2744199524>>>0,"star pendant","Accessory"],
+[741,8,4205471211>>>0,"star sunglasses","Headwear"],
+[96,6,3355289665>>>0,"star-print tee","Tops"],
+[865,6,849671253>>>0,"starry leggings","Socks"],
+[315,6,232316697>>>0,"starry socks","Socks"],
+[1009,8,4059982259>>>0,"starry stage dress","Topslong"],
+[246,17,633900255>>>0,"starter pants","Bottoms"],
+[382,17,2267040903>>>0,"starter shoes","Shoes"],
+[339,17,3644932053>>>0,"starter socks","Socks"],
+[77,17,3887460442>>>0,"starter top","Tops"],
+[191,5,2148547545>>>0,"steampunk coat","Tops"],
+[529,5,3517300101>>>0,"steampunk dress","Topslong"],
+[849,5,41262431>>>0,"steampunk hat","Headwear"],
+[650,6,3692184854>>>0,"stethoscope","Accessory"],
+[189,6,1706330282>>>0,"sticker-print shirt","Tops"],
+[317,4,3862147428>>>0,"stockings","Socks"],
+[827,8,2565184328>>>0,"stole","Accessory"],
+[298,8,1364000276>>>0,"strapped skirt","Bottoms"],
+[383,8,1565003207>>>0,"strappy pumps","Shoes"],
+[396,8,1860939706>>>0,"strappy sandals","Shoes"],
+[656,3,2012069334>>>0,"straw boater hat","Headwear"],
+[662,4,1517595611>>>0,"straw hat","Headwear"],
+[402,1,2973698777>>>0,"straw sandals","Shoes"],
+[936,2,3743987169>>>0,"straw skirt","Bottoms"],
+[845,2,3673395279>>>0,"strawberry hat","Headwear"],
+[218,6,4169402699>>>0,"striped cozy shorts","Bottoms"],
+[337,8,1650366659>>>0,"striped knee-highs","Socks"],
+[327,8,851771184>>>0,"striped leggings","Socks"],
+[43,6,3331867209>>>0,"striped loungewear","Tops"],
+[960,6,498135177>>>0,"striped maxi skirt","Bottoms"],
+[206,5,3613016429>>>0,"striped pants","Bottoms"],
+[266,6,1138285122>>>0,"striped pencil skirt","Bottoms"],
+[54,6,3231317318>>>0,"striped polo shirt","Tops"],
+[926,8,3207833112>>>0,"striped slip-ons","Shoes"],
+[965,8,1196499726>>>0,"striped slippers","Shoes"],
+[341,8,1979048424>>>0,"striped socks","Socks"],
+[100,8,174202398>>>0,"striped tank top","Tops"],
+[333,8,1668958524>>>0,"striped-cuff ankle socks","Socks"],
+[646,8,1622029267>>>0,"studded backpack","Accessory"],
+[417,6,601618251>>>0,"studded boots","Shoes"],
+[401,8,1365299173>>>0,"studded dress shoes","Shoes"],
+[964,6,3080825626>>>0,"studded leather choker","Accessory"],
+[683,2,549423704>>>0,"studded newsboy cap","Headwear"],
+[1059,2,3787847714>>>0,"student cap","Headwear"],
+[310,6,3767047838>>>0,"suede pants","Bottoms"],
+[860,6,2698556891>>>0,"sugar-skull mask","Headwear"],
+[535,4,1781032848>>>0,"suit of armor","All"],
+[33,6,1117757493>>>0,"summer cardigan","Tops"],
+[89,8,404814251>>>0,"summer-sailor-uniform top","Tops"],
+[444,8,183861981>>>0,"sunflower dress","Topslong"],
+[223,3,1594394189>>>0,"sunflower skirt","Bottoms"],
+[60,4,3398963448>>>0,"sunny-side-up tee","Tops"],
+[968,6,2244012647>>>0,"superhero suit","All"],
+[955,6,2780929652>>>0,"sushi socks","Socks"],
+[475,8,3080430862>>>0,"suspender skirt with blouse","Topslong"],
+[455,4,2384123490>>>0,"suspenders getup","Topslong"],
+[222,8,254942824>>>0,"sweatpants","Bottoms"],
+[97,8,493221712>>>0,"swim top","Tops"],
+[257,8,553296992>>>0,"swim trunks","Bottoms"],
+[773,8,4080889090>>>0,"swimming cap","Headwear"],
+[344,6,414323518>>>0,"tabi socks","Socks"],
+[64,2,3006263992>>>0,"tailcoat","Tops"],
+[11,6,98008430>>>0,"tailored jacket","Tops"],
+[776,6,2101738430>>>0,"tam","Headwear"],
+[95,8,207072783>>>0,"tank top","Tops"],
+[153,4,3427862228>>>0,"tee with nautical scarf","Tops"],
+[677,5,581036928>>>0,"ten-gallon hat","Headwear"],
+[214,4,3305606790>>>0,"tennis skirt","Bottoms"],
+[18,4,89066935>>>0,"tennis sweater","Tops"],
+[1057,8,280136776>>>0,"tennis-racket bag","Accessory"],
+[585,6,2745995552>>>0,"text badge","Accessory"],
+[846,1,195099922>>>0,"thick-lens glasses","Headwear"],
+[724,6,3608190375>>>0,"tiara","Headwear"],
+[666,8,2461697219>>>0,"tie-dye bucket hat","Headwear"],
+[446,6,945067559>>>0,"tie-dye dress","Topslong"],
+[1029,8,3330979502>>>0,"tie-dye socks","Socks"],
+[110,4,3467545399>>>0,"tie-dye tee","Tops"],
+[289,8,2164759098>>>0,"tiered skirt","Bottoms"],
+[81,8,2154778940>>>0,"tiger baseball jacket","Tops"],
+[771,3,129338076>>>0,"tiger hood","Headwear"],
+[567,3,48449886>>>0,"tiger suit","All"],
+[630,3,3031282106>>>0,"tiger tail","Accessory"],
+[313,8,1766617995>>>0,"tights","Socks"],
+[332,8,2984815142>>>0,"tiny-flower pantyhose","Socks"],
+[510,3,3837307686>>>0,"toga","Topslong"],
+[657,4,46034288>>>0,"top hat","Headwear"],
+[752,4,2450876792>>>0,"toy-robot mask","Headwear"],
+[542,4,1661571491>>>0,"toy-robot suit","All"],
+[106,8,4096581118>>>0,"track jacket","Tops"],
+[272,8,2785584012>>>0,"track pants","Bottoms"],
+[273,8,2157267927>>>0,"track shorts","Bottoms"],
+[420,6,2309238558>>>0,"traditional Korean shoes","Shoes"],
+[6,5,909357976>>>0,"traffic-print tee","Tops"],
+[575,8,1587390101>>>0,"train suit","All"],
+[834,8,2177307156>>>0,"training pants","Bottoms"],
+[770,6,2917734419>>>0,"trapper hat","Headwear"],
+[1027,3,3604325051>>>0,"trash-can suit","All"],
+[1058,4,1313451656>>>0,"travel bag","Accessory"],
+[929,3,608160929>>>0,"tree hood","Headwear"],
+[928,3,2454065658>>>0,"tree suit","All"],
+[16,3,2497698900>>>0,"trench coat","Tops"],
+[1036,8,2901538687>>>0,"triceratops hood","Headwear"],
+[661,6,1673392949>>>0,"trilby","Headwear"],
+[877,4,502467700>>>0,"triple chain","Accessory"],
+[428,6,4271769224>>>0,"tropical-print maxi dress","Topslong"],
+[123,8,364592151>>>0,"tube top","Tops"],
+[686,6,3664798900>>>0,"tulip hat","Headwear"],
+[279,8,2883462979>>>0,"tulle skirt","Bottoms"],
+[577,1,2994949458>>>0,"tuna-sushi suit","All"],
+[116,8,2128234416>>>0,"tunic top","Tops"],
+[985,8,2469990906>>>0,"turban","Headwear"],
+[1015,1,3098554172>>>0,"turkey hood","Headwear"],
+[1017,1,1081828113>>>0,"turkey suit","All"],
+[1016,1,2812913425>>>0,"turkey tail","Accessory"],
+[896,4,2526237568>>>0,"turtle shell","Accessory"],
+[51,6,839982846>>>0,"turtleneck sweater","Tops"],
+[1038,8,1328833504>>>0,"TV mask","Headwear"],
+[38,3,2376377764>>>0,"tweed jacket","Tops"],
+[215,3,2099973602>>>0,"tweed skirt","Bottoms"],
+[892,8,3347450933>>>0,"two-tone tights","Socks"],
+[29,5,2272493693>>>0,"two-toned shirt","Tops"],
+[527,6,2164031108>>>0,"Tyrolean dress","Topslong"],
+[751,6,3373430308>>>0,"Tyrolean hat","Headwear"],
+[525,6,3611034150>>>0,"Tyrolean lederhosen","Topslong"],
+[990,1,1262321200>>>0,"UFO suit","All"],
+[174,6,2881877571>>>0,"ugly holiday sweater","Tops"],
+[160,8,1240931330>>>0,"university sweatshirt","Tops"],
+[73,3,228979880>>>0,"utility vest","Tops"],
+[196,8,1066326857>>>0,"V-neck sweater","Tops"],
+[20,8,2524750014>>>0,"V-neck tee","Tops"],
+[115,2,2034440866>>>0,"vampire attire","Tops"],
+[14,6,660796040>>>0,"varsity cardigan","Tops"],
+[141,8,238152902>>>0,"varsity jacket","Tops"],
+[103,6,3864884786>>>0,"vertical-striped dress shirt","Tops"],
+[156,8,40185778>>>0,"vertical-striped tee","Tops"],
+[13,4,2866311477>>>0,"vest and tee","Tops"],
+[158,4,1630427510>>>0,"Viking clothes","Tops"],
+[774,4,1966465082>>>0,"Viking hat","Headwear"],
+[462,6,4017625107>>>0,"vintage dress","Topslong"],
+[788,6,3289253925>>>0,"VR headset","Headwear"],
+[480,8,594637376>>>0,"waders","Topslong"],
+[1048,6,1380830681>>>0,"warning light","Headwear"],
+[370,8,1315351753>>>0,"water shoes","Shoes"],
+[430,2,3157378784>>>0,"wedding dress","Topslong"],
+[748,2,4031853280>>>0,"wedding tiara","Headwear"],
+[1012,8,2786997595>>>0,"weightlifting singlet","Topslong"],
+[1014,2,3889110499>>>0,"welding mask","Headwear"],
+[378,6,881500113>>>0,"western boots","Shoes"],
+[127,6,1758078201>>>0,"western shirt","Tops"],
+[512,8,2471690516>>>0,"wet suit","Topslong"],
+[627,8,153320759>>>0,"whistle","Accessory"],
+[848,8,1104125493>>>0,"wide-brim felt hat","Headwear"],
+[663,6,735067531>>>0,"wide-brim straw hat","Headwear"],
+[1030,8,878015607>>>0,"wide-striped shirt","Tops"],
+[180,8,410493986>>>0,"windbreaker","Tops"],
+[580,1,406127543>>>0,"windup key","Accessory"],
+[400,4,2449048403>>>0,"wing-tip loafers","Shoes"],
+[460,6,1833402001>>>0,"witch dress","Topslong"],
+[676,6,2819776939>>>0,"witch hat","Headwear"],
+[386,6,2883203464>>>0,"witch shoes","Shoes"],
+[749,3,1937584493>>>0,"wizard hat","Headwear"],
+[519,3,242049702>>>0,"wizard robe","Topslong"],
+[403,6,3160159469>>>0,"wooden clogs","Shoes"],
+[608,3,3152949520>>>0,"wooden-bead necklace","Accessory"],
+[150,8,3774072695>>>0,"work shirt with patches","Tops"],
+[316,8,1106907449>>>0,"workout tights","Socks"],
+[445,8,3487222596>>>0,"wrap dress","Topslong"],
+[200,5,4160271764>>>0,"wraparound skirt","Bottoms"],
+[937,8,415674069>>>0,"wrestling boots","Shoes"],
+[521,8,5354050>>>0,"wrestling singlet","Topslong"],
+[197,8,1477648896>>>0,"wrinkled long-sleeve tee","Tops"],
+[366,6,937213340>>>0,"zebra-print pumps","Shoes"],
+[108,8,1325662944>>>0,"zip-up hoodie","Tops"],
+[633,3,4187412962>>>0,"zipper","Accessory"]
+];
+const COORD_DATA=[
+[166,2728592174>>>0,6,"ABC-loungewear outfit","Basic"],
+[338,1330177525>>>0,8,"aerobics outfit","Basic"],
+[283,554003071>>>0,1,"all-black outfit","Basic"],
+[79,3228083823>>>0,8,"all-out summer-vacay outfit","Basic"],
+[117,589280293>>>0,1,"angel costume","Basic"],
+[303,3053763139>>>0,6,"animal-print-blouson outfit","Basic"],
+[290,3779388687>>>0,8,"anorak-jacket outfit","Basic"],
+[231,3732989990>>>0,8,"ao dai outfit","Basic"],
+[274,351257940>>>0,8,"ao gam outfit","Basic"],
+[254,2790045472>>>0,8,"Aran outfit","Basic"],
+[23,3378073563>>>0,8,"argyle-vest outfit","Basic"],
+[178,3851043732>>>0,8,"aristocratic-coat costume","Basic"],
+[177,387756158>>>0,8,"aristocratic-dress costume","Basic"],
+[123,3800678469>>>0,2,"astronaut costume","Basic"],
+[288,804557831>>>0,3,"B-3 outfit","Basic"],
+[99,1084322887>>>0,6,"baby-bird costume","Basic"],
+[165,529939872>>>0,8,"baby-snapsuit outfit","Basic"],
+[293,2754858731>>>0,8,"baji jeogori outfit","Basic"],
+[209,2883543735>>>0,8,"ballet costume","Basic"],
+[313,3640080655>>>0,8,"bandanna-top outfit","Basic"],
+[238,4067884967>>>0,6,"baseball uniform","Basic"],
+[2,3190210889>>>0,8,"basic-dress outfit","Basic"],
+[4,515079868>>>0,6,"basic-dress-shirt outfit","Basic"],
+[109,4094218970>>>0,8,"basic-pullover outfit","Basic"],
+[12,1476100284>>>0,8,"basic-sweatshirt outfit","Basic"],
+[1,4063511767>>>0,8,"basic-tee outfit","Basic"],
+[164,467152766>>>0,8,"basic-turtleneck outfit","Basic"],
+[211,2155603384>>>0,8,"basketball uniform","Basic"],
+[102,1809781745>>>0,6,"beach-vacation outfit","Basic"],
+[194,3986799199>>>0,5,"bear costume","Basic"],
+[76,1073145180>>>0,4,"bear-ear-cap outfit","Basic"],
+[119,1608703087>>>0,1,"bee costume","Basic"],
+[133,3656835147>>>0,8,"biker outfit","Basic"],
+[234,770946418>>>0,6,"biker-jacket outfit","Basic"],
+[108,1045919107>>>0,8,"bird costume","Basic"],
+[84,2369632285>>>0,6,"blazer-with-bow outfit","Basic"],
+[83,2880583819>>>0,6,"blazer-with-necktie outfit","Basic"],
+[121,2175446380>>>0,8,"bodysuit outfit","Basic"],
+[47,696576213>>>0,3,"bomber-jacket outfit","Basic"],
+[39,3456639251>>>0,4,"botanical-print-skirt outfit","Basic"],
+[92,2793345266>>>0,6,"breezy business outfit","Basic"],
+[19,2694882990>>>0,5,"business suit & tie outfit","Basic"],
+[20,3659732087>>>0,8,"business-suit outfit","Basic"],
+[38,1202911867>>>0,8,"camisole-layered-tee outfit","Basic"],
+[189,3425578193>>>0,1,"cardboard-box costume","Basic"],
+[347,4258560639>>>0,1,"cardboard-robot costume","Basic"],
+[6,1872179965>>>0,8,"cargo-shorts outfit","Basic"],
+[11,1289377204>>>0,8,"casual cardigan outfit","Basic"],
+[24,1597922544>>>0,4,"casual vest outfit","Basic"],
+[298,1087317362>>>0,6,"casual-kimono outfit","Basic"],
+[125,3481035181>>>0,8,"cat costume","Basic"],
+[343,2734264564>>>0,6,"catcher uniform","Basic"],
+[226,2277765101>>>0,6,"celebrity outfit","Basic"],
+[225,1120528918>>>0,8,"cheerleader uniform","Basic"],
+[77,771370175>>>0,8,"chef outfit","Basic"],
+[199,1873056630>>>0,8,"cheongsam outfit","Basic"],
+[304,1225108509>>>0,1,"chicken costume","Basic"],
+[292,1950549966>>>0,8,"chima jeogori outfit","Basic"],
+[143,3608691516>>>0,8,"city-walk outfit","Basic"],
+[328,4178986770>>>0,6,"classic-maid costume","Basic"],
+[62,2007940000>>>0,8,"classical-dress outfit","Basic"],
+[31,1395285050>>>0,6,"coach-jacket outfit","Basic"],
+[50,3270110557>>>0,6,"coat-dress outfit","Basic"],
+[285,3378637395>>>0,8,"collarless-coat outfit","Basic"],
+[29,4028432261>>>0,6,"color-blocked-tee outfit","Basic"],
+[296,3666810291>>>0,5,"colorful checkered outfit","Basic"],
+[69,1170979541>>>0,8,"comfy sweats outfit","Basic"],
+[331,2402776741>>>0,8,"compression outfit","Basic"],
+[287,2718125906>>>0,5,"cool leather outfit","Basic"],
+[258,2071751152>>>0,6,"corduroy outfit","Basic"],
+[276,477671694>>>0,3,"cosmic outfit","Basic"],
+[87,635469777>>>0,4,"country outfit","Basic"],
+[207,3902482765>>>0,4,"cow costume","Basic"],
+[46,1051428913>>>0,6,"Cowichan-sweater outfit","Basic"],
+[187,186764619>>>0,8,"cozy fleece outfit","Basic"],
+[148,4177880124>>>0,6,"crazy-color-shirt outfit","Basic"],
+[172,2598198700>>>0,6,"cyberpunk costume","Basic"],
+[134,1889025141>>>0,6,"cycling uniform","Basic"],
+[317,748417736>>>0,8,"dance-performance outfit","Basic"],
+[145,2815397134>>>0,8,"denim-dress outfit","Basic"],
+[153,3205058305>>>0,4,"denim-jacket outfit","Basic"],
+[251,1055450645>>>0,3,"detective outfit","Basic"],
+[118,3931301305>>>0,6,"devil costume","Basic"],
+[112,4070453774>>>0,8,"dinosaur costume","Basic"],
+[171,2454158455>>>0,3,"disco-star outfit","Basic"],
+[224,895197599>>>0,3,"diving costume","Basic"],
+[131,3149536860>>>0,8,"DJ outfit","Basic"],
+[124,623535695>>>0,8,"dog costume","Basic"],
+[330,441078225>>>0,8,"dog-logo-tracksuit outfit","Basic"],
+[41,46663129>>>0,8,"dolly-dress outfit","Basic"],
+[142,3422211591>>>0,8,"dolly-shirt outfit","Basic"],
+[55,138603389>>>0,6,"dotted-shirt outfit","Basic"],
+[45,4162131205>>>0,8,"down-jacket outfit","Basic"],
+[306,2716567439>>>0,8,"dragon costume","Basic"],
+[346,444322991>>>0,6,"dreamy-dress outfit","Basic"],
+[71,1634720317>>>0,5,"dreamy-jacket outfit","Basic"],
+[212,1398418215>>>0,6,"dreamy-unicorn outfit","Basic"],
+[34,1386036962>>>0,8,"dress shirt & sweater outfit","Basic"],
+[18,1410165528>>>0,6,"duffle coat & skirt outfit","Basic"],
+[237,1586872906>>>0,8,"elegant-dress outfit","Basic"],
+[7,1706704108>>>0,8,"energetic-skirt outfit","Basic"],
+[324,34490929>>>0,8,"exercise outfit","Basic"],
+[244,3754384464>>>0,4,"explorer outfit","Basic"],
+[181,3329996800>>>0,8,"fairy costume","Basic"],
+[204,413958908>>>0,6,"far-future costume","Basic"],
+[147,2068641683>>>0,8,"faux-fur-coat-dress outfit","Basic"],
+[222,945028076>>>0,8,"figure-skating costume","Basic"],
+[221,2185363004>>>0,8,"figure-skating-dress costume","Basic"],
+[271,457537250>>>0,4,"firefighter outfit","Basic"],
+[210,783464216>>>0,8,"fish-folk costume","Basic"],
+[32,2203949799>>>0,6,"flannel-shirt outfit","Basic"],
+[334,1668237593>>>0,8,"flapper-dress outfit","Basic"],
+[163,1391328845>>>0,8,"fleece-pullover outfit","Basic"],
+[282,23406829>>>0,5,"flight-attendant outfit","Basic"],
+[301,346876798>>>0,8,"floral-sweater outfit","Basic"],
+[190,3162064651>>>0,8,"flower costume","Basic"],
+[168,2684052725>>>0,6,"flowery outfit","Basic"],
+[72,2701779073>>>0,6,"fluffy loungewear outfit","Basic"],
+[157,339268437>>>0,8,"fly-fisher outfit","Basic"],
+[345,4206763744>>>0,6,"football uniform","Basic"],
+[129,2547840551>>>0,6,"formal peacoat outfit","Basic"],
+[340,2136099182>>>0,6,"formal suspenders outfit","Basic"],
+[162,593730593>>>0,5,"formal vest outfit","Basic"],
+[159,1253042523>>>0,6,"formal-dress outfit","Basic"],
+[94,3382075205>>>0,1,"frog costume","Basic"],
+[43,2251120730>>>0,6,"fruit-print-tee outfit","Basic"],
+[266,2972802415>>>0,8,"garden-gnome costume","Basic"],
+[126,3899612413>>>0,8,"gaudy bubble-era outfit","Basic"],
+[98,2648107034>>>0,6,"gaudy-suit outfit","Basic"],
+[56,2575901488>>>0,4,"geometric-print-tee outfit","Basic"],
+[161,3772103589>>>0,4,"geometric-skirt outfit","Basic"],
+[28,2916404427>>>0,8,"gingham outfit","Basic"],
+[314,1159562947>>>0,2,"gladiator costume","Basic"],
+[111,1532715969>>>0,8,"goodnight pajama outfit","Basic"],
+[25,1738316855>>>0,3,"gothic prince outfit","Basic"],
+[68,2177554155>>>0,4,"graduation outfit","Basic"],
+[219,122026361>>>0,6,"grunge outfit","Basic"],
+[197,2153341232>>>0,6,"hamster costume","Basic"],
+[155,1763903203>>>0,6,"heart-to-heart outfit","Basic"],
+[269,2454964979>>>0,8,"hemp-leaf-yukata outfit","Basic"],
+[122,2689778998>>>0,8,"hero costume","Basic"],
+[42,31005414>>>0,4,"hibiscus-print-shirt outfit","Basic"],
+[233,409657453>>>0,8,"high-waist-pinafore outfit","Basic"],
+[48,587003391>>>0,8,"hiking outfit","Basic"],
+[130,2650918008>>>0,5,"hip-hop outfit","Basic"],
+[236,2243804134>>>0,6,"holiday-party outfit","Basic"],
+[115,269997533>>>0,1,"holiday-tree costume","Basic"],
+[320,2030443682>>>0,6,"horse costume","Basic"],
+[100,514120663>>>0,1,"hot-dog costume","Basic"],
+[253,1510258905>>>0,6,"houndstooth-dress outfit","Basic"],
+[96,1394792028>>>0,6,"ice-cream-tee outfit","Basic"],
+[342,3271817933>>>0,6,"ice-hockey uniform","Basic"],
+[188,4146440328>>>0,4,"jack-o'-lantern costume","Basic"],
+[182,2476574094>>>0,4,"Japanese-print outfit","Basic"],
+[213,3205454959>>>0,4,"jester costume","Basic"],
+[339,3199865845>>>0,8,"jockey uniform","Basic"],
+[179,3209742013>>>0,6,"jogging outfit","Basic"],
+[57,1768817231>>>0,6,"jumpsuit outfit","Basic"],
+[120,277158686>>>0,4,"knight costume","Basic"],
+[252,3668113953>>>0,8,"knit-dress outfit","Basic"],
+[265,1896167902>>>0,1,"koala costume","Basic"],
+[200,2577951726>>>0,6,"kung-fu uniform","Basic"],
+[273,3738834369>>>0,8,"kurta outfit","Basic"],
+[132,3524245201>>>0,1,"lab-coat outfit","Basic"],
+[248,2805782060>>>0,8,"lace-overlay-dress outfit","Basic"],
+[312,116899337>>>0,8,"lace-top outfit","Basic"],
+[215,2270906180>>>0,4,"lettered-tee outfit","Basic"],
+[193,318107798>>>0,2,"lion costume","Basic"],
+[146,1113517013>>>0,4,"long-denim-dress outfit","Basic"],
+[300,4042376483>>>0,7,"long-knit-cardigan outfit","Basic"],
+[70,2319495292>>>0,8,"long-sleeve deck-striped outfit","Basic"],
+[3,1019703152>>>0,8,"long-sleeve striped-tee outfit","Basic"],
+[5,2329602557>>>0,8,"long-sleeve tee & skirt outfit","Basic"],
+[37,4008916368>>>0,6,"lovely hearts outfit","Basic"],
+[311,2049831117>>>0,8,"luchador uniform","Basic"],
+[186,4038300796>>>0,8,"magical costume","Basic"],
+[263,3918603433>>>0,6,"maid costume","Basic"],
+[232,4135014080>>>0,8,"marathon outfit","Basic"],
+[63,145246800>>>0,6,"mid-shower-doorbell outfit","Basic"],
+[196,401684910>>>0,8,"mid-shower-phone-call outfit","Basic"],
+[176,442387647>>>0,6,"monkey costume","Basic"],
+[203,1012223374>>>0,8,"monster costume","Basic"],
+[228,1272300157>>>0,4,"morning-glory-yukata outfit","Basic"],
+[66,2828822559>>>0,4,"multistriped-sweater outfit","Basic"],
+[307,1097276749>>>0,1,"mummy costume","Basic"],
+[341,649524535>>>0,8,"mushroom costume","Basic"],
+[160,1372900880>>>0,8,"natural-fiber-dress outfit","Basic"],
+[261,1343742365>>>0,4,"nautical outfit","Basic"],
+[262,2298177256>>>0,8,"ninja costume","Basic"],
+[249,717351249>>>0,6,"noir-detective outfit","Basic"],
+[49,1387417089>>>0,4,"Nordic-sweater outfit","Basic"],
+[322,1666265704>>>0,3,"nurse outfit","Basic"],
+[333,1159727105>>>0,4,"oni costume","Basic"],
+[318,833830681>>>0,8,"open-school-uniform outfit","Basic"],
+[223,3634704458>>>0,8,"over-sized-tee outfit","Basic"],
+[58,3886914569>>>0,6,"over-the-top outfit","Basic"],
+[97,4231293360>>>0,5,"painter outfit","Basic"],
+[51,1724951958>>>0,3,"paisley-jacket outfit","Basic"],
+[61,1141667905>>>0,7,"party-dress outfit","Basic"],
+[206,3872559439>>>0,8,"pastel-suit outfit","Basic"],
+[60,4008097843>>>0,4,"patchwork outfit","Basic"],
+[75,669886249>>>0,6,"patterned-shirt outfit","Basic"],
+[17,2827190471>>>0,6,"peacoat outfit","Basic"],
+[270,1108011379>>>0,4,"penguin costume","Basic"],
+[336,3117292382>>>0,2,"phantom-thief costume","Basic"],
+[315,2757436131>>>0,2,"pharaoh costume","Basic"],
+[15,3023091931>>>0,2,"photo-print-tee outfit","Basic"],
+[308,1680426433>>>0,1,"pig costume","Basic"],
+[281,714759253>>>0,5,"pilot outfit","Basic"],
+[183,1282269430>>>0,6,"pinafore-dress outfit","Basic"],
+[255,1847030243>>>0,1,"pineapple costume","Basic"],
+[90,2233985200>>>0,4,"pirate costume","Basic"],
+[284,2425014268>>>0,8,"plaid-coat outfit","Basic"],
+[208,2147679020>>>0,6,"plaid-dress outfit","Basic"],
+[9,6995139>>>0,4,"plaid-flannel outfit","Basic"],
+[240,268038690>>>0,8,"plaid-jacket outfit","Basic"],
+[214,2143772472>>>0,3,"police uniform","Basic"],
+[138,3779550360>>>0,8,"polka-dot-dress outfit","Basic"],
+[158,1803771316>>>0,6,"polo-dress outfit","Basic"],
+[205,3454908477>>>0,6,"pom-pom-dress outfit","Basic"],
+[277,328713721>>>0,8,"pop-idol outfit","Basic"],
+[175,3501591483>>>0,6,"prince costume","Basic"],
+[174,1201253843>>>0,8,"princess costume","Basic"],
+[326,884002044>>>0,4,"punky cargo-pants outfit","Basic"],
+[327,2932088848>>>0,4,"punky skirt outfit","Basic"],
+[198,1190673355>>>0,8,"qipao outfit","Basic"],
+[302,900332209>>>0,6,"quilted jacket & skirt outfit","Basic"],
+[95,1298658334>>>0,6,"quilted-jacket outfit","Basic"],
+[110,304926255>>>0,6,"rabbit costume","Basic"],
+[259,2681376301>>>0,8,"racing uniform","Basic"],
+[280,1383767418>>>0,3,"ragged outfit","Basic"],
+[139,188234220>>>0,8,"raglan-sweatshirt outfit","Basic"],
+[103,446271553>>>0,4,"rainy-day outfit","Basic"],
+[127,2970348381>>>0,4,"refreshing lemon outfit","Basic"],
+[116,1545007950>>>0,1,"reindeer costume","Basic"],
+[156,3342698678>>>0,8,"relaxed tunic-top outfit","Basic"],
+[299,3082682038>>>0,6,"retro bedtime outfit","Basic"],
+[89,2804237997>>>0,6,"retro-dress outfit","Basic"],
+[82,2430328965>>>0,4,"retro-floral-dress outfit","Basic"],
+[229,3931569317>>>0,8,"retro-swimsuit outfit","Basic"],
+[323,4165434112>>>0,3,"RN outfit","Basic"],
+[309,2800965067>>>0,3,"rodeo-rider costume","Basic"],
+[264,1019679051>>>0,2,"royal costume","Basic"],
+[325,3632772700>>>0,8,"rugby uniform","Basic"],
+[201,2626166357>>>0,6,"running outfit","Basic"],
+[275,3266707592>>>0,8,"sage costume","Basic"],
+[86,1728845264>>>0,4,"sailor school uniform","Basic"],
+[44,3604470322>>>0,5,"sailor-dress outfit","Basic"],
+[305,1293104084>>>0,8,"samba costume","Basic"],
+[245,2003765372>>>0,6,"samurai outfit","Basic"],
+[113,345342407>>>0,1,"Santa outfit","Basic"],
+[114,2675986521>>>0,1,"Santa-dress outfit","Basic"],
+[291,1246351922>>>0,8,"sari outfit","Basic"],
+[329,1983984740>>>0,8,"school outfit","Basic"],
+[85,2777092112>>>0,1,"school uniform","Basic"],
+[80,4178684993>>>0,4,"school-smock outfit","Basic"],
+[247,2281002055>>>0,6,"seaside-stroll outfit","Basic"],
+[297,3408006746>>>0,8,"semi-formal-kimono outfit","Basic"],
+[227,1092375912>>>0,4,"sheep costume","Basic"],
+[136,1238954900>>>0,6,"shirt-with-bow outfit","Basic"],
+[135,1805432399>>>0,6,"shirt-with-necktie outfit","Basic"],
+[40,1628078094>>>0,8,"shirtdress outfit","Basic"],
+[10,2183859740>>>0,6,"short-sleeve-cardigan outfit","Basic"],
+[154,3923613239>>>0,8,"silk-dress outfit","Basic"],
+[141,1493754725>>>0,8,"simple-dress outfit","Basic"],
+[256,3378674244>>>0,6,"simple-parka outfit","Basic"],
+[195,3080236813>>>0,4,"skeleton costume","Basic"],
+[167,3241326007>>>0,6,"skiing outfit","Basic"],
+[151,2158912743>>>0,6,"skipper-collar-shirt outfit","Basic"],
+[257,109937508>>>0,8,"skirt & down-jacket outfit","Basic"],
+[235,3519526993>>>0,4,"skull-tee outfit","Basic"],
+[246,289607555>>>0,6,"sleek cyberpunk outfit","Basic"],
+[150,2326548693>>>0,8,"sleeveless-knit-top outfit","Basic"],
+[16,711328288>>>0,6,"sleeveless-shirt outfit","Basic"],
+[74,2731499552>>>0,1,"sleeveless-shirtdress outfit","Basic"],
+[65,1608735205>>>0,6,"sleeveless-turtleneck outfit","Basic"],
+[335,3056433708>>>0,8,"snorkeling outfit","Basic"],
+[105,573935988>>>0,1,"snowman costume","Basic"],
+[239,567758258>>>0,8,"soccer uniform","Basic"],
+[319,3552850075>>>0,8,"soft-drink costume","Basic"],
+[316,927536540>>>0,8,"soft-serve costume","Basic"],
+[191,1584265344>>>0,4,"sprout costume","Basic"],
+[332,2965787815>>>0,1,"stag-beetle costume","Basic"],
+[52,2698292779>>>0,6,"star-print-tee outfit","Basic"],
+[0,6956255>>>0,1,"starter outfit","Basic"],
+[278,2986181412>>>0,5,"steampunk-coat outfit","Basic"],
+[279,1362013693>>>0,5,"steampunk-dress outfit","Basic"],
+[220,14108651>>>0,8,"store-attendant outfit","Basic"],
+[21,2025882173>>>0,6,"street-style layered outfit","Basic"],
+[192,412311786>>>0,8,"street-style outfit","Basic"],
+[217,3446349469>>>0,6,"striped outfit","Basic"],
+[26,804550236>>>0,6,"striped rugby outfit","Basic"],
+[33,3930140242>>>0,6,"striped-polo outfit","Basic"],
+[310,3673190692>>>0,8,"stylish heart outfit","Basic"],
+[93,2262903188>>>0,8,"summer sailor school uniform","Basic"],
+[242,925236729>>>0,4,"summer vintage-suit outfit","Basic"],
+[13,3331862910>>>0,6,"summer-cardigan outfit","Basic"],
+[81,1184772635>>>0,8,"sunny sunflower outfit","Basic"],
+[27,3019062521>>>0,4,"sunny-side-up outfit","Basic"],
+[260,1539590529>>>0,4,"superfan outfit","Basic"],
+[137,2598003620>>>0,8,"surveyor outfit","Basic"],
+[88,624371902>>>0,4,"suspenders outfit","Basic"],
+[35,439941233>>>0,5,"sweatshirt & miniskirt outfit","Basic"],
+[180,3509458388>>>0,8,"swim outfit","Basic"],
+[53,1200434834>>>0,2,"tailcoat outfit","Basic"],
+[8,1723082162>>>0,6,"tailored-jacket outfit","Basic"],
+[243,3541733328>>>0,6,"tam outfit","Basic"],
+[36,1757641455>>>0,8,"tennis uniform","Basic"],
+[67,418608093>>>0,4,"tennis-sweater outfit","Basic"],
+[22,3457567837>>>0,8,"tidy button-down outfit","Basic"],
+[149,3840751583>>>0,4,"tie-dye-tee outfit","Basic"],
+[216,1654284360>>>0,3,"tiger costume","Basic"],
+[152,2733280065>>>0,8,"tiger-baseball-jacket outfit","Basic"],
+[202,1259822431>>>0,4,"toy-robot costume","Basic"],
+[106,3783186126>>>0,8,"tracksuit outfit","Basic"],
+[107,724650675>>>0,8,"tracksuit with shorts outfit","Basic"],
+[241,2715209528>>>0,6,"traffic-guard outfit","Basic"],
+[54,1954839608>>>0,5,"traffic-print-tee outfit","Basic"],
+[272,1371003836>>>0,3,"tree costume","Basic"],
+[30,1952997248>>>0,3,"trench-coat outfit","Basic"],
+[73,41391415>>>0,6,"tropical-vacation outfit","Basic"],
+[337,3670582729>>>0,1,"turkey costume","Basic"],
+[14,1661479982>>>0,6,"turtleneck-sweater outfit","Basic"],
+[78,214661162>>>0,3,"tweed outfit","Basic"],
+[59,3459655102>>>0,5,"two-toned-shirt outfit","Basic"],
+[294,4222611280>>>0,6,"Tyrolean-dress outfit","Basic"],
+[295,1077066364>>>0,6,"Tyrolean-lederhosen outfit","Basic"],
+[218,1942925328>>>0,8,"university outfit","Basic"],
+[104,498906253>>>0,3,"utility-vest outfit","Basic"],
+[230,4190670615>>>0,2,"vampire costume","Basic"],
+[64,818055647>>>0,6,"varsity-cardigan outfit","Basic"],
+[184,2543711564>>>0,8,"varsity-jacket outfit","Basic"],
+[267,538236221>>>0,4,"Viking costume","Basic"],
+[101,3093240127>>>0,6,"vintage outfit","Basic"],
+[173,851549972>>>0,8,"waitstaff outfit","Basic"],
+[250,1144692285>>>0,8,"warm fleece outfit","Basic"],
+[169,3548017668>>>0,2,"wedding-dress outfit","Basic"],
+[170,149208122>>>0,1,"wedding-suit outfit","Basic"],
+[185,2995795732>>>0,6,"western outfit","Basic"],
+[286,1415822708>>>0,8,"windbreaker outfit","Basic"],
+[289,3779649678>>>0,3,"winter camo outfit","Basic"],
+[91,2886933622>>>0,6,"witch costume","Basic"],
+[268,2208676044>>>0,3,"wizard costume","Basic"],
+[128,2587246481>>>0,5,"work-from-home outfit","Basic"],
+[140,1520991134>>>0,8,"wrap-dress outfit","Basic"],
+[144,313422983>>>0,8,"Y2K outfit","Basic"],
+[344,1311723131>>>0,8,"yoga outfit","Basic"]
+];
+const TREASURE_DATA=[
+[2063257229>>>0,"9-volt battery","Treasure"],
+[3931866946>>>0,"action movie","Treasure"],
+[3557482369>>>0,"adventure game","Treasure"],
+[261757812>>>0,"alebrije","Treasure"],
+[3589285799>>>0,"alpaca","Treasure"],
+[2636791625>>>0,"alpha alien","Treasure"],
+[2168635366>>>0,"aluminum briefcase","Treasure"],
+[2217673081>>>0,"amber","Treasure"],
+[1867847650>>>0,"amethyst","Treasure"],
+[117384738>>>0,"ammonite fossil","Treasure"],
+[3271628849>>>0,"animal-shaped planter","Treasure"],
+[1096266695>>>0,"anime-openings compilation","Treasure"],
+[3473575068>>>0,"anonymous notebook","Treasure"],
+[2321083261>>>0,"autumn leaf","Treasure"],
+[4198320182>>>0,"axolotl","Treasure"],
+[1940046845>>>0,"back scratcher","Treasure"],
+[3392355698>>>0,"Ballet 101 DVD","Levelup"],
+[3071758806>>>0,"balloon animal","Treasure"],
+[69933724>>>0,"bamboo box","Treasure"],
+[3275073860>>>0,"baseball","Levelup"],
+[2489257995>>>0,"bearded dragon","Treasure"],
+[3677279664>>>0,"bent spoon","Treasure"],
+[3888024020>>>0,"beta alien","Treasure"],
+[1050773243>>>0,"big vase","Treasure"],
+[2583417738>>>0,"binoculars","Treasure"],
+[2455108827>>>0,"bird feather","Treasure"],
+[1645381614>>>0,"bird nest","Treasure"],
+[1356767956>>>0,"bonsai tree","Treasure"],
+[288114153>>>0,"book of many riddles","Treasure"],
+[1531143045>>>0,"botanical guidebook","Treasure"],
+[4257707994>>>0,"botijo","Treasure"],
+[3192986928>>>0,"bottle cap","Treasure"],
+[2854754306>>>0,"bouquet","Treasure"],
+[1821498510>>>0,"box of tissues","Treasure"],
+[2264455181>>>0,"brass key","Treasure"],
+[3140193660>>>0,"bronze palette","Treasure"],
+[2784966277>>>0,"bronze speech bubble","Treasure"],
+[1282077019>>>0,"bronze trophy","Treasure"],
+[25893639>>>0,"bubble blower","Levelup"],
+[4129715813>>>0,"bun-tower figure","Treasure"],
+[4157884603>>>0,"butterfly","Treasure"],
+[2457559083>>>0,"call bell","Treasure"],
+[113519295>>>0,"camera","Levelup"],
+[3719471400>>>0,"capybara","Treasure"],
+[2464550972>>>0,"carnation","Treasure"],
+[982759267>>>0,"cartoon","Treasure"],
+[233210912>>>0,"cat","Treasure"],
+[1897359114>>>0,"celadon-porcelain tea set","Treasure"],
+[1297525248>>>0,"celebrity autograph","Treasure"],
+[1940386931>>>0,"chess piece","Treasure"],
+[3267299807>>>0,"chick","Treasure"],
+[842096604>>>0,"children's album","Treasure"],
+[805088326>>>0,"chipmunk","Treasure"],
+[112800032>>>0,"cicada shell","Treasure"],
+[1823039123>>>0,"circuit board","Treasure"],
+[2047016646>>>0,"classical album","Treasure"],
+[3931538121>>>0,"clay figure","Treasure"],
+[2909678113>>>0,"clione","Treasure"],
+[1753770076>>>0,"clown fish","Treasure"],
+[3997391605>>>0,"cockatoo","Treasure"],
+[1491788666>>>0,"coconut bowl","Treasure"],
+[2460389320>>>0,"colorful basket","Treasure"],
+[3765626308>>>0,"compass","Treasure"],
+[1887968384>>>0,"cooking show","Treasure"],
+[1336799310>>>0,"coral","Treasure"],
+[2083565060>>>0,"covered book","Treasure"],
+[3599015911>>>0,"creature egg","Treasure"],
+[796491786>>>0,"crystal","Treasure"],
+[3205068018>>>0,"crystal ball","Treasure"],
+[138794171>>>0,"dancing game","Treasure"],
+[3503425296>>>0,"Daruma","Treasure"],
+[2544817117>>>0,"Daruma Otoshi game","Treasure"],
+[2594546901>>>0,"dating-sim game","Treasure"],
+[4242315591>>>0,"diamond","Treasure"],
+[1633514764>>>0,"die","Treasure"],
+[2275833742>>>0,"dirty sock","Treasure"],
+[2261940184>>>0,"disco ball","Treasure"],
+[1710423573>>>0,"dog","Treasure"],
+[1338556619>>>0,"dogū figure","Treasure"],
+[950743489>>>0,"door handle","Treasure"],
+[2366488354>>>0,"eastern quoll","Treasure"],
+[2964007528>>>0,"educational game","Treasure"],
+[3616399187>>>0,"embroidered decoration","Treasure"],
+[192039033>>>0,"embroidered handkerchief","Treasure"],
+[3698772317>>>0,"engagement ring","Treasure"],
+[4108752297>>>0,"expensive-looking vase","Treasure"],
+[3852369214>>>0,"famous-mountains calendar","Treasure"],
+[1605506191>>>0,"faucet","Treasure"],
+[1727761345>>>0,"fighting game","Treasure"],
+[2298413722>>>0,"fishing lure","Treasure"],
+[3028316910>>>0,"flamingo","Treasure"],
+[1904127003>>>0,"floppy disk","Treasure"],
+[3763491337>>>0,"flyswatter","Treasure"],
+[3735945389>>>0,"four-leaf clover","Treasure"],
+[2638362748>>>0,"foxtail","Treasure"],
+[3215466030>>>0,"frog","Treasure"],
+[1338262732>>>0,"funny comic","Treasure"],
+[1246345780>>>0,"gamma alien","Treasure"],
+[2366817542>>>0,"gears","Treasure"],
+[2383644474>>>0,"ghost","Treasure"],
+[2175552676>>>0,"glass ornament","Treasure"],
+[4182100699>>>0,"globe","Treasure"],
+[2640211287>>>0,"gold bar","Treasure"],
+[559485794>>>0,"gold coin","Treasure"],
+[650950989>>>0,"gold palette","Treasure"],
+[96621135>>>0,"gold speech bubble","Treasure"],
+[3382368807>>>0,"gold trophy","Treasure"],
+[3456753565>>>0,"goldfish","Treasure"],
+[407388248>>>0,"guitar","Levelup"],
+[598321537>>>0,"hamster","Treasure"],
+[471832169>>>0,"hand mirror","Treasure"],
+[3808338754>>>0,"Hawaiian key chain","Treasure"],
+[2334258795>>>0,"hedgehog","Treasure"],
+[3104233570>>>0,"Hercules beetle","Treasure"],
+[2929451192>>>0,"historical bust","Treasure"],
+[194624211>>>0,"historical document","Treasure"],
+[2523892470>>>0,"horror game","Treasure"],
+[399088312>>>0,"horror movie","Treasure"],
+[1874280154>>>0,"horror novel","Treasure"],
+[2067386005>>>0,"horse","Treasure"],
+[1734733219>>>0,"hourglass","Treasure"],
+[2359397902>>>0,"incense burner","Treasure"],
+[2280098914>>>0,"insect collection","Treasure"],
+[3610405942>>>0,"J-pop album","Treasure"],
+[426536181>>>0,"jazz album","Treasure"],
+[1465923002>>>0,"jellyfish","Treasure"],
+[2726423189>>>0,"jewelry box","Treasure"],
+[2305799128>>>0,"Jogging 101 DVD","Levelup"],
+[1795556215>>>0,"Jōmon-period pottery","Treasure"],
+[2634248403>>>0,"kangaroo","Treasure"],
+[915547604>>>0,"Karate 101 DVD","Levelup"],
+[1988373766>>>0,"Keseran-Pasaran","Treasure"],
+[2993932778>>>0,"kettle","Treasure"],
+[742984740>>>0,"knitting set","Levelup"],
+[1274132899>>>0,"koala plush","Treasure"],
+[1625842781>>>0,"kokeshi doll","Treasure"],
+[98629273>>>0,"laptop","Levelup"],
+[792427779>>>0,"light bulb","Treasure"],
+[3943660086>>>0,"lion","Treasure"],
+[996151722>>>0,"live-concert video","Treasure"],
+[3850326794>>>0,"lonely earbud","Treasure"],
+[3485411644>>>0,"loofah","Treasure"],
+[1324294525>>>0,"love story","Treasure"],
+[2281682953>>>0,"lucky cat","Treasure"],
+[701960009>>>0,"magnifying glass","Treasure"],
+[3666136733>>>0,"mahjong tile","Treasure"],
+[1817813972>>>0,"makeup box","Treasure"],
+[1344173583>>>0,"maple-syrup tap","Treasure"],
+[3445082376>>>0,"maracas","Levelup"],
+[755344739>>>0,"marble","Treasure"],
+[3686724641>>>0,"marionette","Treasure"],
+[2275360037>>>0,"martian rock","Treasure"],
+[1321222935>>>0,"message in a bottle","Treasure"],
+[4124446510>>>0,"mini car","Treasure"],
+[3426642760>>>0,"model train","Treasure"],
+[3394331811>>>0,"mosquito coil","Treasure"],
+[853012016>>>0,"Muscle Building 101 DVD","Levelup"],
+[148518249>>>0,"mysterious liquid","Treasure"],
+[565792183>>>0,"nail polish","Treasure"],
+[636252130>>>0,"nature video","Treasure"],
+[3919076567>>>0,"octahedral stone","Treasure"],
+[1513530315>>>0,"octopus","Treasure"],
+[3693356722>>>0,"olive-oil soap","Treasure"],
+[1191858425>>>0,"omamori","Treasure"],
+[1517191102>>>0,"one-way ticket","Treasure"],
+[3110289650>>>0,"origami crane","Treasure"],
+[3465566817>>>0,"painting set","Levelup"],
+[3975477744>>>0,"paper talisman","Treasure"],
+[3895209131>>>0,"parrot","Treasure"],
+[365153746>>>0,"pearl","Treasure"],
+[2753620983>>>0,"pearlescent accessory case","Treasure"],
+[3468156970>>>0,"pebble","Treasure"],
+[1309614293>>>0,"penguin","Treasure"],
+[959962213>>>0,"perfume","Treasure"],
+[2533954086>>>0,"picture book","Treasure"],
+[1106739130>>>0,"picture-postcards set","Treasure"],
+[3746101268>>>0,"pig","Treasure"],
+[3003540755>>>0,"piggy bank","Treasure"],
+[2385235910>>>0,"pile of documents","Treasure"],
+[4084579201>>>0,"pine cone","Treasure"],
+[199678077>>>0,"piñata","Treasure"],
+[2162211433>>>0,"plastic-model leftovers","Treasure"],
+[2493728856>>>0,"platinum palette","Treasure"],
+[3471529629>>>0,"platinum speech bubble","Treasure"],
+[753573823>>>0,"platinum trophy","Treasure"],
+[940497902>>>0,"plush panda","Treasure"],
+[3999777987>>>0,"pocket watch","Treasure"],
+[3462019935>>>0,"pop album","Treasure"],
+[355332356>>>0,"puzzle game","Treasure"],
+[2074768046>>>0,"rabbit","Treasure"],
+[3425276870>>>0,"racing game","Treasure"],
+[3806870804>>>0,"receipt","Treasure"],
+[4194353523>>>0,"reggae album","Treasure"],
+[3386495566>>>0,"restaurant menu","Treasure"],
+[3935751967>>>0,"robot","Treasure"],
+[1791120456>>>0,"rock album","Treasure"],
+[3561673547>>>0,"rock collection","Treasure"],
+[3219743026>>>0,"role-playing game","Treasure"],
+[3712285442>>>0,"romantic movie","Treasure"],
+[2706712395>>>0,"roof tiles","Treasure"],
+[733170776>>>0,"rose","Treasure"],
+[1019473555>>>0,"rubber ducky","Treasure"],
+[2099302384>>>0,"ruby","Treasure"],
+[666535460>>>0,"safe","Treasure"],
+[2590857665>>>0,"satellite dish","Treasure"],
+[1423609429>>>0,"sauna whisk","Treasure"],
+[1540061431>>>0,"scented candle","Treasure"],
+[394044493>>>0,"sci-fi movie","Treasure"],
+[1148912383>>>0,"screw","Treasure"],
+[2006613683>>>0,"sea-urchin skeleton","Treasure"],
+[3716703093>>>0,"seashell","Treasure"],
+[3674586975>>>0,"security camera","Treasure"],
+[3854307833>>>0,"self-help book","Treasure"],
+[436616634>>>0,"shark","Treasure"],
+[1304764803>>>0,"shiny beads","Treasure"],
+[3256524980>>>0,"ship in a bottle","Treasure"],
+[284849293>>>0,"shogi \"king\" piece","Treasure"],
+[3225193735>>>0,"shopping-channel show","Treasure"],
+[281747472>>>0,"silver coin","Treasure"],
+[35078769>>>0,"silver palette","Treasure"],
+[4105443130>>>0,"silver speech bubble","Treasure"],
+[3237232013>>>0,"silver trophy","Treasure"],
+[3657896309>>>0,"slime","Treasure"],
+[3295513149>>>0,"soccer ball","Levelup"],
+[3609646835>>>0,"solar panel","Treasure"],
+[1420167911>>>0,"solid-gold cup","Treasure"],
+[1733249241>>>0,"spinning top","Treasure"],
+[1086560596>>>0,"spirit","Treasure"],
+[3783751721>>>0,"sports show","Treasure"],
+[1501954377>>>0,"Statue of Liberty figurine","Treasure"],
+[1933313114>>>0,"stopwatch","Treasure"],
+[2738660711>>>0,"Street Dancing 101 DVD","Levelup"],
+[2000193113>>>0,"sugar glider","Treasure"],
+[1231101766>>>0,"Super Scope","Treasure"],
+[4022935857>>>0,"suspicious button","Treasure"],
+[1280345675>>>0,"tabletop light","Treasure"],
+[3283587858>>>0,"tanuki statue","Treasure"],
+[104364254>>>0,"tawashi scrub brush","Treasure"],
+[2645887626>>>0,"techno album","Treasure"],
+[2706391009>>>0,"tiny terrarium","Treasure"],
+[3243316662>>>0,"toilet paper","Treasure"],
+[3875641027>>>0,"Tomodachi Life","Treasure"],
+[1711338916>>>0,"toy robot","Treasure"],
+[1583603808>>>0,"toy sword","Levelup"],
+[2757578817>>>0,"treasure map","Treasure"],
+[1010072799>>>0,"tree branch","Treasure"],
+[2042866471>>>0,"tuna","Treasure"],
+[2172784857>>>0,"turtle","Treasure"],
+[54438993>>>0,"Tyrannosaurus","Treasure"],
+[140875451>>>0,"UFO","Treasure"],
+[4294051592>>>0,"unicorn","Treasure"],
+[4153430879>>>0,"vacuum tube","Treasure"],
+[594167246>>>0,"variety show","Treasure"],
+[2069578693>>>0,"Venetian glass","Treasure"],
+[123023294>>>0,"video-game soundtrack","Treasure"],
+[810096500>>>0,"Virtual Boy","Treasure"],
+[585816954>>>0,"water flea","Treasure"],
+[3930948519>>>0,"weak-looking elastic rope","Treasure"],
+[3055640232>>>0,"wind-up teeth","Treasure"],
+[1683963450>>>0,"wire puzzle","Treasure"],
+[3128735522>>>0,"wooden bear statue","Treasure"],
+[176855844>>>0,"wool-felt sheep","Treasure"],
+[3969682293>>>0,"Yoga 101 DVD","Levelup"]
+];
+// Clothes: 1069, Coords: 347, Treasures: 263
+
+// ── Belongings helpers ────────────────────────────────────────────────────────
+const BL_SLOTS_PER_MII=1200, BL_COORD_SLOTS=400, BL_COLOR_SLOTS=16;
+const BL_H_CLOTH_OWN=0x84824827, BL_H_COORD_OWN=0x89ce9150;
+const BL_H_GOODS_ID=0xe3d6005e, BL_H_GOODS_TIME=0x48c3881a, BL_H_GOODS_UGC=0x2115afb6;
+const BL_H_MII_LEVEL=H('Mii.MiiMisc.SatisfyInfo.Level');
+// ClothInfo worn slots
+const BL_WORN_SLOTS=[
+  {key:'All',kh:0xb20feced,ch:0xee37f256,pfx:['ClothAll']},
+  {key:'Topslong',kh:0x35256740,ch:0x1124095d,pfx:['ClothTopslong']},
+  {key:'Tops',kh:0xe81ee9c4,ch:0x77cf0ff7,pfx:['ClothTops']},
+  {key:'BottomsA',kh:0x15aea81d,ch:0xec5010fb,pfx:['ClothBottoms']},
+  {key:'BottomsB',kh:0x7a1809d1,ch:0x536dbec2,pfx:['ClothBottoms','ClothSocks']},
+  {key:'Headwear',kh:0x98cc9ccc,ch:0xc499cda5,pfx:['ClothHeadwear']},
+  {key:'Shoes',kh:0x0a903d03,ch:0xc0529e53,pfx:['ClothShoes']},
+  {key:'Accessory',kh:0xc1094d9f,ch:0x64af701a,pfx:['ClothAccessory']},
+];
+const BL_COORD_KH=0xd5ee521a, BL_COORD_CH=0x763c97cc;
+
+// Build lookup maps once
+const _clothByHash=new Map();for(const c of CLOTH_DATA)_clothByHash.set(c[2]>>>0,c);
+const _coordByKey=new Map();for(const c of COORD_DATA)_coordByKey.set(c[1]>>>0,c);
+const _treasureByHash=new Map();for(const t of TREASURE_DATA)_treasureByHash.set(t[0]>>>0,t);
+
+function blReadUInt(hash,idx){return getUIntAt(savMii.entries,hash,idx);}
+function blWriteUInt(hash,idx,val){setUIntAt(savMii.entries,hash,idx,val>>>0);}
+function blReadInt(hash,idx){return getIntAt(savMii.entries,hash,idx);}
+function blWriteInt(hash,idx,val){setIntAt(savMii.entries,hash,idx,val|0);}
+function blReadU64(hash,idx){return getUInt64At(savMii.entries,hash,idx);}
+function blWriteU64(hash,idx,val){setUInt64At(savMii.entries,hash,idx,val);}
+function blArrSize(hash){return arrSize(savMii.entries,hash);}
+
+function blOwnMask(itemIdx){return blReadUInt(BL_H_CLOTH_OWN,savMiiSlot*BL_SLOTS_PER_MII+itemIdx);}
+function blSetOwnMask(itemIdx,mask){blWriteUInt(BL_H_CLOTH_OWN,savMiiSlot*BL_SLOTS_PER_MII+itemIdx,mask);}
+function blCoordMask(si){return blReadUInt(BL_H_COORD_OWN,savMiiSlot*BL_COORD_SLOTS+si);}
+function blSetCoordMask(si,mask){blWriteUInt(BL_H_COORD_OWN,savMiiSlot*BL_COORD_SLOTS+si,mask);}
+function blValidMask(cc){const n=Math.min(cc,BL_COLOR_SLOTS);return n>=32?0xffffffff:((1<<n)-1)>>>0;}
+function blOwnedColors(mask,cc){const out=[];for(let i=0;i<Math.min(cc,BL_COLOR_SLOTS);i++)if((mask>>>i)&1)out.push(i);return out;}
+function blPopcount(m){let n=0;m=m>>>0;while(m){n+=m&1;m>>>=1;}return n;}
+
+function blGoodsSlotsPerMii(){
+  const total=blArrSize(BL_H_GOODS_ID);if(total===0)return 0;
+  const mc=blArrSize(BL_H_MII_LEVEL);if(mc>0&&total%mc===0)return total/mc;
+  return 12;
+}
+
+function blFormatTime(t){
+  if(!t||t===0n)return null;
+  const ms=Number(t)*1000;if(!Number.isFinite(ms)||ms<=0)return null;
+  try{const d=new Date(ms);if(isNaN(d.getTime()))return null;return d.toLocaleString();}catch{return null;}
+}
+
+let blClothFilter='owned', blClothSearch='', blClothCat='All';
+let blCoordFilter='owned', blCoordSearch='';
+
+// ── Belongings render ─────────────────────────────────────────────────────────
+function renderMiiBelongings(){
+  if(!savMii)return;
+  const panel=document.getElementById('mii-bl-panel');
+  if(!panel)return;
+  const idx=savMiiSlot;
+  const parts=[];
+
+  // ── 1. Worn Outfit ────────────────────────────────────────────────────────
+  const wornHtml=renderBlWornOutfit(idx);
+  if(wornHtml)parts.push(wornHtml);
+
+  // ── 2. Goods Pocket ───────────────────────────────────────────────────────
+  const goodsHtml=renderBlGoods(idx);
+  if(goodsHtml)parts.push(goodsHtml);
+
+  // ── 3. Owned Clothes ──────────────────────────────────────────────────────
+  const clothsHtml=renderBlCloths(idx);
+  if(clothsHtml)parts.push(clothsHtml);
+
+  // ── 4. Owned Coordinates ─────────────────────────────────────────────────
+  const coordsHtml=renderBlCoords(idx);
+  if(coordsHtml)parts.push(coordsHtml);
+
+  if(parts.length===0){
+    panel.innerHTML='<div class="bl-no-results">No belongings data found in this save file.</div>';
+  } else {
+    panel.innerHTML=parts.join('');
+  }
+}
+
+function renderBlWornOutfit(idx){
+  const hasCoordKey=blArrSize(BL_COORD_KH)>0;
+  const hasSlotKeys=BL_WORN_SLOTS.some(s=>blArrSize(s.kh)>0);
+  if(!hasCoordKey&&!hasSlotKeys)return'';
+
+  const coordKH=hasCoordKey?blReadUInt(BL_COORD_KH,idx)>>>0:0;
+  const coordCI=hasCoordKey?blReadInt(BL_COORD_CH,idx):0;
+  const coordData=coordKH?_coordByKey.get(coordKH):null;
+  const wornMode=coordKH?'coordinate':'individual';
+
+  let body='';
+
+  if(wornMode==='coordinate'&&coordData){
+    // Coordinate outfit: show as one selector + color
+    const coordOpts=COORD_DATA.filter(c=>{
+      const mask=blCoordMask(c[0]);
+      return blOwnedColors(mask,c[2]).length>0;
+    }).map(c=>`<option value="${c[1]>>>0}"${(c[1]>>>0)===coordKH?' selected':''}>${esc(c[3])}</option>`).join('');
+    const colorOpts=coordData?blOwnedColors(blCoordMask(coordData[0]),coordData[2]).map(ci=>`<option value="${ci}"${ci===coordCI?' selected':''}>${ci+1}</option>`).join(''):'';
+    body+=`<div class="bl-worn-grid">
+      <div class="bl-worn-slot">
+        <div class="bl-worn-slot-lbl">Coordinate outfit</div>
+        <select class="ed-select" onchange="blCommitCoordKey(this.value)">
+          <option value="0">(none)</option>${coordOpts}</select>
+        ${coordData&&colorOpts?`<div style="margin-top:5px"><select class="ed-select" onchange="blCommitCoordColor(this.value)">${colorOpts}</select></div>`:''}
+        ${coordData?`<div class="bl-coord-pieces">${esc(coordData[3])} · ${esc(coordData[4])}</div>`:''}
+      </div>
+    </div>
+    <div style="font-size:.72rem;color:var(--muted)">
+      A coordinate outfit is active. <button class="bl-btn-sm" onclick="blClearCoord()">Switch to individual</button>
+    </div>`;
+  } else {
+    if(coordKH){
+      body+=`<div class="bl-warn">A coordinate outfit (key 0x${coordKH.toString(16).padStart(8,'0')}) is active — individual edits may be overridden. <button class="bl-btn-sm" onclick="blClearCoord()">Clear coordinate</button></div>`;
+    }
+    body+='<div class="bl-worn-grid">';
+    for(const s of BL_WORN_SLOTS){
+      if(blArrSize(s.kh)===0)continue;
+      const kh=blReadUInt(s.kh,idx)>>>0;
+      const ci=blReadInt(s.ch,idx);
+      const cd=kh?_clothByHash.get(kh):null;
+      const ownableForSlot=CLOTH_DATA.filter(c=>c[4]&&s.pfx.some(p=>p.replace('Cloth','')===c[4])&&blOwnedColors(blOwnMask(c[0]),c[1]).length>0);
+      const opts=ownableForSlot.map(c=>`<option value="${c[2]>>>0}"${(c[2]>>>0)===kh?' selected':''}>${esc(c[3])}</option>`).join('');
+      const colorOpts=cd?blOwnedColors(blOwnMask(cd[0]),cd[1]).map(i=>`<option value="${i}"${i===ci?' selected':''}>${i+1}</option>`).join(''):'';
+      body+=`<div class="bl-worn-slot">
+        <div class="bl-worn-slot-lbl">${esc(s.key)} <button class="bl-btn-sm" onclick="blClearWornSlot(${s.kh>>>0},${s.ch>>>0},${idx})" style="float:right;margin-top:-2px">✕</button></div>
+        <select class="ed-select" data-kh="${s.kh>>>0}" data-ch="${s.ch>>>0}" onchange="blCommitWornKey(this)">
+          <option value="0">(none)</option>${opts}
+          ${!cd&&kh?`<option value="${kh}" selected>0x${kh.toString(16).padStart(8,'0')} (unknown)</option>`:''}
+        </select>
+        ${cd&&colorOpts?`<div style="margin-top:5px"><select class="ed-select" data-ch="${s.ch>>>0}" onchange="blCommitWornColor(this)">${colorOpts}</select></div>`:''}
+        ${cd?`<div style="font-size:.7rem;color:var(--muted);margin-top:3px">${esc(cd[3])}</div>`:''}
+      </div>`;
+    }
+    body+='</div>';
+  }
+
+  return `<div class="bl-section">
+    <div class="bl-section-head"><span>Worn Outfit</span></div>
+    <div class="bl-section-caption">What this Mii is currently wearing.</div>
+    <div class="bl-section-body">${body}</div>
+  </div>`;
+}
+
+function blCommitCoordKey(raw){
+  if(!savMii)return;
+  const next=(parseInt(raw)|0)>>>0;
+  setUIntAt(savMii.entries,BL_COORD_KH,savMiiSlot,next);
+  if(blArrSize(BL_COORD_CH)>0){
+    const cd=next?_coordByKey.get(next):null;
+    const owned=cd?blOwnedColors(blCoordMask(cd[0]),cd[2]):[];
+    const cur=blReadInt(BL_COORD_CH,savMiiSlot);
+    if(next===0||!owned.includes(cur))setIntAt(savMii.entries,BL_COORD_CH,savMiiSlot,owned.length?owned[0]:0);
+  }
+  renderMiiBelongings();
+}
+function blCommitCoordColor(raw){
+  if(!savMii||blArrSize(BL_COORD_CH)===0)return;
+  setIntAt(savMii.entries,BL_COORD_CH,savMiiSlot,parseInt(raw)|0);
+}
+function blClearCoord(){
+  if(!savMii)return;
+  if(blArrSize(BL_COORD_KH)>0)setUIntAt(savMii.entries,BL_COORD_KH,savMiiSlot,0);
+  if(blArrSize(BL_COORD_CH)>0)setIntAt(savMii.entries,BL_COORD_CH,savMiiSlot,0);
+  renderMiiBelongings();
+}
+function blCommitWornKey(sel){
+  if(!savMii)return;
+  const kh=parseInt(sel.dataset.kh)>>>0;
+  const ch=parseInt(sel.dataset.ch)>>>0;
+  const next=(parseInt(sel.value)|0)>>>0;
+  if(blArrSize(kh)>0)setUIntAt(savMii.entries,kh,savMiiSlot,next);
+  if(blArrSize(ch)>0){
+    const cd=next?_clothByHash.get(next):null;
+    const owned=cd?blOwnedColors(blOwnMask(cd[0]),cd[1]):[];
+    const cur=blReadInt(ch,savMiiSlot);
+    if(next===0||!owned.includes(cur))setIntAt(savMii.entries,ch,savMiiSlot,owned.length?owned[0]:0);
+  }
+  renderMiiBelongings();
+}
+function blCommitWornColor(sel){
+  if(!savMii)return;
+  const ch=parseInt(sel.dataset.ch)>>>0;
+  if(blArrSize(ch)>0)setIntAt(savMii.entries,ch,savMiiSlot,parseInt(sel.value)|0);
+}
+function blClearWornSlot(kh,ch,idx){
+  if(!savMii)return;
+  if(blArrSize(kh)>0)setUIntAt(savMii.entries,kh,idx,0);
+  if(blArrSize(ch)>0)setIntAt(savMii.entries,ch,idx,0);
+  renderMiiBelongings();
+}
+
+function ugcGoodsName(ug){
+  const stem='UgcGoods'+String(ug).padStart(3,'0');
+  const e=entries.find(x=>x.stem===stem);
+  return e?e.name:'Goods '+ug;
+}
+function renderBlGoods(idx){
+  const total=blArrSize(BL_H_GOODS_ID);if(total===0)return'';
+  const spm=blGoodsSlotsPerMii();if(spm===0)return'';
+  const hasTime=blArrSize(BL_H_GOODS_TIME)>0;
+  const hasUgc=blArrSize(BL_H_GOODS_UGC)>0;
+  const slots=[];let usedCount=0;
+  for(let s=0;s<spm;s++){
+    const ai=idx*spm+s;
+    const sid=blReadUInt(BL_H_GOODS_ID,ai)>>>0;
+    const ug=hasUgc?blReadInt(BL_H_GOODS_UGC,ai):-1;
+    const t=hasTime?blReadU64(BL_H_GOODS_TIME,ai):null;
+    const tr=sid?_treasureByHash.get(sid):null;
+    if(sid||ug>=0)usedCount++;
+    slots.push({s,ai,sid,ug,t,tr});
+  }
+  // Build grouped treasure options
+  const groups={};
+  for(const tr of TREASURE_DATA){
+    const g=tr[2]||'Other';
+    if(!groups[g])groups[g]=[];
+    groups[g].push(tr);
+  }
+  const grpKeys=['Levelup','Treasure','Other'].filter(k=>groups[k]);
+  function mkGoodsOpts(sid){
+    return '<option value="0"'+(sid===0?' selected':'')+`>(empty)</option>`+
+      grpKeys.map(k=>`<optgroup label="${k}">${groups[k].map(tr=>`<option value="${tr[0]>>>0}"${(tr[0]>>>0)===sid?' selected':''}>${esc(tr[1])}</option>`).join('')}</optgroup>`).join('');
+  }
+
+  const rows=slots.map(sl=>{
+    const dateStr=sl.t?blFormatTime(sl.t):null;
+    const isUgc=sl.ug>=0;
+    const unknown=sl.sid&&!sl.tr&&!isUgc;
+    const opts=isUgc?'':`<select class="ed-select" data-ai="${sl.ai}" onchange="blCommitGoods(event)">
+      ${mkGoodsOpts(sl.sid)}
+      ${unknown?`<option value="${sl.sid}" selected>0x${sl.sid.toString(16).padStart(8,'0')} (unknown)</option>`:''}
+      </select>`;
+    return `<div class="bl-goods-slot">
+      <div class="bl-goods-hd"><span>Slot ${sl.s+1}</span><button class="bl-btn-sm" onclick="blClearGoodsSlot(${sl.ai})">✕</button></div>
+      ${isUgc?`<div style="font-size:.8rem;color:var(--muted)">${esc(ugcGoodsName(sl.ug))}</div>`:opts}
+      ${sl.tr?`<div style="font-size:.7rem;color:var(--muted);margin-top:3px">${esc(sl.tr[1])} · ${esc(sl.tr[2])}</div>`:''}
+      ${dateStr?`<div style="font-size:.7rem;color:var(--muted);margin-top:3px">Got: ${esc(dateStr)}</div>`:''}
+    </div>`;
+  }).join('');
+
+  return `<div class="bl-section">
+    <div class="bl-section-head">
+      <span>Goods Pocket</span>
+      <span class="bl-summary">${usedCount} / ${spm} used</span>
+    </div>
+    <div class="bl-section-caption">Items in this Mii's pocket.</div>
+    <div class="bl-section-body">
+      <div class="bl-btns">
+        <button class="bl-btn-sm" onclick="blClearAllGoods(${idx},${spm})">Clear all</button>
+      </div>
+      <div class="bl-goods-grid">${rows}</div>
+    </div>
+  </div>`;
+}
+function blCommitGoods(ev){
+  if(!savMii)return;
+  const el=ev.target,ai=parseInt(el.dataset.ai),next=(parseInt(el.value)|0)>>>0;
+  blWriteUInt(BL_H_GOODS_ID,ai,next);
+  if(blArrSize(BL_H_GOODS_UGC)>0)blWriteInt(BL_H_GOODS_UGC,ai,-1);
+  if(blArrSize(BL_H_GOODS_TIME)>0){
+    const now=next===0?0n:BigInt(Math.floor(Date.now()/1000));
+    blWriteU64(BL_H_GOODS_TIME,ai,now);
+  }
+  renderMiiBelongings();
+}
+function blClearGoodsSlot(ai){
+  if(!savMii)return;
+  blWriteUInt(BL_H_GOODS_ID,ai,0);
+  if(blArrSize(BL_H_GOODS_UGC)>0)blWriteInt(BL_H_GOODS_UGC,ai,-1);
+  if(blArrSize(BL_H_GOODS_TIME)>0)blWriteU64(BL_H_GOODS_TIME,ai,0n);
+  renderMiiBelongings();
+}
+function blClearAllGoods(idx,spm){
+  if(!savMii)return;
+  for(let s=0;s<spm;s++)blClearGoodsSlot(idx*spm+s);
+}
+
+function renderBlCloths(idx){
+  const total=blArrSize(BL_H_CLOTH_OWN);if(total===0)return'';
+  const cats=['All','Tops','Topslong','Bottoms','Headwear','Shoes','Accessory','Socks','Other'];
+  let ownedItems=0,ownedColors=0;
+  const rows=CLOTH_DATA.filter(c=>{
+    if(c[0]<0||c[0]>=BL_SLOTS_PER_MII)return false;
+    const ai=idx*BL_SLOTS_PER_MII+c[0];if(ai>=total)return false;
+    const mask=blOwnMask(c[0])&blValidMask(c[1]);
+    const q=(blClothSearch||'').trim().toLowerCase();
+    if(blClothFilter==='owned'&&mask===0)return false;
+    if(blClothFilter==='unowned'&&mask!==0)return false;
+    if(blClothCat!=='All'&&c[4]!==blClothCat)return false;
+    if(q&&!c[3].toLowerCase().includes(q))return false;
+    return true;
+  });
+  for(const c of CLOTH_DATA){
+    if(c[0]<0||c[0]>=BL_SLOTS_PER_MII)continue;
+    const ai=idx*BL_SLOTS_PER_MII+c[0];if(ai>=total)continue;
+    const mask=blOwnMask(c[0])&blValidMask(c[1]);
+    if(blPopcount(mask)>0)ownedItems++;
+    ownedColors+=blPopcount(mask);
+  }
+
+  const rowsHtml=rows.map(c=>{
+    const ai=idx*BL_SLOTS_PER_MII+c[0];
+    const mask=blOwnMask(c[0]);
+    const vm=blValidMask(c[1]);
+    const eff=mask&vm;
+    const owned=blPopcount(eff)>0;
+    const chips=Array.from({length:c[1]},(_,ci)=>{
+      const on=((eff>>>ci)&1)===1;
+      return `<button class="bl-color-chip${on?' owned':''}" title="${esc(c[3])} color ${ci+1}" onclick="blToggleClothColor(${c[0]},${ci},${on?0:1})">${ci+1}</button>`;
+    }).join('');
+    return `<div class="bl-item-row${owned?' owned':''}">
+      <div class="bl-item-info">
+        <div class="bl-item-name">${esc(c[3])}</div>
+        <div class="bl-item-meta">${esc(c[4])} &middot; ${blPopcount(eff)}/${c[1]} colors</div>
+        <div class="bl-item-colors">
+          <button class="bl-btn-sm" onclick="blSetAllClothColors(${c[0]},${c[1]},1)">+all</button>
+          <button class="bl-btn-sm" onclick="blSetAllClothColors(${c[0]},${c[1]},0)">-all</button>
+          ${chips}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const catOpts=cats.map(ct=>`<option value="${ct}"${ct===blClothCat?' selected':''}>${ct}</option>`).join('');
+  return `<div class="bl-section">
+    <div class="bl-section-head">
+      <span>Owned Clothes</span>
+      <span class="bl-summary">${ownedItems} items · ${ownedColors} colors total</span>
+    </div>
+    <div class="bl-section-caption">Toggle ownership per clothing item and color.</div>
+    <div class="bl-section-body">
+      <div class="bl-filters">
+        <label>Search<input type="text" placeholder="search..." value="${esc(blClothSearch)}" oninput="blClothSearch=this.value;renderMiiBelongings()"></label>
+        <label>Show<select onchange="blClothFilter=this.value;renderMiiBelongings()">
+          <option value="owned"${blClothFilter==='owned'?' selected':''}>Owned</option>
+          <option value="unowned"${blClothFilter==='unowned'?' selected':''}>Unowned</option>
+          <option value="all"${blClothFilter==='all'?' selected':''}>All</option>
+        </select></label>
+        <label>Category<select onchange="blClothCat=this.value;renderMiiBelongings()">${catOpts}</select></label>
+      </div>
+      <div class="bl-btns">
+        <button class="bl-btn-sm" onclick="blClearVisibleCloths()">Clear visible</button>
+        <button class="bl-btn-sm" onclick="blClearAllCloths()">Clear all</button>
+      </div>
+      <div class="bl-bitmask-list">${rowsHtml||'<div class="bl-no-results">No items match the filter.</div>'}</div>
+    </div>
+  </div>`;
+}
+function blToggleClothColor(itemIdx,ci,owned){
+  if(!savMii)return;
+  const cur=blOwnMask(itemIdx);const bit=(1<<ci)>>>0;
+  blSetOwnMask(itemIdx,owned?cur|bit:cur&~bit);
+  renderMiiBelongings();
+}
+function blSetAllClothColors(itemIdx,cc,owned){
+  if(!savMii)return;
+  const vm=blValidMask(cc);const cur=blOwnMask(itemIdx);
+  blSetOwnMask(itemIdx,owned?(cur|vm)>>>0:(cur&~vm)>>>0);
+  renderMiiBelongings();
+}
+function blClearVisibleCloths(){
+  if(!savMii)return;
+  const idx=savMiiSlot;const total=blArrSize(BL_H_CLOTH_OWN);
+  const q=(blClothSearch||'').trim().toLowerCase();
+  for(const c of CLOTH_DATA){
+    if(c[0]<0||c[0]>=BL_SLOTS_PER_MII)continue;
+    const ai=idx*BL_SLOTS_PER_MII+c[0];if(ai>=total)continue;
+    if(blClothFilter==='unowned')continue;
+    if(blClothCat!=='All'&&c[4]!==blClothCat)continue;
+    if(q&&!c[3].toLowerCase().includes(q))continue;
+    blSetOwnMask(c[0],0);
+  }
+  renderMiiBelongings();
+}
+function blClearAllCloths(){
+  if(!savMii)return;
+  const idx=savMiiSlot;const total=blArrSize(BL_H_CLOTH_OWN);
+  for(const c of CLOTH_DATA){
+    if(c[0]<0||c[0]>=BL_SLOTS_PER_MII)continue;
+    const ai=idx*BL_SLOTS_PER_MII+c[0];if(ai>=total)continue;
+    if(blOwnMask(c[0])!==0)blSetOwnMask(c[0],0);
+  }
+  renderMiiBelongings();
+}
+
+function renderBlCoords(idx){
+  const total=blArrSize(BL_H_COORD_OWN);if(total===0)return'';
+  let ownedItems=0,ownedColors=0;
+  const rows=COORD_DATA.filter(c=>{
+    if(c[0]<0||c[0]>=BL_COORD_SLOTS)return false;
+    const ai=idx*BL_COORD_SLOTS+c[0];if(ai>=total)return false;
+    const mask=blCoordMask(c[0])&blValidMask(c[2]);
+    const q=(blCoordSearch||'').trim().toLowerCase();
+    if(blCoordFilter==='owned'&&mask===0)return false;
+    if(blCoordFilter==='unowned'&&mask!==0)return false;
+    if(q&&!c[3].toLowerCase().includes(q))return false;
+    return true;
+  });
+  for(const c of COORD_DATA){
+    if(c[0]<0||c[0]>=BL_COORD_SLOTS)continue;
+    const ai=idx*BL_COORD_SLOTS+c[0];if(ai>=total)continue;
+    const mask=blCoordMask(c[0])&blValidMask(c[2]);
+    if(blPopcount(mask)>0)ownedItems++;
+    ownedColors+=blPopcount(mask);
+  }
+
+  const rowsHtml=rows.map(c=>{
+    const mask=blCoordMask(c[0]);
+    const vm=blValidMask(c[2]);
+    const eff=mask&vm;
+    const owned=blPopcount(eff)>0;
+    const chips=Array.from({length:c[2]},(_,ci)=>{
+      const on=((eff>>>ci)&1)===1;
+      return `<button class="bl-color-chip${on?' owned':''}" title="${esc(c[3])} color ${ci+1}" onclick="blToggleCoordColor(${c[0]},${ci},${on?0:1})">${ci+1}</button>`;
+    }).join('');
+    return `<div class="bl-item-row${owned?' owned':''}">
+      <div class="bl-item-info">
+        <div class="bl-item-name">${esc(c[3])}</div>
+        <div class="bl-item-meta">${esc(c[4])} &middot; ${blPopcount(eff)}/${c[2]} colors</div>
+        <div class="bl-item-colors">
+          <button class="bl-btn-sm" onclick="blSetAllCoordColors(${c[0]},${c[2]},1)">+all</button>
+          <button class="bl-btn-sm" onclick="blSetAllCoordColors(${c[0]},${c[2]},0)">-all</button>
+          ${chips}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div class="bl-section">
+    <div class="bl-section-head">
+      <span>Owned Coordinate Outfits</span>
+      <span class="bl-summary">${ownedItems} sets · ${ownedColors} colors total</span>
+    </div>
+    <div class="bl-section-caption">Toggle ownership per coordinate outfit and color variant.</div>
+    <div class="bl-section-body">
+      <div class="bl-filters">
+        <label>Search<input type="text" placeholder="search..." value="${esc(blCoordSearch)}" oninput="blCoordSearch=this.value;renderMiiBelongings()"></label>
+        <label>Show<select onchange="blCoordFilter=this.value;renderMiiBelongings()">
+          <option value="owned"${blCoordFilter==='owned'?' selected':''}>Owned</option>
+          <option value="unowned"${blCoordFilter==='unowned'?' selected':''}>Unowned</option>
+          <option value="all"${blCoordFilter==='all'?' selected':''}>All</option>
+        </select></label>
+      </div>
+      <div class="bl-btns">
+        <button class="bl-btn-sm" onclick="blClearVisibleCoords()">Clear visible</button>
+        <button class="bl-btn-sm" onclick="blClearAllCoords()">Clear all</button>
+      </div>
+      <div class="bl-bitmask-list">${rowsHtml||'<div class="bl-no-results">No items match the filter.</div>'}</div>
+    </div>
+  </div>`;
+}
+function blToggleCoordColor(si,ci,owned){
+  if(!savMii)return;
+  const cur=blCoordMask(si);const bit=(1<<ci)>>>0;
+  blSetCoordMask(si,owned?cur|bit:cur&~bit);
+  renderMiiBelongings();
+}
+function blSetAllCoordColors(si,cc,owned){
+  if(!savMii)return;
+  const vm=blValidMask(cc);const cur=blCoordMask(si);
+  blSetCoordMask(si,owned?(cur|vm)>>>0:(cur&~vm)>>>0);
+  renderMiiBelongings();
+}
+function blClearVisibleCoords(){
+  if(!savMii)return;
+  const idx=savMiiSlot;const total=blArrSize(BL_H_COORD_OWN);
+  const q=(blCoordSearch||'').trim().toLowerCase();
+  for(const c of COORD_DATA){
+    if(c[0]<0||c[0]>=BL_COORD_SLOTS)continue;
+    const ai=idx*BL_COORD_SLOTS+c[0];if(ai>=total)continue;
+    if(blCoordFilter==='unowned')continue;
+    if(q&&!c[3].toLowerCase().includes(q))continue;
+    if(blCoordMask(c[0])!==0)blSetCoordMask(c[0],0);
+  }
+  renderMiiBelongings();
+}
+function blClearAllCoords(){
+  if(!savMii)return;
+  const idx=savMiiSlot;const total=blArrSize(BL_H_COORD_OWN);
+  for(const c of COORD_DATA){
+    if(c[0]<0||c[0]>=BL_COORD_SLOTS)continue;
+    const ai=idx*BL_COORD_SLOTS+c[0];if(ai>=total)continue;
+    if(blCoordMask(c[0])!==0)blSetCoordMask(c[0],0);
+  }
+  renderMiiBelongings();
+}
+
 // ── Mii sub-tabs ──────────────────────────────────────────────────────────────
 function switchMiiSubTab(name,btn){
   miiSubTab=name;
   document.querySelectorAll('.mii-subtab').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
-  ['stats','words','rel','social'].forEach(t=>{
+  ['stats','words','rel','social','belongings'].forEach(t=>{
     const el=document.getElementById('mii-content-'+t);
     if(el)el.style.display=(t===name?'':'none');
   });
@@ -866,6 +3104,7 @@ function renderMiiSubTab(){
   else if(miiSubTab==='words')renderMiiWords();
   else if(miiSubTab==='rel')renderMiiRelations();
   else if(miiSubTab==='social')renderMiiSocial();
+  else if(miiSubTab==='belongings')renderMiiBelongings();
 }
 // ── Words editor ──────────────────────────────────────────────────────────────
 function renderMiiWords(){
@@ -931,6 +3170,7 @@ function renderMiiRelations(){
   const hName=H('Mii.Name.Name');
   const pc=arrSize(e,H_IA);
   let rows='',count=0;
+  const H_TST=0x1a892e50;
   const mkSel=(t,pid,side)=>{
     let s=`<select class="ed-select" data-pi="${pid}" data-side="${side}" onchange="onRelChange(event)">`;
     for(const o of REL_OPTS)s+=`<option value="${o.v>>>0}"${(o.v>>>0)===(t>>>0)?' selected':''}>${esc(o.l)}</option>`;
@@ -948,6 +3188,7 @@ function renderMiiRelations(){
     const oName=getWStr32At(e,hName,other)||'?';
     const outFixed=isRelFixed(outT),inFixed=isRelFixed(inT);
     const outCol=relColor(outT),inCol=relColor(inT);
+    const tst=getUInt64At(e,H_TST,i),tstVal=u64ToDateLocal(tst);
     rows+=`<div class="rel-row" style="border-left-color:${outCol}">
       <div class="rel-row-head"><span class="rel-row-name">${esc(oName)}</span><span style="font-size:.72rem;color:var(--muted)">pair #${i+1} &middot; slot ${other+1}</span></div>
       <div class="rel-row-fields">
@@ -966,6 +3207,7 @@ function renderMiiRelations(){
           ${inFixed?'<span class="rel-fixed-note">meter locked for this type</span>':''}
         </div>
       </div>
+      <div style="margin-top:6px;font-size:.72rem;color:var(--muted)">Since: <input type="datetime-local" step="1" data-pi="${i}" value="${tstVal}"${tst===null?' disabled':''} onchange="onTypeSetTimeChange(event)" style="background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:3px 6px;font-size:.72rem;font-family:inherit"></div>
     </div>`;
   }
   const empty='<div style="padding:24px;color:var(--muted);text-align:center;font-size:.85rem">no relationships for this mii</div>';
@@ -987,6 +3229,13 @@ function onRelChange(ev){
   } else {
     setIntAt(e,H_METER,arrIdx,parseInt(el.value)||0);
   }
+}
+function onTypeSetTimeChange(ev){
+  if(!savMii)return;
+  const pi=parseInt(ev.target.dataset.pi);
+  const secs=dateLocalToU64(ev.target.value);
+  if(secs===null)return;
+  setUInt64At(savMii.entries,0x1a892e50,pi,secs);
 }
 // ── Social inline (client-side, reflects unsaved edits) ──────────────────────
 function renderMiiSocial(){
@@ -1242,6 +3491,62 @@ static void HandleMiiImport(int fd,const Request& req){
     Send200(fd,"application/json","{\"ok\":true}");
 }
 
+// GET /api/ugc/itemexport?stem=UgcFood005
+static void HandleUgcItemExport(int fd,const std::string& query){
+    std::string stem=GetQueryParam(query,"stem");
+    if(stem.empty()){Send500(fd,"Missing stem");return;}
+    static const char* kPfx[]={"Food","Cloth","Goods","Interior","Exterior","MapObject","MapFloor"};
+    static const char* kExt[]={".ltdf",".ltdc",".ltdg",".ltdi",".ltde",".ltdo",".ltdl"};
+    int kind=-1;int slot0=0;
+    if(stem.size()>3&&stem.substr(0,3)=="Ugc"){
+        std::string rest=stem.substr(3);
+        for(int k=0;k<7;k++){size_t pl=strlen(kPfx[k]);if(rest.size()>pl&&rest.substr(0,pl)==kPfx[k]){kind=k;slot0=atoi(rest.substr(pl).c_str());break;}}
+    }
+    if(kind<0){Send500(fd,"Cannot parse UGC stem: "+stem);return;}
+    std::string tmpPath="/switch/TomoToolNX/.ugc_export_tmp";
+    std::string err=MiiManager::ExportUgc(kind,slot0+1,tmpPath);
+    if(!err.empty()){SrvLog("UGC item export failed: "+err,true);Send500(fd,err);return;}
+    std::string actualPath=tmpPath+kExt[kind];
+    std::vector<uint8_t> data;
+    FILE* f=fopen(actualPath.c_str(),"rb");
+    if(!f){Send500(fd,"Cannot read exported file");return;}
+    fseek(f,0,SEEK_END);size_t sz=(size_t)ftell(f);fseek(f,0,SEEK_SET);
+    data.resize(sz);fread(data.data(),1,sz,f);fclose(f);remove(actualPath.c_str());
+    Send200Bin(fd,"application/octet-stream",data,"attachment; filename=\""+stem+kExt[kind]+"\"");
+    SrvLog("UGC item export: "+stem+" OK");
+}
+
+// POST /api/ugc/itemimport — multipart: stem + file [+ isAdding]
+static void HandleUgcItemImport(int fd,const Request& req){
+    auto fields=ParseMultipart(req.body,req.contentType);
+    std::string stemStr,isAddingStr;std::vector<uint8_t> fileData;
+    for(auto& f:fields){
+        if(f.name=="stem")stemStr=f.data;
+        else if(f.name=="isAdding")isAddingStr=f.data;
+        else if(f.name=="file")fileData.assign(f.data.begin(),f.data.end());
+    }
+    if(stemStr.empty()||fileData.empty()){Send500(fd,"Missing stem or file");return;}
+    static const char* kPfx[]={"Food","Cloth","Goods","Interior","Exterior","MapObject","MapFloor"};
+    int kind=-1;int slot0=0;
+    if(stemStr.size()>3&&stemStr.substr(0,3)=="Ugc"){
+        std::string rest=stemStr.substr(3);
+        for(int k=0;k<7;k++){size_t pl=strlen(kPfx[k]);if(rest.size()>pl&&rest.substr(0,pl)==kPfx[k]){kind=k;slot0=atoi(rest.substr(pl).c_str());break;}}
+    }
+    if(kind<0){Send500(fd,"Cannot parse UGC stem: "+stemStr);return;}
+    bool isAdding=(isAddingStr=="true"||isAddingStr=="1");
+    SrvLog("UGC item import: "+stemStr+" kind="+std::to_string(kind)+" slot="+std::to_string(slot0+1)+(isAdding?" (adding)":""));
+    MkdirP("/switch/TomoToolNX");
+    std::string tmpPath="/switch/TomoToolNX/.ugc_import_tmp.ltdx";
+    {FILE* f=fopen(tmpPath.c_str(),"wb");if(!f){Send500(fd,"Cannot write temp file");return;}
+    fwrite(fileData.data(),1,fileData.size(),f);fclose(f);}
+    std::string err=MiiManager::ImportUgc(kind,slot0+1,tmpPath,isAdding);
+    remove(tmpPath.c_str());
+    if(!err.empty()){SrvLog("UGC item import failed: "+err,true);Send500(fd,err);return;}
+    SrvLog("UGC item import "+stemStr+" OK");
+    mutexLock(&s_mutex);s_pendingCommit=true;mutexUnlock(&s_mutex);
+    Send200(fd,"application/json","{\"ok\":true}");
+}
+
 // GET /api/mii/social?slot=N  — return relationship graph JSON for one mii slot
 static void HandleMiiSocial(int fd, const std::string& query) {
     std::string slotStr = GetQueryParam(query, "slot");
@@ -1375,10 +3680,12 @@ static void HandleConnection(int fd){
     else if(req.method=="GET"&&req.path=="/api/preview")HandlePreview(fd,req.query);
     else if(req.method=="GET"&&req.path=="/api/export")HandleExport(fd,req.query);
     else if(req.method=="POST"&&req.path=="/api/import")HandleImport(fd,req);
-    else if(req.method=="GET"  &&req.path=="/api/mii/list")       HandleMiiList(fd);
-    else if(req.method=="GET"  &&req.path=="/api/mii/export")      HandleMiiExport(fd,req.query);
-    else if(req.method=="POST" &&req.path=="/api/mii/import")      HandleMiiImport(fd,req);
-    else if(req.method=="GET"  &&req.path=="/api/mii/social")     HandleMiiSocial(fd,req.query);
+    else if(req.method=="GET"  &&req.path=="/api/mii/list")         HandleMiiList(fd);
+    else if(req.method=="GET"  &&req.path=="/api/mii/export")       HandleMiiExport(fd,req.query);
+    else if(req.method=="POST" &&req.path=="/api/mii/import")       HandleMiiImport(fd,req);
+    else if(req.method=="GET"  &&req.path=="/api/mii/social")       HandleMiiSocial(fd,req.query);
+    else if(req.method=="GET"  &&req.path=="/api/ugc/itemexport")   HandleUgcItemExport(fd,req.query);
+    else if(req.method=="POST" &&req.path=="/api/ugc/itemimport")   HandleUgcItemImport(fd,req);
     else if(req.method=="GET"  &&req.path=="/api/save/download")   HandleSaveDownload(fd,req.query);
     else if(req.method=="POST" &&req.path=="/api/save/upload")     HandleSaveUpload(fd,req);
     else Send404(fd);

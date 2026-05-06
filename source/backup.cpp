@@ -2,11 +2,13 @@
 #include "backup.h"
 #include <string>
 #include <vector>
+#include <algorithm>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <unistd.h>
 #include <switch.h>   // Thread, Mutex
 
@@ -23,6 +25,38 @@ static bool FileExists(const std::string& p) {
 }
 static bool DirExists(const std::string& p) {
     struct stat st; return stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+// Returns path for a new timestamped backup folder: BACKUP_ROOT/save_DD-MM-YYYY_HH-MM
+static std::string MakeTimestampedBackupPath() {
+    time_t now = time(nullptr);
+    struct tm* t = localtime(&now);
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%s/save_%02d-%02d-%04d_%02d-%02d",
+             BACKUP_ROOT,
+             t->tm_mday, t->tm_mon + 1, t->tm_year + 1900,
+             t->tm_hour, t->tm_min);
+    return buf;
+}
+
+// Returns all save_* backup folders under BACKUP_ROOT, sorted oldest-first by mtime.
+static std::vector<std::string> ListSaveBackups() {
+    std::vector<std::pair<time_t,std::string>> entries;
+    DIR* d = opendir(BACKUP_ROOT);
+    if (!d) return {};
+    struct dirent* de;
+    while ((de = readdir(d)) != nullptr) {
+        if (strncmp(de->d_name, "save_", 5) != 0) continue;
+        std::string full = std::string(BACKUP_ROOT) + "/" + de->d_name;
+        struct stat st;
+        if (stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
+            entries.push_back({st.st_mtime, full});
+    }
+    closedir(d);
+    std::sort(entries.begin(), entries.end());
+    std::vector<std::string> result;
+    for (auto& e : entries) result.push_back(e.second);
+    return result;
 }
 
 static void CopyFile(const std::string& src, const std::string& dst) {
@@ -80,6 +114,7 @@ static float   s_progress  = 0.0f;
 static bool    s_done      = false;
 static std::string s_error;
 static std::string s_saveRoot;
+static std::string s_backupDest;
 
 // Recursive copy — copies src tree into dst (dst must already exist)
 static void CopyTree(const std::string& src, const std::string& dst,
@@ -111,7 +146,7 @@ static void CopyTree(const std::string& src, const std::string& dst,
 
 static void BackupThreadFunc(void*) {
     std::string root = s_saveRoot;
-    std::string dest = BACKUP_SAVE;
+    std::string dest = s_backupDest;
 
     MkdirP(BACKUP_ROOT);
     MkdirP(dest);
@@ -132,10 +167,11 @@ namespace BackupService {
 
 void StartFullBackup(const std::string& saveMountRoot) {
     mutexInit(&s_mutex);
-    s_progress = 0.0f;
-    s_done     = false;
-    s_error    = "";
-    s_saveRoot = saveMountRoot;
+    s_progress   = 0.0f;
+    s_done       = false;
+    s_error      = "";
+    s_saveRoot   = saveMountRoot;
+    s_backupDest = MakeTimestampedBackupPath();
     threadCreate(&s_thread, BackupThreadFunc, nullptr, nullptr, 256*1024, 0x2C, -2);
     threadStart(&s_thread);
     s_threadActive = true;
@@ -169,7 +205,14 @@ std::string BackupError() {
     return v;
 }
 
-bool HasExistingBackup() { return DirExists(BACKUP_SAVE); }
+bool HasExistingBackup() { return !ListSaveBackups().empty(); }
+
+int CountBackups() { return (int)ListSaveBackups().size(); }
+
+void DeleteOldestBackup() {
+    auto backups = ListSaveBackups();
+    if (!backups.empty()) RmRf(backups[0]);
+}
 
 void DeleteBackup() { RmRf(BACKUP_ROOT); }
 

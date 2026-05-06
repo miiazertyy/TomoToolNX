@@ -41,4 +41,13 @@ void LoadUgcNames();
 // Returns empty string if the slot is unnamed or the save is unreadable.
 std::string GetUgcName(const std::string& stem);
 
+// Export UGC item at 1-based slot to destPath (auto-appends .ltdf/.ltdc/etc.).
+// ugcKind: 0=Food,1=Cloth,2=Goods,3=Interior,4=Exterior,5=MapObject,6=MapFloor
+// Returns empty string on success, error message on failure.
+std::string ExportUgc(int ugcKind, int slot, const std::string& destPath);
+
+// Import a .ltdx file into slot (1-based). Pass isAdding=true for new slots.
+// Returns empty string on success, error message on failure.
+std::string ImportUgc(int ugcKind, int slot, const std::string& ltdxPath, bool isAdding);
+
 } // namespace MiiManager

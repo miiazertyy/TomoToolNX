@@ -41,23 +41,32 @@ static bool FileExists(const std::string& p) {
 static void MkdirP(const std::string& path) { mkdir(path.c_str(), 0777); }
 
 // ─── Offset locator (port of offsetLocator()) ─────────────────────────────────
-// Searches for the little-endian hash, returns the data offset (hash+4+4)
+// Finds a field by its hash in the save's index section and returns the slot value
+// (the 4 bytes immediately following the hash in the index entry).
+// For heap-based array fields the slot is the heap offset; callers add +4 to skip the count.
 
 static int OffsetLocator(const std::vector<uint8_t>& data, const char* hashHex) {
-    // Parse hex string to 4 bytes
+    if (data.size() < 0x20) return -1;
+
+    // Parse hex string to 4 bytes, then byte-reverse for little-endian comparison
     uint8_t hash[4];
     for (int i = 0; i < 4; i++) {
         unsigned int v = 0;
         sscanf(hashHex + i*2, "%02x", &v);
         hash[i] = (uint8_t)v;
     }
-    // Reverse to little-endian
     uint8_t le[4] = {hash[3], hash[2], hash[1], hash[0]};
 
-    // Search
-    for (size_t i = 0; i + 8 <= data.size(); i++) {
+    // Read saveDataOff from header (bytes 8-11, LE) to bound the index section.
+    // The index runs from 0x20 to saveDataOff; heap data starts after that.
+    // Only scan the index, in 8-byte-aligned steps matching the entry layout,
+    // to avoid false positives from heap payload containing a matching byte pattern.
+    uint32_t saveDataOff = (uint32_t)data[8]  | ((uint32_t)data[9]  << 8)
+                         | ((uint32_t)data[10] << 16) | ((uint32_t)data[11] << 24);
+    if (saveDataOff > (uint32_t)data.size()) saveDataOff = (uint32_t)data.size();
+
+    for (size_t i = 0x20; i + 8 <= (size_t)saveDataOff; i += 8) {
         if (memcmp(data.data() + i, le, 4) == 0) {
-            // Next 4 bytes are the offset value
             uint32_t offset = 0;
             memcpy(&offset, data.data() + i + 4, 4);
             return (int)offset;
@@ -163,8 +172,10 @@ static const char* FP_HASHES[5] = {
 };
 
 // Magic section markers
+static const uint8_t MAGIC_A2[4] = {0xA2,0xA2,0xA2,0xA2};
 static const uint8_t MAGIC_A3[4] = {0xA3,0xA3,0xA3,0xA3};
 static const uint8_t MAGIC_A4[4] = {0xA4,0xA4,0xA4,0xA4};
+static const uint8_t MAGIC_A5[4] = {0xA5,0xA5,0xA5,0xA5};
 
 // Find first occurrence of 4-byte pattern
 static int FindMagic(const std::vector<uint8_t>& data, const uint8_t* magic, int from=0) {
@@ -177,6 +188,93 @@ static int FindMagicLast(const std::vector<uint8_t>& data, const uint8_t* magic)
     for (size_t i = 0; i + 4 <= data.size(); i++)
         if (memcmp(data.data()+i, magic, 4) == 0) last = (int)i;
     return last;
+}
+
+// ─── UGC kind tables (mirrors ShareUGCTemplate.py) ───────────────────────────
+
+static const char* UGC_EXT[7]  = {".ltdf",".ltdc",".ltdg",".ltdi",".ltde",".ltdo",".ltdl"};
+static const char* UGC_PFX[7]  = {"Food","Cloth","Goods","Interior","Exterior","MapObject","MapFloor"};
+static const int   UGC_NIGHT_IDX[7]  = {5, 6, 13, 4, 7, 9, 4};
+static const int   UGC_NIGHT_SZ[7]   = {13,38, 13,13,13,13,13};
+static const int   UGC_MAX_SL[7]     = {99,299,99, 99,99, 99, 99};
+
+static const char* UGC_ENABLE_H[7] = {"F4A39965","AF129C33","1A9C00FE","A39744E9","F4BEADC2","5951050B","A1126D32"};
+static const char* UGC_TEX_H[7]    = {"3558B77F","59BFA9D3","70D10A48","E7F9D439","16227C50","A9C5CFB8","06A7A14C"};
+static const char* UGC_HASH_H[7]   = {"6D48F8E2","89F25CAC","56202100","7FEF7F7D","38D72795","1B28B170","816D50A3"};
+static const uint8_t UGC_HASH_IDX[7] = {1,3,2,6,7,4,5};
+static const uint8_t UGC_TEX_DATA[28] = {
+    0x41,0x49,0x93,0x56, 0xE3,0xC2,0x2F,0xB4,
+    0x41,0x49,0x93,0x56, 0xE3,0xC2,0x2F,0xB4,
+    0xE3,0xC2,0x2F,0xB4, 0xE3,0xC2,0x2F,0xB4,
+    0xE3,0xC2,0x2F,0xB4,
+};
+
+// Per-kind ugcOffset hashes
+static const char* UGC_F_H0[10] = {"307FEEFA","6F93FFBD","5CA9336E","F768620A","5AF04BEB","2DB168C5","634800AE","DD8D6C5A","AF1186CF","58E6AAD3"};
+static const char* UGC_F_H1[10] = {"C81545FE","2FB9146D","7A31EF97","7EEC35E9","5E32FD3F","0DBABE27","71621C98","2D271339","CDF31EB5","2823DBD3"};
+static const char* UGC_F_H2[17] = {"3FAA2222","823F8297","7ECC8A60","88DC1D43","8896DDD6","BFF29472","5D965762","78D39208","53C762B0","40D2C6FE","C0A6C046","AE373B0D","7D5FFBB7","9E978F5E","F6349929","9038CDD0","9A59F58A"};
+static const char* UGC_F_H3[8]  = {"A9116402","835114C1","EC65E2E4","0A7CF2C5","662CD807","01B3661E","5AF4A09F","41FF2201"};
+static const char* UGC_F_H4[11] = {"ED95CF0F","43F509BA","A7A0773C","A7A0773C","34BA6119","5E6E9F8C","2907C040","97865D6B","609F197D","47A50525","71EA7734"};
+static const char* UGC_F_H5[13] = {"274659D1","DCE826FC","E04E1E6B","056F2F20","BC7D7E30","3C2BC52F","CFFECCC2","5C15E339","5EFF5E0E","9838264B","48778DE6","62AD5137","D1B3B197"};
+static const char* UGC_F_H6[8]  = {"21D582D9","DE7CB924","E8BD8C89","C35B8B0F","60E280FB","7EC3836A","F209E2F9","6D842ACC"};
+static const int   UGC_NUM_F[7] = {10,10,17,8,11,13,8};
+static const char** UGC_F_H[7]  = {(const char**)UGC_F_H0,(const char**)UGC_F_H1,(const char**)UGC_F_H2,(const char**)UGC_F_H3,(const char**)UGC_F_H4,(const char**)UGC_F_H5,(const char**)UGC_F_H6};
+
+// Per-kind name hashes
+static const char* UGC_N_H0[2] = {"408494F5","BA0F4BAF"};
+static const char* UGC_N_H1[2] = {"40710642","CF9A13EA"};
+static const char* UGC_N_H2[4] = {"2F793EB1","F655B33A","F36A5A0B","A66367EB"};
+static const char* UGC_N_H3[2] = {"3DE2C5DD","85A37B90"};
+static const char* UGC_N_H4[2] = {"27C875D6","0E15E3F8"};
+static const char* UGC_N_H5[2] = {"56F99338","EE921AE2"};
+static const char* UGC_N_H6[2] = {"918875A9","503490E0"};
+static const int   UGC_NUM_N[7] = {2,2,4,2,2,2,2};
+// bytes-per-slot for each name field (name[0..3])
+static const int   UGC_N_SZ[7][4] = {
+    {128,128,  0,  0}, // Food
+    {128,128,  0,  0}, // Cloth
+    {128,128, 64,128}, // Goods (extra GoodsText+HowToCallGoodsText)
+    {128,128,  0,  0}, // Interior
+    {128,128,  0,  0}, // Exterior
+    {128,128,  0,  0}, // MapObject
+    {128,128,  0,  0}, // MapFloor
+};
+static const char** UGC_N_H[7] = {(const char**)UGC_N_H0,(const char**)UGC_N_H1,(const char**)UGC_N_H2,(const char**)UGC_N_H3,(const char**)UGC_N_H4,(const char**)UGC_N_H5,(const char**)UGC_N_H6};
+
+// vOffset/v2Offset hashes (nullptr = not used for this kind)
+static const char* UGC_V_H[7]  = {nullptr,nullptr,"F36C4E28",nullptr,"3C14025E","27F2ECDE",nullptr};
+static const char* UGC_V2_H[7] = {nullptr,nullptr,nullptr,   nullptr,"B9D21B4F","2F96203B",nullptr};
+
+struct UgcOffsets {
+    int f[17]; // ugcOffsets: per-slot field data (absolute byte pos in Player.sav, already +4)
+    int n[4];  // name offsets (absolute byte pos)
+    int v;     // vOffset (-1 if unused)
+    int v2;    // v2Offset (-1 if unused)
+    int enable, tex, hash; // slot-enable / texture-kind / hash-index arrays
+};
+
+static bool BuildUgcOffsets(const std::vector<uint8_t>& psav, int kind, UgcOffsets& out) {
+    for (int i = 0; i < UGC_NUM_F[kind]; i++) {
+        out.f[i] = OffsetLocator(psav, UGC_F_H[kind][i]);
+        if (out.f[i] < 0) return false;
+        out.f[i] += 4;
+    }
+    for (int i = 0; i < UGC_NUM_N[kind]; i++) {
+        out.n[i] = OffsetLocator(psav, UGC_N_H[kind][i]);
+        if (out.n[i] < 0) return false;
+        out.n[i] += 4;
+    }
+    auto locate = [&](const char* h) -> int {
+        if (!h) return -1;
+        int r = OffsetLocator(psav, h);
+        return r >= 0 ? r + 4 : -1;
+    };
+    out.v      = locate(UGC_V_H[kind]);
+    out.v2     = locate(UGC_V2_H[kind]);
+    out.enable = locate(UGC_ENABLE_H[kind]);
+    out.tex    = locate(UGC_TEX_H[kind]);
+    out.hash   = locate(UGC_HASH_H[kind]);
+    return true;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -400,10 +498,20 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
     canvasStart += 4;
     ugctexStart += 4;
 
-    // Detect facepaint — both canvas and ugctex must be present
+    // Detect facepaint — embedded in .ltd (ltdData[0]==1 && ltdData[1]==1)
     int facepaint = 0;
     if (mii[1] == 1 && mii[2] == 1) {
         facepaint = 1;
+        if (mii.size() > 47) mii[47] = 1;
+    }
+    // External .canvas.zs / .ugctex.zs alongside the .ltd file (facepaint == 2)
+    std::string ltdBase = ltdPath;
+    if (ltdBase.size() >= 4 && ltdBase.substr(ltdBase.size()-4) == ".ltd")
+        ltdBase = ltdBase.substr(0, ltdBase.size()-4);
+    std::string extCanvasPath = ltdBase + ".canvas.zs";
+    std::string extUgcPath    = ltdBase + ".ugctex.zs";
+    if (FileExists(extCanvasPath) && FileExists(extUgcPath)) {
+        facepaint = 2;
         if (mii.size() > 47) mii[47] = 1;
     }
 
@@ -425,8 +533,18 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
             memcpy(miisav.data() + miinames + s*64, mii.data() + 232, 64);
         if ((int)mii.size() >= 296 + 128)
             memcpy(miisav.data() + miiprefer + s*128, mii.data() + 296, 128);
-        // Sexuality (3 bytes at 424)
-        if (persOffsetSX >= 0 && (int)mii.size() >= 427 && persOffsetSX + 27 <= (int)miisav.size()) {
+        // Sexuality (3 bytes at 424) — only if Mii is level < 2
+        int levelHash = OffsetLocator(miisav, "9999B7D9");
+        bool canSetSexuality = true;
+        if (levelHash >= 0) {
+            int levelOff = levelHash + 4 + s * 4;
+            if (levelOff + 4 <= (int)miisav.size()) {
+                uint32_t level = 0;
+                memcpy(&level, miisav.data() + levelOff, 4);
+                canSetSexuality = (level < 2);
+            }
+        }
+        if (canSetSexuality && persOffsetSX >= 0 && (int)mii.size() >= 427 && persOffsetSX + 27 <= (int)miisav.size()) {
             auto bits = DecodeSexuality(miisav.data() + persOffsetSX, 27);
             for (int b = 0; b < 3; b++)
                 if (s*3+b < (int)bits.size()) bits[s*3+b] = mii[424+b];
@@ -491,13 +609,21 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
         std::string canvasPath = std::string(SAVE_UGC_DIR) + "/UgcFacePaint" + fpFile + ".canvas.zs";
         std::string ugctexPath = std::string(SAVE_UGC_DIR) + "/UgcFacePaint" + fpFile + ".ugctex.zs";
 
-        if (canvasStart < ugctexStart - 4) {
-            std::vector<uint8_t> canvas(mii.begin()+canvasStart, mii.begin()+ugctexStart-4);
-            WriteFile(canvasPath, canvas);
-        }
-        if (ugctexStart < (int)mii.size()) {
-            std::vector<uint8_t> ugctexData(mii.begin()+ugctexStart, mii.end());
-            WriteFile(ugctexPath, ugctexData);
+        if (facepaint == 2) {
+            // External files alongside the .ltd — copy them directly
+            std::vector<uint8_t> extCanvas, extUgcTex;
+            if (ReadFile(extCanvasPath, extCanvas)) WriteFile(canvasPath, extCanvas);
+            if (ReadFile(extUgcPath,    extUgcTex))  WriteFile(ugctexPath,  extUgcTex);
+        } else {
+            // Embedded in .ltd — extract from between the magic markers
+            if (canvasStart < ugctexStart - 4) {
+                std::vector<uint8_t> canvas(mii.begin()+canvasStart, mii.begin()+ugctexStart-4);
+                WriteFile(canvasPath, canvas);
+            }
+            if (ugctexStart < (int)mii.size()) {
+                std::vector<uint8_t> ugctexData(mii.begin()+ugctexStart, mii.end());
+                WriteFile(ugctexPath, ugctexData);
+            }
         }
     } else {
         // New Mii has no facepaint — clear old facepaint data if slot previously had one
@@ -575,9 +701,288 @@ void LoadUgcNames() {
     }
 }
 
+static std::string FormatUgcStem(const std::string& stem) {
+    static const struct { const char* key; const char* label; } MAP[] = {
+        {"ugcfood",      "Food"},
+        {"ugccloth",     "Cloth"},
+        {"ugcgoods",     "Goods"},
+        {"ugcinterior",  "Interior"},
+        {"ugcexterior",  "Exterior"},
+        {"ugcmapobject", "Map Object"},
+        {"ugcmapfloor",  "Map Floor"},
+        {"ugcfacepaint", "Face Paint"},
+    };
+    std::string low = stem;
+    for (auto& c : low) c = (char)tolower((unsigned char)c);
+    for (auto& m : MAP) {
+        size_t kl = strlen(m.key);
+        if (low.size() > kl && low.compare(0, kl, m.key) == 0) {
+            std::string num = stem.substr(kl);
+            size_t nz = num.find_first_not_of('0');
+            num = (nz == std::string::npos) ? "0" : num.substr(nz);
+            return std::string(m.label) + " " + num;
+        }
+    }
+    return stem;
+}
+
 std::string GetUgcName(const std::string& stem) {
     auto it = s_ugcNames.find(stem);
-    return (it != s_ugcNames.end()) ? it->second : "";
+    if (it != s_ugcNames.end()) return it->second;
+    return FormatUgcStem(stem);
+}
+
+std::string ExportUgc(int ugcKind, int slot, const std::string& destPath) {
+    if (ugcKind < 0 || ugcKind >= 7)
+        return "Invalid UGC kind";
+    if (slot < 1 || slot > UGC_MAX_SL[ugcKind])
+        return "Invalid slot (1-" + std::to_string(UGC_MAX_SL[ugcKind]) + ")";
+
+    std::vector<uint8_t> psav;
+    if (!ReadFile(SAVE_PLAYER_SAV, psav)) return "Cannot read Player.sav";
+
+    UgcOffsets off;
+    if (!BuildUgcOffsets(psav, ugcKind, off))
+        return "Could not locate UGC offsets in Player.sav";
+
+    int s = slot - 1;
+    int nf       = UGC_NUM_F[ugcKind];
+    int nightIdx = UGC_NIGHT_IDX[ugcKind];
+    int nightSz  = UGC_NIGHT_SZ[ugcKind];
+
+    // Build ugcData (nf * 4 bytes)
+    std::vector<uint8_t> ugcData;
+    for (int x = 0; x < nf; x++) {
+        uint8_t val[4] = {0,0,0,0};
+        if (x == nightIdx) {
+            // Extract single bit from the packed bit array
+            if (off.f[x] + nightSz <= (int)psav.size()) {
+                auto bits = DecodeSexuality(psav.data() + off.f[x], nightSz);
+                val[0] = (s < (int)bits.size()) ? (uint8_t)bits[s] : 0;
+            }
+        } else {
+            int fieldOff = off.f[x] + s * 4;
+            if (fieldOff + 4 <= (int)psav.size())
+                memcpy(val, psav.data() + fieldOff, 4);
+        }
+        ugcData.insert(ugcData.end(), val, val + 4);
+    }
+
+    // Build name section
+    int nn = UGC_NUM_N[ugcKind];
+    std::vector<uint8_t> nameData;
+    for (int i = 0; i < nn; i++) {
+        int sz = UGC_N_SZ[ugcKind][i];
+        int nameOff = off.n[i] + s * sz;
+        if (nameOff + sz <= (int)psav.size())
+            nameData.insert(nameData.end(), psav.data() + nameOff, psav.data() + nameOff + sz);
+        else
+            nameData.insert(nameData.end(), sz, 0);
+    }
+
+    // Build vector data (12 bytes) and vector2 data (8 bytes)
+    // NOTE: Python uses vOffset for both vector and vector2 reads — porting faithfully
+    std::vector<uint8_t> vec(12, 0), vec2(8, 0);
+    if (off.v >= 0 && off.v + s * 12 + 12 <= (int)psav.size())
+        memcpy(vec.data(), psav.data() + off.v + s * 12, 12);
+    if (off.v2 >= 0 && off.v >= 0 && off.v + s * 8 + 8 <= (int)psav.size())
+        memcpy(vec2.data(), psav.data() + off.v + s * 8, 8);
+
+    // Sanitize name for filename
+    std::string utf8name = nameData.size() >= 2 ? Utf16leToUtf8(nameData.data(), std::min((int)nameData.size(), 128)) : "";
+    std::string sanitName;
+    for (unsigned char c : utf8name) {
+        if ((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='.'||c=='-'||c=='_')
+            sanitName += (char)c;
+        else
+            sanitName += '_';
+    }
+    if (sanitName.empty()) sanitName = "ugc";
+
+    // Build UGC file stem (e.g. "Food005")
+    std::string ugcNum;
+    if (s < 10)      ugcNum = "00" + std::to_string(s);
+    else if (s < 99) ugcNum = "0"  + std::to_string(s);
+    else             ugcNum = std::to_string(s);
+    std::string ugcStem = std::string(UGC_PFX[ugcKind]) + ugcNum;
+
+    // Read texture files
+    std::vector<uint8_t> canvastex, ugctex, thumbtex;
+    std::string canvasPath = std::string(SAVE_UGC_DIR) + "/Ugc" + ugcStem + ".canvas.zs";
+    std::string ugctexPath = std::string(SAVE_UGC_DIR) + "/Ugc" + ugcStem + ".ugctex.zs";
+    std::string thumbPath  = std::string(SAVE_UGC_DIR) + "/Ugc" + ugcStem + "_Thumb.ugctex.zs";
+    if (!ReadFile(canvasPath, canvastex)) return "Cannot read canvas: " + canvasPath;
+    if (!ReadFile(ugctexPath, ugctex))   return "Cannot read ugctex: " + ugctexPath;
+    if (!ReadFile(thumbPath,  thumbtex)) return "Cannot read thumb: "  + thumbPath;
+
+    // Assemble: [kind(1)][0][0][0][ugcData][vec12][vec28][A2A2A2A2][names][A3A3A3A3][canvas][A4A4A4A4][ugctex][A5A5A5A5][thumb]
+    std::vector<uint8_t> output;
+    output.push_back((uint8_t)ugcKind);
+    output.push_back(0); output.push_back(0); output.push_back(0);
+    output.insert(output.end(), ugcData.begin(),  ugcData.end());
+    output.insert(output.end(), vec.begin(),      vec.end());
+    output.insert(output.end(), vec2.begin(),     vec2.end());
+    output.insert(output.end(), MAGIC_A2,         MAGIC_A2 + 4);
+    output.insert(output.end(), nameData.begin(), nameData.end());
+    output.insert(output.end(), MAGIC_A3,         MAGIC_A3 + 4);
+    output.insert(output.end(), canvastex.begin(),canvastex.end());
+    output.insert(output.end(), MAGIC_A4,         MAGIC_A4 + 4);
+    output.insert(output.end(), ugctex.begin(),   ugctex.end());
+    output.insert(output.end(), MAGIC_A5,         MAGIC_A5 + 4);
+    output.insert(output.end(), thumbtex.begin(), thumbtex.end());
+
+    // Build final path
+    std::string finalPath = destPath;
+    if (finalPath.size() >= 4 && finalPath.substr(finalPath.size() - 4) == "auto")
+        finalPath = finalPath.substr(0, finalPath.size() - 4) + sanitName;
+    const char* ext = UGC_EXT[ugcKind];
+    if (finalPath.find(ext) == std::string::npos)
+        finalPath += ext;
+    finalPath = UniquePath(finalPath);
+
+    if (!WriteFile(finalPath, output))
+        return "Failed to write " + finalPath;
+    return "";
+}
+
+std::string ImportUgc(int ugcKind, int slot, const std::string& ltdxPath, bool isAdding) {
+    if (ugcKind < 0 || ugcKind >= 7)
+        return "Invalid UGC kind";
+    if (slot < 1 || slot > UGC_MAX_SL[ugcKind])
+        return "Invalid slot (1-" + std::to_string(UGC_MAX_SL[ugcKind]) + ")";
+
+    std::vector<uint8_t> ltdx;
+    if (!ReadFile(ltdxPath, ltdx)) return "Cannot read file: " + ltdxPath;
+    if (ltdx.empty())              return "Empty file";
+    if (ltdx[0] != (uint8_t)ugcKind)
+        return std::string("Incorrect UGC type in file. Expected ") + UGC_PFX[ugcKind];
+
+    // Exterior cannot be replaced, only added
+    if (ugcKind == 4 && !isAdding)
+        return "You can only add Exterior and Objects, not replace. Please use the add slot.";
+
+    std::vector<uint8_t> psav;
+    if (!ReadFile(SAVE_PLAYER_SAV, psav)) return "Cannot read Player.sav";
+
+    UgcOffsets off;
+    if (!BuildUgcOffsets(psav, ugcKind, off))
+        return "Could not locate UGC offsets in Player.sav";
+
+    int s = slot - 1;
+
+    // Cloth: when replacing, subtype (ugcOffsets[0]) must match
+    if (ugcKind == 1 && !isAdding && (int)ltdx.size() >= 8) {
+        if (off.f[0] + s * 4 + 4 <= (int)psav.size()) {
+            if (memcmp(psav.data() + off.f[0] + s * 4, ltdx.data() + 4, 4) != 0)
+                return "This item is not the same subtype as what you're importing! Find the same type or add the item.";
+        }
+    }
+
+    // Find section markers
+    int nameMagic   = FindMagic(ltdx, MAGIC_A2);
+    int canvasMagic = FindMagic(ltdx, MAGIC_A3);
+    int ugctexMagic = FindMagic(ltdx, MAGIC_A4);
+    int thumbMagic  = FindMagic(ltdx, MAGIC_A5);
+    if (nameMagic < 0 || canvasMagic < 0 || ugctexMagic < 0 || thumbMagic < 0)
+        return "Invalid file structure — missing section markers";
+    if (nameMagic < 4)
+        return "Invalid file: A2 marker too early";
+    int nameStart   = nameMagic   + 4;
+    int canvasStart = canvasMagic + 4;
+    int ugctexStart = ugctexMagic + 4;
+    int thumbStart  = thumbMagic  + 4;
+
+    // Write texture files
+    std::string ugcNum;
+    if (s < 10)      ugcNum = "00" + std::to_string(s);
+    else if (s < 99) ugcNum = "0"  + std::to_string(s);
+    else             ugcNum = std::to_string(s);
+    std::string ugcStem = std::string(UGC_PFX[ugcKind]) + ugcNum;
+    MkdirP(SAVE_UGC_DIR);
+    std::string canvasOut = std::string(SAVE_UGC_DIR) + "/Ugc" + ugcStem + ".canvas.zs";
+    std::string ugctexOut = std::string(SAVE_UGC_DIR) + "/Ugc" + ugcStem + ".ugctex.zs";
+    std::string thumbOut  = std::string(SAVE_UGC_DIR) + "/Ugc" + ugcStem + "_Thumb.ugctex.zs";
+
+    // canvas: [canvasStart .. ugctexMagic)
+    if (canvasStart <= ugctexMagic) {
+        std::vector<uint8_t> canvas(ltdx.begin() + canvasStart, ltdx.begin() + ugctexMagic);
+        WriteFile(canvasOut, canvas);
+    }
+    // ugctex: [ugctexStart .. thumbMagic)
+    if (ugctexStart <= thumbMagic) {
+        std::vector<uint8_t> ugctex(ltdx.begin() + ugctexStart, ltdx.begin() + thumbMagic);
+        WriteFile(ugctexOut, ugctex);
+    }
+    // thumb: [thumbStart .. end)
+    if (thumbStart <= (int)ltdx.size()) {
+        std::vector<uint8_t> thumb(ltdx.begin() + thumbStart, ltdx.end());
+        WriteFile(thumbOut, thumb);
+    }
+
+    // Apply UGC field data to Player.sav
+    int nf       = UGC_NUM_F[ugcKind];
+    int nightIdx = UGC_NIGHT_IDX[ugcKind];
+    int nightSz  = UGC_NIGHT_SZ[ugcKind];
+    for (int x = 0; x < nf; x++) {
+        int fileOff = 4 + x * 4;
+        if (fileOff + 4 > (int)ltdx.size()) break;
+        if (x == nightIdx) {
+            // Write one bit into the packed bit array
+            if (off.f[x] + nightSz <= (int)psav.size()) {
+                auto bits = DecodeSexuality(psav.data() + off.f[x], nightSz);
+                if (s < (int)bits.size()) {
+                    uint8_t val = ltdx[fileOff];
+                    bits[s] = (val == 0 || val == 1) ? val : 0;
+                }
+                auto encoded = EncodeSexuality(bits);
+                memcpy(psav.data() + off.f[x], encoded.data(),
+                       std::min(encoded.size(), (size_t)nightSz));
+            }
+        } else {
+            int fieldOff = off.f[x] + s * 4;
+            if (fieldOff + 4 <= (int)psav.size())
+                memcpy(psav.data() + fieldOff, ltdx.data() + fileOff, 4);
+        }
+    }
+
+    // If adding, mark slot as enabled and set tex/hash metadata
+    if (isAdding) {
+        static const uint8_t ENABLE_VAL[4] = {0xF4,0xAD,0x7F,0x1D};
+        if (off.enable >= 0 && off.enable + s*4 + 4 <= (int)psav.size())
+            memcpy(psav.data() + off.enable + s*4, ENABLE_VAL, 4);
+        if (off.tex >= 0 && off.tex + s*4 + 4 <= (int)psav.size())
+            memcpy(psav.data() + off.tex + s*4, UGC_TEX_DATA + ugcKind * 4, 4);
+        if (off.hash >= 0 && off.hash + s*4 + 4 <= (int)psav.size()) {
+            uint8_t hv[4] = {(uint8_t)s, 0, UGC_HASH_IDX[ugcKind], 0};
+            memcpy(psav.data() + off.hash + s*4, hv, 4);
+        }
+    }
+
+    // Write name fields
+    int nn = UGC_NUM_N[ugcKind];
+    int nameReadOff = nameStart;
+    for (int i = 0; i < nn; i++) {
+        int sz = UGC_N_SZ[ugcKind][i];
+        int destOff = off.n[i] + s * sz;
+        if (destOff + sz <= (int)psav.size() && nameReadOff + sz <= (int)ltdx.size())
+            memcpy(psav.data() + destOff, ltdx.data() + nameReadOff, sz);
+        nameReadOff += sz;
+    }
+
+    // Write vector data embedded in the file before the A2 marker
+    // Layout: [... vec(12) vec2(8) A2A2A2A2 names ...]
+    // NOTE: Python uses vOffset (not v2Offset) for both vec and vec2 writes — porting faithfully
+    if (off.v >= 0 && nameStart >= 24) {
+        if (nameStart - 24 + 12 <= (int)ltdx.size() && off.v + s*12 + 12 <= (int)psav.size())
+            memcpy(psav.data() + off.v + s*12, ltdx.data() + nameStart - 24, 12);
+    }
+    if (off.v2 >= 0 && off.v >= 0 && nameStart >= 12) {
+        if (nameStart - 12 + 8 <= (int)ltdx.size() && off.v + s*8 + 8 <= (int)psav.size())
+            memcpy(psav.data() + off.v + s*8, ltdx.data() + nameStart - 12, 8);
+    }
+
+    if (!WriteFile(SAVE_PLAYER_SAV, psav)) return "Failed to write Player.sav";
+    return "";
 }
 
 } // namespace MiiManager

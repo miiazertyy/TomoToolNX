@@ -5,15 +5,16 @@
 #include <string>
 #include <cstdint>
 
-#define BACKUP_ROOT  "/switch/TomoToolNX/Backup"
-#define BACKUP_SAVE  "/switch/TomoToolNX/Backup/save"
+#define BACKUP_ROOT    "/switch/TomoToolNX/Backup"
 #define BACKUP_IMPORTS "/switch/TomoToolNX/Backup/imports"
+
 
 namespace BackupService {
 
 // ── Full save backup (runs on background thread) ─────────────────────────────
 
 // Start an async full-save backup from saveMountRoot (e.g. "tomodata:/").
+// Creates a new timestamped folder (save_YYYYMMDD_HHMMSS).
 // Returns immediately. Call BackupProgress() / BackupDone() to poll.
 void StartFullBackup(const std::string& saveMountRoot);
 
@@ -31,12 +32,18 @@ void Cleanup();
 // Error string from the backup thread, empty on success.
 std::string BackupError();
 
-// ── Backup folder presence ────────────────────────────────────────────────────
+// ── Backup folder management ──────────────────────────────────────────────────
 
-// Returns true if a previous full backup exists at BACKUP_SAVE.
+// Returns true if at least one timestamped save backup exists.
 bool HasExistingBackup();
 
-// Delete the entire backup folder (save + imports).
+// Returns the number of existing timestamped save backups (0..MAX_BACKUPS).
+int CountBackups();
+
+// Delete the oldest timestamped save backup (by name order).
+void DeleteOldestBackup();
+
+// Delete the entire backup root folder (save backups + imports).
 void DeleteBackup();
 
 // ── Per-import UGC backup ─────────────────────────────────────────────────────

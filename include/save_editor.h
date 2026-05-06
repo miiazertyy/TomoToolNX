@@ -63,11 +63,13 @@ void     SetEnum (SavFile& s, uint32_t h, uint32_t v);
 
 // ── Array element accessors (heap types) ─────────────────────────────────────
 int32_t  GetIntAt  (const SavFile& s, uint32_t h, int idx, int32_t  def = 0);
-uint32_t GetUIntAt (const SavFile& s, uint32_t h, int idx, uint32_t def = 0);
-uint32_t GetEnumAt (const SavFile& s, uint32_t h, int idx, uint32_t def = 0);
-void     SetIntAt  (SavFile& s, uint32_t h, int idx, int32_t  v);
-void     SetUIntAt (SavFile& s, uint32_t h, int idx, uint32_t v);
-void     SetEnumAt (SavFile& s, uint32_t h, int idx, uint32_t v);
+uint32_t GetUIntAt  (const SavFile& s, uint32_t h, int idx, uint32_t def = 0);
+uint32_t GetEnumAt  (const SavFile& s, uint32_t h, int idx, uint32_t def = 0);
+uint64_t GetUInt64At(const SavFile& s, uint32_t h, int idx, uint64_t def = 0);
+void     SetIntAt   (SavFile& s, uint32_t h, int idx, int32_t  v);
+void     SetUIntAt  (SavFile& s, uint32_t h, int idx, uint32_t v);
+void     SetEnumAt  (SavFile& s, uint32_t h, int idx, uint32_t v);
+void     SetUInt64At(SavFile& s, uint32_t h, int idx, uint64_t v);
 int      ArraySize (const SavFile& s, uint32_t h);  // element count of any array entry
 
 // Reads/writes EnumArray or UIntArray (identical 4-byte layout — game uses either).
