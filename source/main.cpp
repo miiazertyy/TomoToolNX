@@ -3706,7 +3706,7 @@ int main(int,char**) {
                     float cy = ev.tfinger.y * SCREEN_H;
                     float d2 = (cx-s_touch.startX)*(cx-s_touch.startX)
                              + (cy-s_touch.startY)*(cy-s_touch.startY);
-                    if (!s_touch.dragging && d2 > 144.f) // 12 px radius
+                    if (!s_touch.dragging && d2 > 576.f) // 24 px radius — finger drift tolerance for taps
                         s_touch.dragging = true;
                     if (s_touch.dragging)
                         ApplyTouchScroll(ev.tfinger.dx * SCREEN_W,

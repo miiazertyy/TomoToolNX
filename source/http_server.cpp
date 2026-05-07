@@ -220,22 +220,22 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
 .hab-cat-strip{display:flex;flex-wrap:wrap;gap:5px;padding:10px 12px;border-bottom:1px solid var(--border)}
 .hab-cat{padding:5px 14px;border:1px solid var(--border);border-radius:3px;background:var(--surface);color:var(--muted);font-size:.78rem;cursor:pointer;font-family:inherit;letter-spacing:.04em;display:inline-flex;align-items:center;gap:6px}
 .hab-cat:hover{color:var(--text)}
-.hab-cat.active{border-color:var(--gold);color:var(--gold);background:var(--surface2)}
-.hab-cat-dot{width:6px;height:6px;border-radius:50%;background:var(--gold);display:inline-block}
+.hab-cat.active{border-color:var(--accent);color:var(--accent);background:var(--surface2)}
+.hab-cat-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);display:inline-block}
 .hab-caption{font-size:.72rem;color:var(--muted);padding:4px 12px 0;font-style:italic}
 .hab-list{display:flex;flex-direction:column;gap:3px;padding:8px 12px;max-height:480px;overflow-y:auto}
 .hab-row{display:flex;align-items:center;gap:10px;padding:7px 12px;background:var(--surface);border:1px solid var(--border);border-radius:3px}
-.hab-row.active{border-color:var(--gold);background:var(--surface2)}
+.hab-row.active{border-color:var(--accent);background:var(--surface2)}
 .hab-box{width:22px;height:22px;border:1px solid var(--border);border-radius:3px;background:var(--bg);cursor:pointer;flex-shrink:0;padding:0;position:relative}
 .hab-box:hover{border-color:var(--text)}
 .hab-box.on::after{content:'';position:absolute;left:5px;top:5px;right:5px;bottom:5px;background:var(--bg);border-radius:1px}
-.hab-box.gold{border-color:var(--gold)}
-.hab-box.gold.on{background:var(--gold)}
+.hab-box.gold{border-color:var(--accent)}
+.hab-box.gold.on{background:var(--accent)}
 .hab-box.blue{border-color:#5a8cc8}
 .hab-box.blue.on{background:#5a8cc8}
 .hab-label{flex:1;font-size:.82rem;color:var(--muted)}
 .hab-row.active .hab-label,.hab-row.owned .hab-label{color:var(--text)}
-.hab-row.active .hab-label{color:var(--gold)}
+.hab-row.active .hab-label{color:var(--accent)}
 .hab-actions{display:flex;justify-content:flex-end;padding:8px 12px;border-top:1px solid var(--border);gap:6px}
 .hab-empty{padding:18px 12px;color:var(--muted);font-style:italic;text-align:center;font-size:.82rem}
 /* ── belongings panel ──────────────────────────────────────────────────────── */
