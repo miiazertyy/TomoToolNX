@@ -652,6 +652,32 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
         }
     }
 
+    // Reset UgcInfo flags so the imported Mii can be sent via local network.
+    //   IsCopy[slot]              → false  (treat as native mii, not a received copy)
+    //   IsEdit[slot]              → false  (clean state)
+    //   NetworkDeliverCount[slot] → 0      (reset per-mii delivery counter)
+    {
+        // BoolArray patcher: skip 4-byte count, then bit-clear bit at index s.
+        auto clearBoolAt = [&](const char* hashHex) {
+            int o = OffsetLocator(miisav, hashHex);
+            if (o < 0) return;
+            size_t off = (size_t)o + 4 + (size_t)(s >> 3);
+            if (off < miisav.size()) miisav[off] &= (uint8_t)~(1u << (s & 7));
+        };
+        clearBoolAt("DBDB59FA"); // Mii.MiiMisc.UgcInfo.IsCopy
+        clearBoolAt("7F9B5D34"); // Mii.MiiMisc.UgcInfo.IsEdit
+
+        // UIntArray patcher: skip 4-byte count, write zero at slot index.
+        int ndcOff = OffsetLocator(miisav, "62AAAA12"); // Mii.MiiMisc.UgcInfo.NetworkDeliverCount
+        if (ndcOff >= 0) {
+            size_t off = (size_t)ndcOff + 4 + (size_t)s * 4;
+            if (off + 4 <= miisav.size()) {
+                miisav[off]   = 0; miisav[off+1] = 0;
+                miisav[off+2] = 0; miisav[off+3] = 0;
+            }
+        }
+    }
+
     // Write save files
     if (!WriteFile(SAVE_MII_SAV,    miisav))    return "Failed to write Mii.sav";
     if (!WriteFile(SAVE_PLAYER_SAV, playersav)) return "Failed to write Player.sav";

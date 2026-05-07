@@ -216,43 +216,38 @@ void DeleteOldestBackup() {
 
 void DeleteBackup() { RmRf(BACKUP_ROOT); }
 
-// ─── Per-import UGC entry backup ──────────────────────────────────────────────
 
-static std::string GetNextNumberedFolder(const std::string& root) {
-    int highest = 0, width = 3;
-    DIR* dir = opendir(root.c_str());
-    if (dir) {
-        struct dirent* de;
-        while ((de = readdir(dir)) != nullptr) {
-            char* end = nullptr;
-            long n = strtol(de->d_name, &end, 10);
-            if (end != de->d_name && *end == '\0' && n > 0) {
-                if (n > highest) highest = (int)n;
-                int w = (int)strlen(de->d_name);
-                if (w > width) width = w;
-            }
+static std::string RestoreCopyTree(const std::string& src, const std::string& dst) {
+    DIR* d = opendir(src.c_str());
+    if (!d) return "Cannot read: " + src;
+    struct dirent* de;
+    while ((de = readdir(d)) != nullptr) {
+        if (!strcmp(de->d_name,".") || !strcmp(de->d_name,"..")) continue;
+        std::string sc = src + "/" + de->d_name;
+        std::string dc = dst + "/" + de->d_name;
+        struct stat st;
+        if (stat(sc.c_str(), &st) != 0) continue;
+        if (S_ISDIR(st.st_mode)) {
+            MkdirP(dc);
+            std::string err = RestoreCopyTree(sc, dc);
+            if (!err.empty()) { closedir(d); return err; }
+        } else {
+            CopyFile(sc, dc);
         }
-        closedir(dir);
     }
-    int next = highest + 1;
-    std::string s = std::to_string(next);
-    while ((int)s.size() < width) s = "0" + s;
-    return root + "/" + s;
+    closedir(d);
+    return "";
 }
 
-std::string BackupEntry(const UgcTextureEntry& entry) {
-    MkdirP(BACKUP_ROOT);
-    MkdirP(BACKUP_IMPORTS);
-    std::string dest = GetNextNumberedFolder(BACKUP_IMPORTS);
-    MkdirP(dest);
-    auto copyIfExists = [&](const std::string& src) {
-        if (src.empty() || !FileExists(src)) return;
-        CopyFile(src, dest + "/" + Filename(src));
-    };
-    copyIfExists(entry.ugctexPath);
-    copyIfExists(entry.thumbPath);
-    copyIfExists(entry.canvasPath);
-    return dest;
+std::vector<std::string> ListBackups() {
+    auto v = ListSaveBackups();
+    std::reverse(v.begin(), v.end()); // newest first
+    return v;
+}
+
+std::string RestoreBackup(const std::string& backupPath, const std::string& saveMountRoot) {
+    if (!DirExists(backupPath)) return "Backup folder not found";
+    return RestoreCopyTree(backupPath, saveMountRoot);
 }
 
 } // namespace BackupService

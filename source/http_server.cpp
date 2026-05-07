@@ -8,6 +8,7 @@
 #include "backup.h"
 #include "mii_manager.h"
 #include "save_editor.h"
+#include "habits_data.h"
 
 #include <switch.h>
 #include <sys/socket.h>
@@ -62,6 +63,10 @@ static Mutex                 s_importMutex;
 static ImportState           s_importState  = ImportState::Idle;
 static HttpServer::ImportJob s_importJob;
 static std::string           s_importResult;
+static Mutex                   s_bgMutex;
+static ImportState             s_bgState  = ImportState::Idle;
+static HttpServer::BgRemoveJob s_bgJob;
+static std::string             s_bgResult;
 static u64                   s_lastConnectTick = 0;
 
 static const char* HTML_UI = R"HTML(<!DOCTYPE html>
@@ -114,6 +119,8 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .btn-gold:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
 .btn-cyan{border-color:var(--accent2);color:var(--accent2)}
 .btn-cyan:hover:not(:disabled){border-color:var(--accent2);color:var(--accent2)}
+.btn-blue{border-color:#5a8cc8;color:#5a8cc8}
+.btn-blue:hover:not(:disabled){border-color:#7aaee8;color:#7aaee8}
 .status{font-size:11px;padding:4px 10px;border-radius:2px;flex:1;min-width:0;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .status.ok{color:var(--ok)}.status.err{color:var(--err)}.status.info{color:var(--muted)}
 #save-warn{display:none;background:#2a1010;border:1px solid var(--err);border-radius:4px;padding:10px 14px;margin:8px 0;font-size:11px;line-height:1.6;color:var(--text)}
@@ -209,6 +216,28 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
 .social-rel-row{display:flex;gap:8px;padding:4px 8px;background:var(--surface);border-radius:3px;font-size:.78rem;border-left:3px solid;align-items:center}
 .social-rel-name{font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .social-rel-meta{color:var(--muted);font-size:.72rem;white-space:nowrap}
+/* ── habits panel ───────────────────────────────────────────────────────────── */
+.hab-cat-strip{display:flex;flex-wrap:wrap;gap:5px;padding:10px 12px;border-bottom:1px solid var(--border)}
+.hab-cat{padding:5px 14px;border:1px solid var(--border);border-radius:3px;background:var(--surface);color:var(--muted);font-size:.78rem;cursor:pointer;font-family:inherit;letter-spacing:.04em;display:inline-flex;align-items:center;gap:6px}
+.hab-cat:hover{color:var(--text)}
+.hab-cat.active{border-color:var(--gold);color:var(--gold);background:var(--surface2)}
+.hab-cat-dot{width:6px;height:6px;border-radius:50%;background:var(--gold);display:inline-block}
+.hab-caption{font-size:.72rem;color:var(--muted);padding:4px 12px 0;font-style:italic}
+.hab-list{display:flex;flex-direction:column;gap:3px;padding:8px 12px;max-height:480px;overflow-y:auto}
+.hab-row{display:flex;align-items:center;gap:10px;padding:7px 12px;background:var(--surface);border:1px solid var(--border);border-radius:3px}
+.hab-row.active{border-color:var(--gold);background:var(--surface2)}
+.hab-box{width:22px;height:22px;border:1px solid var(--border);border-radius:3px;background:var(--bg);cursor:pointer;flex-shrink:0;padding:0;position:relative}
+.hab-box:hover{border-color:var(--text)}
+.hab-box.on::after{content:'';position:absolute;left:5px;top:5px;right:5px;bottom:5px;background:var(--bg);border-radius:1px}
+.hab-box.gold{border-color:var(--gold)}
+.hab-box.gold.on{background:var(--gold)}
+.hab-box.blue{border-color:#5a8cc8}
+.hab-box.blue.on{background:#5a8cc8}
+.hab-label{flex:1;font-size:.82rem;color:var(--muted)}
+.hab-row.active .hab-label,.hab-row.owned .hab-label{color:var(--text)}
+.hab-row.active .hab-label{color:var(--gold)}
+.hab-actions{display:flex;justify-content:flex-end;padding:8px 12px;border-top:1px solid var(--border);gap:6px}
+.hab-empty{padding:18px 12px;color:var(--muted);font-style:italic;text-align:center;font-size:.82rem}
 /* ── belongings panel ──────────────────────────────────────────────────────── */
 .bl-section{border:1px solid var(--border);border-radius:5px;overflow:hidden}
 .bl-section-head{font-size:.8rem;font-weight:bold;padding:7px 12px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:baseline;gap:8px}
@@ -262,6 +291,7 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
 <div class="mii-subtab-bar" id="mii-subtab-bar-global">
   <button class="mii-subtab active" onclick="switchMiiSubTab('stats',this)">stats</button>
   <button class="mii-subtab" onclick="switchMiiSubTab('belongings',this)">belongings</button>
+  <button class="mii-subtab" onclick="switchMiiSubTab('habits',this)">habits</button>
   <button class="mii-subtab" onclick="switchMiiSubTab('words',this)">words</button>
   <button class="mii-subtab" onclick="switchMiiSubTab('rel',this)">relations</button>
   <button class="mii-subtab" onclick="switchMiiSubTab('social',this)">social</button>
@@ -282,11 +312,15 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
   <div class="toolbar" style="border-top:none;padding-bottom:9px">
     <button class="btn btn-cyan" id="btn-import" disabled onclick="doImport()">import pic</button>
     <button class="btn btn-gold" id="btn-export" disabled onclick="doExport()">export pic</button>
+    <button class="btn btn-blue" id="btn-removebg" disabled onclick="doRemoveBg()">remove BG</button>
     <button class="btn" onclick="loadList()">refresh</button>
     <div class="status info" id="status"></div>
   </div>
   <div class="list-wrap" style="padding-bottom:env(safe-area-inset-bottom,0px)">
-    <div class="list-label">textures</div>
+    <div class="list-label" style="display:flex;align-items:center;gap:6px">
+      <span style="flex:1">textures</span>
+      <input type="search" id="ugc-search" placeholder="search..." oninput="renderList()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:3px 8px;border-radius:3px;font-size:11px;font-family:inherit;width:140px;outline:none">
+    </div>
     <div id="list"></div>
   </div>
 </div>
@@ -328,6 +362,7 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
       <div class="mii-content" id="mii-content-rel" style="display:none"><div id="mii-rel-panel" class="rel-list"></div></div>
       <div class="mii-content" id="mii-content-social" style="display:none"><div id="mii-social-panel"></div></div>
       <div class="mii-content" id="mii-content-belongings" style="display:none"><div id="mii-bl-panel" style="padding:10px 12px;display:flex;flex-direction:column;gap:10px"></div></div>
+      <div class="mii-content" id="mii-content-habits" style="display:none"><div id="mii-habits-panel"></div></div>
     </div>
   </div>
 </div>
@@ -368,21 +403,42 @@ async function loadList(){
   setStatus('loading...','info');
   const d=await(await fetch('/api/list')).json();
   entries=d.entries||[];
-  const l=document.getElementById('list');l.innerHTML='';
+  renderList();
+  setStatus('','info');
+}
+function renderList(){
+  const sb=document.getElementById('ugc-search');
+  const q=(sb&&sb.value||'').trim().toLowerCase();
+  const l=document.getElementById('list'); if(!l)return;
+  l.innerHTML='';
+  let shown=0;
   entries.forEach(e=>{
+    if(q){
+      const name=(e.name||'').toLowerCase();
+      const stem=(e.stem||'').toLowerCase();
+      if(!name.includes(q)&&!stem.includes(q))return;
+    }
     const div=document.createElement('div');
     div.className='entry'+(selected&&selected.stem===e.stem?' active':'');
-    div.innerHTML='<span class="entry-name">'+(e.name||e.stem)+'</span>';
+    div.innerHTML='<span class="entry-name">'+esc(e.name||e.stem)+'</span>';
     div.onclick=()=>selectEntry(e);l.appendChild(div);
+    shown++;
   });
-  document.getElementById('hdr-count').textContent=entries.length+' textures';
-  setStatus('','info');
+  if(shown===0&&entries.length>0){
+    const div=document.createElement('div');
+    div.className='entry';div.style.color='var(--muted)';div.style.cursor='default';
+    div.innerHTML='<span class="entry-name">no matches</span>';
+    l.appendChild(div);
+  }
+  const hdr=document.getElementById('hdr-count');
+  if(hdr)hdr.textContent=q?(shown+' / '+entries.length+' textures'):(entries.length+' textures');
 }
 async function selectEntry(e){
   selected=e;
   document.querySelectorAll('#list .entry').forEach((el,i)=>el.classList.toggle('active',entries[i].stem===e.stem));
   document.getElementById('btn-import').disabled=false;
   document.getElementById('btn-export').disabled=false;
+  document.getElementById('btn-removebg').disabled=false;
   document.getElementById('placeholder').style.display='none';
   document.getElementById('preview-img').style.display='none';
   document.getElementById('info-bar').textContent='';
@@ -394,6 +450,7 @@ async function selectEntry(e){
 }
 function doExport(){if(!selected)return;const a=document.createElement('a');a.href='/api/export?stem='+encodeURIComponent(selected.stem);a.download=selected.stem+'.png';a.click();setStatus('exported','ok');}
 function doImport(){if(!selected)return;document.getElementById('file-input').click();}
+async function doRemoveBg(){if(!selected)return;showSpinner('removing background... (~30s)');const d=await(await fetch('/api/removebg?stem='+encodeURIComponent(selected.stem),{method:'POST'})).json();modalClose();if(d.ok){setStatus('background removed','ok');await loadList();const fresh=entries.find(e=>e.stem===selected.stem);if(fresh)selectEntry(fresh);}else setStatus('failed: '+d.error,'err');}
 function fileChosen(){const fi=document.getElementById('file-input');if(!fi.files.length)return;pendingFile=fi.files[0];fi.value='';uploadFile();}
 async function uploadFile(){
   showSpinner('importing...');
@@ -3089,12 +3146,129 @@ function blClearAllCoords(){
   renderMiiBelongings();
 }
 
+// ── Habits ──────────────────────────────────────────────────────────────────
+const HAB_CAT_LABEL=['Walking','Standing','Eating','Greeting','Anger','Expression','Voice','Stomach','Other'];
+let HABITS_LIST=null;
+let habitCatSel=0;
+const habitHashCache={};
+const HAB_STATE_OWN=H('Own');
+const HAB_STATE_UNOWN=H('Unown');
+const HAB_STATE_NEVER_OWNED=H('NeverOwned');
+function habHashes(name){
+  let r=habitHashCache[name]; if(r)return r;
+  const base='Mii.Belongings.HabitOwnInfo.'+name;
+  r={isOwn:H(base+'.IsOwn'),isChecked:H(base+'.IsChecked'),state:H(base+'.State')};
+  habitHashCache[name]=r; return r;
+}
+function getBoolAt(entries,hash,idx){
+  const e=findE(entries,hash);
+  if(!e||e.type!==1||!e.payload||e.payload.length<4)return false;
+  const dv=arrDV(e),cnt=dv.getUint32(0,true);
+  if(idx<0||idx>=cnt)return false;
+  return ((e.payload[4+(idx>>3)]>>(idx&7))&1)!==0;
+}
+function setBoolAt(entries,hash,idx,v){
+  const e=findE(entries,hash);
+  if(!e||e.type!==1||!e.payload||e.payload.length<4)return;
+  const dv=arrDV(e),cnt=dv.getUint32(0,true);
+  if(idx<0||idx>=cnt)return;
+  const off=4+(idx>>3),mask=1<<(idx&7);
+  if(v) e.payload[off]|=mask;
+  else  e.payload[off]&=(~mask)&0xff;
+}
+async function renderMiiHabits(){
+  const panel=document.getElementById('mii-habits-panel');
+  if(!savMii||!panel)return;
+  if(!HABITS_LIST){
+    panel.innerHTML='<div class="hab-empty">loading...</div>';
+    try{HABITS_LIST=await(await fetch('/api/habits')).json();}catch(e){HABITS_LIST=[];}
+  }
+  const slot=savMiiSlot;
+  let html='<div class="hab-cat-strip">';
+  for(let c=0;c<9;c++){
+    let active=false;
+    for(const h of HABITS_LIST){
+      if(h.c!==c)continue;
+      if(getBoolAt(savMii.entries,habHashes(h.n).isChecked,slot)){active=true;break;}
+    }
+    html+=`<button class="hab-cat${c===habitCatSel?' active':''}" onclick="selHabitCat(${c})">${HAB_CAT_LABEL[c]}${active?'<span class="hab-cat-dot" title="active"></span>':''}</button>`;
+  }
+  html+='</div>';
+  html+='<div class="hab-caption">Personal quirks. The radio is the active habit (one per category). The pill marks habits the Mii has acquired.</div>';
+  const items=HABITS_LIST.filter(h=>h.c===habitCatSel);
+  if(items.length===0){
+    html+='<div class="hab-empty">no habits in this category</div>';
+  }else{
+    html+='<div class="hab-list">';
+    for(const h of items){
+      const hh=habHashes(h.n);
+      const isOwn=getBoolAt(savMii.entries,hh.isOwn,slot);
+      const isChecked=getBoolAt(savMii.entries,hh.isChecked,slot);
+      const cls='hab-row'+(isChecked?' active':isOwn?' owned':'');
+      html+=`<div class="${cls}">
+        <button class="hab-box gold${isChecked?' on':''}" title="set as active habit" onclick="setHabitActive('${esc(h.n)}')"></button>
+        <button class="hab-box blue${isOwn?' on':''}" title="toggle owned" onclick="toggleHabitOwn('${esc(h.n)}')"></button>
+        <span class="hab-label">${esc(h.l)}</span>
+      </div>`;
+    }
+    html+='</div>';
+  }
+  html+='<div class="hab-actions"><button class="btn" onclick="clearHabitCategory()">clear category</button></div>';
+  panel.innerHTML=html;
+}
+function selHabitCat(c){habitCatSel=c;renderMiiHabits();}
+function markMiiDirty(){setSaveStatus('mii','modified — apply to save','info');}
+function setHabitActive(name){
+  if(!savMii||!HABITS_LIST)return;
+  const me=HABITS_LIST.find(x=>x.n===name); if(!me)return;
+  const slot=savMiiSlot;
+  for(const h of HABITS_LIST){
+    if(h.c!==me.c)continue;
+    const hh=habHashes(h.n);
+    const active=(h.n===name);
+    setBoolAt(savMii.entries,hh.isChecked,slot,active);
+    if(active){
+      setBoolAt(savMii.entries,hh.isOwn,slot,true);
+      setEnumAt(savMii.entries,hh.state,slot,HAB_STATE_OWN);
+    }
+  }
+  markMiiDirty(); renderMiiHabits();
+}
+function toggleHabitOwn(name){
+  if(!savMii)return;
+  const slot=savMiiSlot;
+  const hh=habHashes(name);
+  const isOwn=getBoolAt(savMii.entries,hh.isOwn,slot);
+  if(isOwn){
+    const st=getEnumAt(savMii.entries,hh.state,slot);
+    setBoolAt(savMii.entries,hh.isOwn,slot,false);
+    setBoolAt(savMii.entries,hh.isChecked,slot,false);
+    if(st===HAB_STATE_OWN) setEnumAt(savMii.entries,hh.state,slot,HAB_STATE_UNOWN);
+  }else{
+    setBoolAt(savMii.entries,hh.isOwn,slot,true);
+    setEnumAt(savMii.entries,hh.state,slot,HAB_STATE_OWN);
+  }
+  markMiiDirty(); renderMiiHabits();
+}
+function clearHabitCategory(){
+  if(!savMii||!HABITS_LIST)return;
+  const slot=savMiiSlot;
+  for(const h of HABITS_LIST){
+    if(h.c!==habitCatSel)continue;
+    const hh=habHashes(h.n);
+    setBoolAt(savMii.entries,hh.isChecked,slot,false);
+    setBoolAt(savMii.entries,hh.isOwn,slot,false);
+    setEnumAt(savMii.entries,hh.state,slot,HAB_STATE_NEVER_OWNED);
+  }
+  markMiiDirty(); renderMiiHabits();
+}
+
 // ── Mii sub-tabs ──────────────────────────────────────────────────────────────
 function switchMiiSubTab(name,btn){
   miiSubTab=name;
   document.querySelectorAll('.mii-subtab').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
-  ['stats','words','rel','social','belongings'].forEach(t=>{
+  ['stats','words','rel','social','belongings','habits'].forEach(t=>{
     const el=document.getElementById('mii-content-'+t);
     if(el)el.style.display=(t===name?'':'none');
   });
@@ -3107,6 +3281,7 @@ function renderMiiSubTab(){
   else if(miiSubTab==='rel')renderMiiRelations();
   else if(miiSubTab==='social')renderMiiSocial();
   else if(miiSubTab==='belongings')renderMiiBelongings();
+  else if(miiSubTab==='habits')renderMiiHabits();
 }
 // ── Words editor ──────────────────────────────────────────────────────────────
 function renderMiiWords(){
@@ -3383,11 +3558,9 @@ static void HandleImport(int fd,const Request& req){
     {FILE* f=fopen(tmpPath.c_str(),"wb");if(!f){SrvLog("Import: cannot write temp file",true);Send500(fd,"Cannot write temp file");return;}fwrite(fileData.data(),1,fileData.size(),f);fclose(f);}
     SrvLog("Import: temp file written OK ("+std::to_string(fileData.size())+" bytes)");
 
-    SrvLog("Import: backing up original");BackupService::BackupEntry(*found);SrvLog("Import: backup done");
-
     TextureProcessor::ImportOptions opts;
     opts.pngPath=tmpPath;opts.destStem=found->directory()+"/"+found->stem;
-    opts.writeCanvas=found->hasCanvas();opts.writeThumb=false;opts.noSrgb=false;opts.originalUgctexPath=found->ugctexPath;
+    opts.writeCanvas=found->hasCanvas();opts.writeThumb=found->hasThumb();opts.thumbPath=found->thumbPath;opts.noSrgb=false;opts.originalUgctexPath=found->ugctexPath;
 
     SrvLog("Import: queuing PNG decode on main thread (IMG_Load not thread-safe)");
     {mutexLock(&s_importMutex);s_importJob={opts,tmpPath};s_importState=ImportState::Queued;s_importResult="";mutexUnlock(&s_importMutex);}
@@ -3409,7 +3582,55 @@ static void HandleImport(int fd,const Request& req){
     Send200(fd,"application/json","{\"ok\":true}");
 }
 
+// POST /api/removebg?stem=X — queues BgRemoveJob for main thread, long-polls for result
+static void HandleBgRemove(int fd,const Request& req){
+    std::string stem=GetQueryParam(req.query,"stem");
+    if(stem.empty()){SrvLog("BgRemove: missing stem",true);Send500(fd,"Missing stem");return;}
+    auto entries=UgcScanner::Scan(s_ugcPath);const UgcTextureEntry* found=nullptr;
+    for(auto& e:entries)if(e.stem==stem){found=&e;break;}
+    if(!found){SrvLog("BgRemove: entry not found: "+stem,true);Send500(fd,"Entry not found");return;}
+    TextureProcessor::ImportOptions opts;
+    opts.destStem=found->directory()+"/"+found->stem;
+    opts.writeCanvas=found->hasCanvas();opts.writeThumb=found->hasThumb();opts.thumbPath=found->thumbPath;opts.noSrgb=false;opts.originalUgctexPath=found->ugctexPath;
+    {mutexLock(&s_bgMutex);s_bgJob={found->ugctexPath,opts};s_bgState=ImportState::Queued;s_bgResult="";mutexUnlock(&s_bgMutex);}
+    SrvLog("BgRemove: job queued for main thread");
+    bool timedOut=true;
+    for(int i=0;i<120000;i++){
+        svcSleepThread(1000000ULL);
+        mutexLock(&s_bgMutex);bool done=(s_bgState==ImportState::Done);mutexUnlock(&s_bgMutex);
+        if(done){timedOut=false;break;}
+        if(i%10000==9999)SrvLog("BgRemove: waiting for main thread ("+std::to_string((i+1)/1000)+"s)...");
+    }
+    if(timedOut){SrvLog("BgRemove: TIMED OUT",true);mutexLock(&s_bgMutex);s_bgState=ImportState::Idle;mutexUnlock(&s_bgMutex);Send500(fd,"BgRemove timed out");return;}
+    std::string err;{mutexLock(&s_bgMutex);err=s_bgResult;s_bgState=ImportState::Idle;mutexUnlock(&s_bgMutex);}
+    if(!err.empty()){SrvLog("BgRemove: FAILED - "+err,true);Send500(fd,err);return;}
+    SrvLog("BgRemove: SUCCESS "+stem);
+    mutexLock(&s_mutex);s_pendingCommit=true;mutexUnlock(&s_mutex);
+    Send200(fd,"application/json","{\"ok\":true}");
+}
+
 // GET /api/mii/list
+// GET /api/habits — returns list of all habits with category and English label.
+static void HandleHabitsList(int fd){
+    std::string j = "[";
+    for (int i = 0; i < HABIT_COUNT; i++) {
+        if (i) j += ",";
+        std::string label;
+        for (const char* p = HABITS[i].label; *p; p++) {
+            char c = *p;
+            if (c == '"') label += "\\\"";
+            else if (c == '\\') label += "\\\\";
+            else label += c;
+        }
+        j += "{\"n\":\""; j += HABITS[i].name;
+        j += "\",\"c\":"; j += std::to_string(HABITS[i].category);
+        j += ",\"l\":\""; j += label;
+        j += "\"}";
+    }
+    j += "]";
+    Send200(fd, "application/json", j);
+}
+
 static void HandleMiiList(int fd){
     auto miis = MiiManager::ListMiis();
     SrvLog("WebUI: mii list ("+std::to_string(miis.size())+" miis)");
@@ -3686,6 +3907,8 @@ static void HandleConnection(int fd){
     else if(req.method=="GET"&&req.path=="/api/preview")HandlePreview(fd,req.query);
     else if(req.method=="GET"&&req.path=="/api/export")HandleExport(fd,req.query);
     else if(req.method=="POST"&&req.path=="/api/import")HandleImport(fd,req);
+    else if(req.method=="POST"&&req.path=="/api/removebg")HandleBgRemove(fd,req);
+    else if(req.method=="GET"  &&req.path=="/api/habits")           HandleHabitsList(fd);
     else if(req.method=="GET"  &&req.path=="/api/mii/list")         HandleMiiList(fd);
     else if(req.method=="GET"  &&req.path=="/api/mii/export")       HandleMiiExport(fd,req.query);
     else if(req.method=="POST" &&req.path=="/api/mii/import")       HandleMiiImport(fd,req);
@@ -3721,8 +3944,8 @@ namespace HttpServer {
 void Start(int port,const std::string& ugcPath){
     if(s_running) return;
     s_port=port;s_ugcPath=ugcPath;s_running=true;s_pendingCommit=false;s_pendingPlayerSavReload=false;s_pendingMiiSavReload=false;
-    mutexInit(&s_mutex);mutexInit(&s_logMutex);mutexInit(&s_importMutex);
-    s_logWrite=0;s_logRead=0;s_importState=ImportState::Idle;
+    mutexInit(&s_mutex);mutexInit(&s_logMutex);mutexInit(&s_importMutex);mutexInit(&s_bgMutex);
+    s_logWrite=0;s_logRead=0;s_importState=ImportState::Idle;s_bgState=ImportState::Idle;
     MkdirP("/switch/TomoToolNX");
     threadCreate(&s_thread,ServerThreadFunc,nullptr,nullptr,128*1024,0x2C,-2);threadStart(&s_thread);
 }
@@ -3739,6 +3962,9 @@ void ClearPendingMiiSavReload(){mutexLock(&s_mutex);s_pendingMiiSavReload=false;
 bool HasPendingImport(){mutexLock(&s_importMutex);bool v=(s_importState==ImportState::Queued);mutexUnlock(&s_importMutex);return v;}
 ImportJob TakePendingImport(){mutexLock(&s_importMutex);ImportJob job=s_importJob;s_importState=ImportState::InProgress;mutexUnlock(&s_importMutex);return job;}
 void FinishImport(const std::string& result){mutexLock(&s_importMutex);s_importResult=result;s_importState=ImportState::Done;mutexUnlock(&s_importMutex);}
+bool HasPendingBgRemove(){mutexLock(&s_bgMutex);bool v=(s_bgState==ImportState::Queued);mutexUnlock(&s_bgMutex);return v;}
+BgRemoveJob TakePendingBgRemove(){mutexLock(&s_bgMutex);BgRemoveJob j=s_bgJob;s_bgState=ImportState::InProgress;mutexUnlock(&s_bgMutex);return j;}
+void FinishBgRemove(const std::string& result){mutexLock(&s_bgMutex);s_bgResult=result;s_bgState=ImportState::Done;mutexUnlock(&s_bgMutex);}
 void DrainLog(std::vector<LogEntry>& out){mutexLock(&s_logMutex);while(s_logRead<s_logWrite)out.push_back(s_logRing[s_logRead++%LOG_RING_SIZE]);mutexUnlock(&s_logMutex);}
 uint64_t LastConnectTick(){mutexLock(&s_mutex);u64 t=s_lastConnectTick;mutexUnlock(&s_mutex);return t;}
 } // namespace HttpServer

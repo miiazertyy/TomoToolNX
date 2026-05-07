@@ -23,12 +23,12 @@ include $(DEVKITPRO)/libnx/switch_rules
 TARGET      := TomoToolNX
 APP_TITLE   := TomoToolNX
 APP_AUTHOR  := Imprimante
-APP_VERSION := 1.2.2
+APP_VERSION := 1.2.3
 BUILD		:=	build
 SOURCES		:=	source
 DATA		:=	data
 INCLUDES	:=	include
-ROMFS		:=	
+ROMFS		:=	romfs
 
 #---------------------------------------------------------------------------------
 # options for code generation
@@ -115,7 +115,7 @@ ifeq ($(strip $(NO_NACP)),)
 endif
 
 ifneq ($(ROMFS),)
-	export NROFLAGS += --romfs=$(CURDIR)/$(ROMFS)
+	export NROFLAGS += --romfsdir=$(shell cygpath -m $(CURDIR)/$(ROMFS) 2>/dev/null || echo $(CURDIR)/$(ROMFS))
 endif
 
 .PHONY: $(BUILD) clean all

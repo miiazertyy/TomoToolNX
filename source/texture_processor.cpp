@@ -549,6 +549,33 @@ static void ThresholdAlpha(std::vector<uint8_t>& rgba, uint8_t threshold=128) {
         rgba[i] = (rgba[i] >= threshold) ? 255 : 0;
 }
 
+static RgbaImage ResizeBilinear(const RgbaImage& src, int dw, int dh) {
+    RgbaImage dst(dw, dh);
+    for (int dy = 0; dy < dh; dy++) {
+        float fy = (dy + 0.5f) * src.height / dh - 0.5f;
+        if (fy < 0) fy = 0;
+        int y0 = (int)fy, y1 = y0 + 1;
+        if (y1 >= src.height) y1 = src.height - 1;
+        float wy = fy - y0;
+        for (int dx = 0; dx < dw; dx++) {
+            float fx = (dx + 0.5f) * src.width / dw - 0.5f;
+            if (fx < 0) fx = 0;
+            int x0 = (int)fx, x1 = x0 + 1;
+            if (x1 >= src.width) x1 = src.width - 1;
+            float wx = fx - x0;
+            uint8_t* p = dst.row(dy) + dx * 4;
+            for (int c = 0; c < 4; c++) {
+                float v = src.row(y0)[x0*4+c]*(1-wx)*(1-wy)
+                        + src.row(y0)[x1*4+c]*wx*(1-wy)
+                        + src.row(y1)[x0*4+c]*(1-wx)*wy
+                        + src.row(y1)[x1*4+c]*wx*wy;
+                p[c] = (uint8_t)(v + 0.5f);
+            }
+        }
+    }
+    return dst;
+}
+
 static RgbaImage ResizeNearest(const RgbaImage& src, int dw, int dh) {
     RgbaImage dst(dw, dh); // zero-initialized = fully transparent
     float scale = std::min((float)dw / src.width, (float)dh / src.height);
@@ -587,13 +614,11 @@ static bool LoadPng(const std::string& path, RgbaImage& out, std::string& errOut
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ImportPng  (no exceptions)
+// ImportRgbaImage / ImportPng  (no exceptions)
 // ─────────────────────────────────────────────────────────────────────────────
 
-std::string ImportPng(const ImportOptions& opts) {
-    RgbaImage src;
+std::string ImportRgbaImage(const RgbaImage& src, const ImportOptions& opts) {
     std::string err;
-    if (!LoadPng(opts.pngPath, src, err)) return err;
 
     // Detect layout from original ugctex
     UgctexLayout layout{512, 512, 128, 128, 16, TextureFormat::Bc1};
@@ -616,7 +641,7 @@ std::string ImportPng(const ImportOptions& opts) {
         const int cW=256, cH=256;
         RgbaImage ci = (src.width!=cW||src.height!=cH) ? ResizeNearest(src,cW,cH) : src;
         auto rgba = ci.pixels;
-        ThresholdAlpha(rgba); // prevent holes from semi-transparent edges
+        ThresholdAlpha(rgba);
         ConvertSrgbToLinear(rgba);
         auto sw = SwizzleBlockLinear(rgba, cW, cH, 4, DefaultBlockHeight);
         auto comp = ZstdCompress(sw);
@@ -628,7 +653,7 @@ std::string ImportPng(const ImportOptions& opts) {
         int uW=layout.Width, uH=layout.Height;
         RgbaImage ui = (src.width!=uW||src.height!=uH) ? ResizeNearest(src,uW,uH) : src;
         auto rgba = ui.pixels;
-        ThresholdAlpha(rgba); // BC1 can't handle semi-transparent pixels
+        ThresholdAlpha(rgba);
         ConvertSrgbToLinear(rgba);
 
         std::vector<uint8_t> blocks = (layout.Format == TextureFormat::Bc3)
@@ -645,16 +670,26 @@ std::string ImportPng(const ImportOptions& opts) {
     // ── Thumb ──
     if (opts.writeThumb) {
         const int tW=256, tH=256;
-        RgbaImage ti = (src.width!=tW||src.height!=tH) ? ResizeNearest(src,tW,tH) : src;
+        RgbaImage ti = (src.width!=tW||src.height!=tH) ? ResizeBilinear(src,tW,tH) : src;
         auto rgba = ti.pixels;
         ConvertSrgbToLinear(rgba);
         auto blocks = Bc3Encode(rgba, tW, tH);
         auto sw     = SwizzleBlockLinear(blocks, tW/4, tH/4, 16, ThumbBlockHeight);
         auto comp   = ZstdCompress(sw);
-        if (!WriteFile(opts.destStem + "_Thumb_ugctex.zs", comp, err)) return err;
+        std::string thumbDest = opts.thumbPath.empty()
+            ? opts.destStem + "_Thumb.ugctex.zs"
+            : opts.thumbPath;
+        if (!WriteFile(thumbDest, comp, err)) return err;
     }
 
-    return ""; // success
+    return "";
+}
+
+std::string ImportPng(const ImportOptions& opts) {
+    RgbaImage src;
+    std::string err;
+    if (!LoadPng(opts.pngPath, src, err)) return err;
+    return ImportRgbaImage(src, opts);
 }
 
 } // namespace TextureProcessor

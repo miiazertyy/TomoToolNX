@@ -71,10 +71,13 @@ namespace TextureProcessor {
         bool writeThumb      = false;
         bool noSrgb          = false;
         std::string originalUgctexPath;
+        std::string thumbPath; // actual thumb file path — write destination when set
     };
 
     // Returns empty string on success, error message on failure.
     std::string ImportPng(const ImportOptions& opts);
+    // Same as ImportPng but accepts an already-decoded sRGB RgbaImage (skips PNG load).
+    std::string ImportRgbaImage(const RgbaImage& src, const ImportOptions& opts);
 
     // ── Internal helpers (exposed for testing) ──
     std::vector<uint8_t> DeswizzleBlockLinear(const std::vector<uint8_t>& data,

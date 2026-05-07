@@ -338,6 +338,26 @@ void SetUInt64At(SavFile& s, uint32_t h, int idx, uint64_t v) {
 void SetEnumAt(SavFile& s, uint32_t h, int idx, uint32_t v) {
     ArrayWrite(FindMut(s,h), DT_EnumArray, idx, v);
 }
+bool GetBoolAt(const SavFile& s, uint32_t h, int idx, bool def) {
+    const Entry* e = Find(s, h);
+    if (!e || e->type != DT_BoolArray || e->payload.size() < 4) return def;
+    uint32_t cnt = R32(e->payload.data());
+    if (idx < 0 || (uint32_t)idx >= cnt) return def;
+    size_t byteOff = 4 + (size_t)(idx >> 3);
+    if (byteOff >= e->payload.size()) return def;
+    return ((e->payload[byteOff] >> (idx & 7)) & 1) != 0;
+}
+void SetBoolAt(SavFile& s, uint32_t h, int idx, bool v) {
+    Entry* e = FindMut(s, h);
+    if (!e || e->type != DT_BoolArray || e->payload.size() < 4) return;
+    uint32_t cnt = R32(e->payload.data());
+    if (idx < 0 || (uint32_t)idx >= cnt) return;
+    size_t byteOff = 4 + (size_t)(idx >> 3);
+    if (byteOff >= e->payload.size()) return;
+    uint8_t mask = (uint8_t)(1u << (idx & 7));
+    if (v) e->payload[byteOff] |= mask;
+    else   e->payload[byteOff] &= (uint8_t)~mask;
+}
 // Reads from EnumArray or UIntArray (identical binary layout — game uses either).
 uint32_t GetAnyEnumAt(const SavFile& s, uint32_t h, int idx, uint32_t def) {
     const Entry* e = Find(s, h);

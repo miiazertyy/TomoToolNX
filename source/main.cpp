@@ -18,6 +18,8 @@
 
 #include "save_editor.h"
 #include "belongings_data.h"
+#include "habits_data.h"
+#include "u2net_infer.h"
 #include <string>
 #include <vector>
 #include <dirent.h>
@@ -154,7 +156,9 @@ static OnSwitchMode gOnSwitchMode = OnSwitchMode::WebUI;
 
 static std::vector<UgcTextureEntry> gEntries;
 static int          gEntrySel    = 0;
-static int          gEntryScroll = 0;
+static int          gEntryScroll = 0;          // position in filtered list (top of visible window)
+static std::string  gUgcFilter;                // active substring filter (lowercase)
+static std::vector<int> gFilteredEntries;      // indices into gEntries that match the filter
 static SDL_Texture* gPreviewTex  = nullptr;
 static std::string  gPreviewStem;
 static std::string  gOnSwitchMsg;
@@ -203,6 +207,8 @@ static void TSetMode(int mode)  { gOnSwitchMode = (OnSwitchMode)mode; gOnSwitchM
 // Defined after their target globals are declared (forward refs below via lambdas are fine as fn ptrs)
 static void TSelUser (int idx);
 static void TSelUgc  (int idx);
+static void TUgcOpenSearch(int);
+static void TUgcClearSearch(int);
 static void TSelBrowse(int idx);
 static void TAdjust  (int delta); // encoded: negative=left, positive=right; |val| = scale
 static void TUndoNameLang(int);
@@ -217,6 +223,9 @@ static void TSelMiiRelation(int idx);
 static void TRelMeterAdj(int delta);
 static void TRelDateKbd(int idx);
 static void TSetSocialView(int v);
+static void TSelHabitCat(int c);
+static void TSelHabitItem(int posInCat);
+static void TToggleHabitOwn(int posInCat);
 static void TBLSel(int idx);
 static void TBLPickSel(int idx);
 static void TAckSaveWarning(int);
@@ -244,6 +253,7 @@ static int    gMiiStatsFieldSel = 0;
 static int    gMiiStatsScroll   = 0;
 static std::string gPlayerMsg, gMiiStatsMsg;
 static SDL_Color   gPlayerMsgCol = COL_TEXT, gMiiStatsMsgCol = COL_TEXT;
+static int         gMiiStatsMsgFrames = 0;  // auto-fade countdown for transient habit/edit messages
 
 // Undo state (single-step undo per field)
 static int32_t gPlayerUndoVal[16]   = {};
@@ -285,14 +295,25 @@ static bool gSaveFeedbackQuit   = false;
 static bool gShowThumbTip      = false;
 static int  gThumbTipCountdown = 0;  // frames remaining before button enables
 static bool gThumbTipSeen      = false;
+
+// Background-removal state
+static bool gShowBgRemovePrompt = false;
+
+static constexpr const char* kBgModelPath = "romfs:/u2netp.bin";
 static int  gMaxBackups        = 8;
 
 static int         gSettingsSel    = 0;
 static std::string gSettingsMsg;
 static SDL_Color   gSettingsMsgCol = COL_TEXT;
 
+static bool                     gShowRestorePicker = false;
+static std::vector<std::string> gRestoreList;
+static int                      gRestoreSel        = 0;
+static int                      gRestoreScroll     = 0;
+
 static void TOpenSettings(int)      { gSettingsMsg = ""; gScreen = Screen::Settings; }
 static void TSelSettingsItem(int i) { gSettingsSel = i; }
+static void TRestorePickSel(int i)  { gRestoreSel  = i; }
 
 // ─── Player field table ───────────────────────────────────────────────────────
 struct SaveFieldDef {
@@ -506,36 +527,75 @@ static bool RelMeterFixed(uint32_t hash) {
     return hash==0x0784a8dcu || hash==0x7e3d1e46u; // Other or Invalid
 }
 
-// Fit a UTF-8 string to maxW pixels wide using font f, appending "~" if truncated.
+// Fit a UTF-8 string to maxW pixels wide using font f, appending "…" if truncated.
 static std::string FitNodeName(const std::string& s, TTF_Font* f, int maxW) {
+    const char* ELL = "\xE2\x80\xA6"; // U+2026 HORIZONTAL ELLIPSIS
     const std::string src = s.empty() ? "?" : s;
     if (!f) return src;
     int w = 0, h = 0;
     TTF_SizeUTF8(f, src.c_str(), &w, &h);
     if (w <= maxW) return src;
+    const char* tail = TTF_GlyphIsProvided(f, 0x2026) ? ELL : "...";
     std::string t = src;
     while (!t.empty()) {
         // strip trailing bytes until we're at a UTF-8 codepoint boundary
         do { t.pop_back(); } while (!t.empty() && (uint8_t(t.back()) & 0xC0) == 0x80);
-        std::string cand = t + "~";
+        std::string cand = t + tail;
         TTF_SizeUTF8(f, cand.c_str(), &w, &h);
         if (w <= maxW) return cand;
     }
-    return "~";
+    return tail;
 }
 
 // MiiStats sub-tab state
-enum class MiiStatsSubTab { Stats=0, Belongings=1, Words=2, Relations=3, Social=4 };
+enum class MiiStatsSubTab { Stats=0, Belongings=1, Habits=2, Words=3, Relations=4, Social=5 };
+static const int MII_SUBTAB_COUNT = 6;
 static MiiStatsSubTab gMiiStatsSubTab  = MiiStatsSubTab::Stats;
+
+// Habits sub-tab state
+struct HabitHashes { uint32_t isOwn, isChecked, state; };
+static HabitHashes gHabitHashes[HABIT_COUNT];
+static uint32_t    gHabitStateOwnH        = 0;
+static uint32_t    gHabitStateUnownH      = 0;
+static uint32_t    gHabitStateNeverOwnedH = 0;
+static bool        gHabitHashesReady      = false;
+static int         gHabitCatSel           = 0; // category index (0..HABIT_CAT_COUNT-1)
+static int         gHabitItemSel          = 0; // index within current category
+static int         gHabitScroll           = 0; // first visible row within current category
+
+static void EnsureHabitHashes() {
+    if (gHabitHashesReady) return;
+    for (int i = 0; i < HABIT_COUNT; i++) {
+        std::string base = std::string("Mii.Belongings.HabitOwnInfo.") + HABITS[i].name;
+        gHabitHashes[i].isOwn     = SaveEditor::Hash((base + ".IsOwn").c_str());
+        gHabitHashes[i].isChecked = SaveEditor::Hash((base + ".IsChecked").c_str());
+        gHabitHashes[i].state     = SaveEditor::Hash((base + ".State").c_str());
+    }
+    gHabitStateOwnH        = SaveEditor::Hash("Own");
+    gHabitStateUnownH      = SaveEditor::Hash("Unown");
+    gHabitStateNeverOwnedH = SaveEditor::Hash("NeverOwned");
+    gHabitHashesReady = true;
+}
+
+// Returns the global indices of habits in the given category.
+static std::vector<int> HabitsInCategory(int cat) {
+    std::vector<int> out;
+    out.reserve(16);
+    for (int i = 0; i < HABIT_COUNT; i++)
+        if (HABITS[i].category == cat) out.push_back(i);
+    return out;
+}
 static bool           gSocialExpanded  = false;
 static int            gSocialScroll    = 0;
 static int            gBlSel           = 0;   // selected item in Belongings (0–24)
 static int            gBlScroll        = 0;   // visual-row scroll for Belongings
 static bool           gBlPickerOpen    = false;
-static int            gBlPickerSel     = 0;
+static int            gBlPickerSel     = 0;          // index into gBlFiltered
 static int            gBlPickerScroll  = 0;
 static std::vector<uint32_t>    gBlPickerHashes;
 static std::vector<const char*> gBlPickerLabels;
+static std::string              gBlFilter;          // active substring filter (lowercase)
+static std::vector<int>         gBlFiltered;        // indices into gBlPickerHashes/Labels
 static int            gMiiWordsSlotSel = 0;   // 0-11: selected word slot
 static int            gMiiRelSel       = 0;   // selected row in filtered relations list
 static int            gMiiRelScroll    = 0;   // first visible row in filtered relations list
@@ -571,7 +631,7 @@ static u64 NavRepeat(u64 kDown, u64 kHeld) {
         int idx = __builtin_ctzll(bit);
         if (kHeld & bit) {
             int f = ++s_navHold[idx];
-            if (f > 4) result |= bit;
+            if (f > 15 && f % 2 == 0) result |= bit;
         } else {
             s_navHold[idx] = 0;
         }
@@ -634,13 +694,106 @@ static void TRelMeterAdj(int delta) {
     adjM(otDir);
     gMiiSavDirty = true;
 }
+static void TSelHabitCat(int c) {
+    if (c >= 0 && c < HABIT_CAT_COUNT) {
+        gHabitCatSel = c; gHabitItemSel = 0; gHabitScroll = 0;
+    }
+}
+// Apply the same logic the controller's A button does, but inline so the touch path
+// doesn't depend on cross-frame gSimKDown ordering.
+static void TSelHabitItem(int posInCat) {
+    gHabitItemSel = posInCat;
+    if (!gMiiSav.loaded || gMiis.empty() || gMiiStatsMiiSel >= (int)gMiis.size()) return;
+    EnsureHabitHashes();
+    int miiIdx = gMiis[gMiiStatsMiiSel].slot - 1;
+    std::vector<int> items = HabitsInCategory(gHabitCatSel);
+    if (posInCat < 0 || posInCat >= (int)items.size()) return;
+    int chosen = items[posInCat];
+    bool wasActive = SaveEditor::GetBoolAt(gMiiSav, gHabitHashes[chosen].isChecked, miiIdx, false);
+    if (wasActive) {
+        // Tapping the active gold box again: unset it (allows touch users to clear without keyboard).
+        SaveEditor::SetBoolAt(gMiiSav, gHabitHashes[chosen].isChecked, miiIdx, false);
+    } else {
+        // Make this habit the active one in its category (exclusive).
+        for (int idx : items) {
+            bool active = (idx == chosen);
+            SaveEditor::SetBoolAt(gMiiSav, gHabitHashes[idx].isChecked, miiIdx, active);
+            if (active) {
+                SaveEditor::SetBoolAt(gMiiSav, gHabitHashes[idx].isOwn, miiIdx, true);
+                SaveEditor::SetEnumAt(gMiiSav, gHabitHashes[idx].state, miiIdx, gHabitStateOwnH);
+            }
+        }
+    }
+    gMiiSavDirty = true;
+    gMiiStatsMsg = std::string(wasActive?"Cleared: ":"Active: ") + HABITS[chosen].label;
+    gMiiStatsMsgCol = COL_GREEN;
+    gMiiStatsMsgFrames = 120;
+}
+static void TToggleHabitOwn(int posInCat) {
+    gHabitItemSel = posInCat;
+    if (!gMiiSav.loaded || gMiis.empty() || gMiiStatsMiiSel >= (int)gMiis.size()) return;
+    EnsureHabitHashes();
+    int miiIdx = gMiis[gMiiStatsMiiSel].slot - 1;
+    std::vector<int> items = HabitsInCategory(gHabitCatSel);
+    if (posInCat < 0 || posInCat >= (int)items.size()) return;
+    int chosen = items[posInCat];
+    bool isOwn = SaveEditor::GetBoolAt(gMiiSav, gHabitHashes[chosen].isOwn, miiIdx, false);
+    if (isOwn) {
+        uint32_t st = SaveEditor::GetEnumAt(gMiiSav, gHabitHashes[chosen].state, miiIdx, gHabitStateNeverOwnedH);
+        SaveEditor::SetBoolAt(gMiiSav, gHabitHashes[chosen].isOwn,     miiIdx, false);
+        SaveEditor::SetBoolAt(gMiiSav, gHabitHashes[chosen].isChecked, miiIdx, false);
+        if (st == gHabitStateOwnH)
+            SaveEditor::SetEnumAt(gMiiSav, gHabitHashes[chosen].state, miiIdx, gHabitStateUnownH);
+    } else {
+        SaveEditor::SetBoolAt(gMiiSav, gHabitHashes[chosen].isOwn, miiIdx, true);
+        SaveEditor::SetEnumAt(gMiiSav, gHabitHashes[chosen].state,  miiIdx, gHabitStateOwnH);
+    }
+    gMiiSavDirty = true;
+    gMiiStatsMsg = std::string(isOwn?"Removed: ":"Added: ") + HABITS[chosen].label;
+    gMiiStatsMsgCol = COL_GREEN;
+    gMiiStatsMsgFrames = 120;
+}
 static void TSetSocialView(int v) {
     gMiiStatsSubTab = (MiiStatsSubTab)v;
     gSocialScroll = 0;
     if (gMiiStatsSubTab != MiiStatsSubTab::Social) gSocialExpanded = false;
 }
 static void TBLSel(int idx) { gBlSel = idx; }
-static void TBLPickSel(int idx) { if (idx >= 0 && idx < (int)gBlPickerHashes.size()) gBlPickerSel = idx; }
+static void TBLPickSel(int idx) { if (idx >= 0 && idx < (int)gBlFiltered.size()) gBlPickerSel = idx; }
+
+// Rebuild gBlFiltered from gBlPickerLabels using gBlFilter (case-insensitive substring).
+// Empty filter → identity (all indices). Always at least keeps "(none)"/"(empty)" sentinel at index 0.
+static void BlRebuildFilter() {
+    gBlFiltered.clear();
+    if (gBlFilter.empty()) {
+        gBlFiltered.reserve(gBlPickerLabels.size());
+        for (int i = 0; i < (int)gBlPickerLabels.size(); i++) gBlFiltered.push_back(i);
+        return;
+    }
+    // Always include sentinel at index 0 so the user can still clear the slot
+    if (!gBlPickerLabels.empty()) gBlFiltered.push_back(0);
+    for (int i = 1; i < (int)gBlPickerLabels.size(); i++) {
+        const char* lbl = gBlPickerLabels[i];
+        if (!lbl) continue;
+        // case-insensitive substring match
+        bool match = false;
+        const char* hay = lbl;
+        const char* needle = gBlFilter.c_str();
+        size_t nlen = gBlFilter.size();
+        for (const char* p = hay; *p; p++) {
+            bool eq = true;
+            for (size_t k = 0; k < nlen; k++) {
+                char a = p[k]; if (!a) { eq = false; break; }
+                char b = needle[k];
+                if (a >= 'A' && a <= 'Z') a = (char)(a + 32);
+                if (b >= 'A' && b <= 'Z') b = (char)(b + 32);
+                if (a != b) { eq = false; break; }
+            }
+            if (eq) { match = true; break; }
+        }
+        if (match) gBlFiltered.push_back(i);
+    }
+}
 static void TAckSaveWarning(int) {
     gSaveWarningAcked = true; gShowSaveWarning = false; SaveConfig();
     gOnSwitchMode = gSaveWarningTarget;
@@ -700,6 +853,54 @@ static std::string FormatStem(const std::string& stem) {
         }
     }
     return stem;
+}
+
+// ── UGC list filter ─────────────────────────────────────────────────────────
+// Case-insensitive substring match against display name AND stem.
+static bool UgcMatchesFilter(int gEntriesIdx) {
+    if (gUgcFilter.empty()) return true;
+    auto contains = [&](const std::string& hay) -> bool {
+        size_t nlen = gUgcFilter.size();
+        if (hay.size() < nlen) return false;
+        for (size_t p = 0; p + nlen <= hay.size(); p++) {
+            bool eq = true;
+            for (size_t k = 0; k < nlen; k++) {
+                char a = hay[p+k]; char b = gUgcFilter[k];
+                if (a >= 'A' && a <= 'Z') a = (char)(a + 32);
+                if (b >= 'A' && b <= 'Z') b = (char)(b + 32);
+                if (a != b) { eq = false; break; }
+            }
+            if (eq) return true;
+        }
+        return false;
+    };
+    const auto& e = gEntries[gEntriesIdx];
+    std::string name = MiiManager::GetUgcName(e.stem);
+    if (!name.empty() && contains(name)) return true;
+    return contains(e.stem);
+}
+
+// Rebuild gFilteredEntries from gEntries using gUgcFilter.
+// Ensures gEntrySel still points at a visible entry; if not, snaps to first one.
+static void RebuildUgcFilter() {
+    gFilteredEntries.clear();
+    gFilteredEntries.reserve(gEntries.size());
+    for (int i = 0; i < (int)gEntries.size(); i++)
+        if (UgcMatchesFilter(i)) gFilteredEntries.push_back(i);
+
+    bool selVisible = false;
+    for (int i : gFilteredEntries) if (i == gEntrySel) { selVisible = true; break; }
+    if (!selVisible && !gFilteredEntries.empty()) gEntrySel = gFilteredEntries[0];
+    if (gEntryScroll < 0) gEntryScroll = 0;
+    if (gEntryScroll > std::max(0, (int)gFilteredEntries.size() - 1))
+        gEntryScroll = std::max(0, (int)gFilteredEntries.size() - 1);
+}
+
+// Find the position of gEntries index `realIdx` in gFilteredEntries; -1 if absent.
+static int UgcFilterPos(int realIdx) {
+    for (int p = 0; p < (int)gFilteredEntries.size(); p++)
+        if (gFilteredEntries[p] == realIdx) return p;
+    return -1;
 }
 
 static void LoadPreview(const UgcTextureEntry& e) {
@@ -807,7 +1008,8 @@ static void DoOnSwitchImport(const std::string& pngPath) {
     opts.pngPath            = pngPath;
     opts.destStem           = gEntries[gEntrySel].directory()+"/"+stem;
     opts.writeCanvas        = gEntries[gEntrySel].hasCanvas();
-    opts.writeThumb         = false;
+    opts.writeThumb         = gEntries[gEntrySel].hasThumb();
+    opts.thumbPath          = gEntries[gEntrySel].thumbPath;
     opts.noSrgb             = false;
     opts.originalUgctexPath = gEntries[gEntrySel].ugctexPath;
 
@@ -822,11 +1024,11 @@ static void DoOnSwitchImport(const std::string& pngPath) {
     // Reload entry list and preview (invalidates any prior reference into gEntries)
     gEntries = UgcScanner::Scan(SAVE_UGC_PATH);
     MiiManager::LoadUgcNames();
+    RebuildUgcFilter();
     if (gEntrySel >= (int)gEntries.size()) gEntrySel=(int)gEntries.size()-1;
     if (!gEntries.empty()) LoadPreview(gEntries[gEntrySel]);
     gOnSwitchMsg="Imported — save or discard on exit"; gOnSwitchMsgCol=COL_GREEN;
     LogOK("Import OK: "+stem);
-    if (!gThumbTipSeen) { gShowThumbTip=true; gThumbTipCountdown=120; }
 }
 
 // ─── Draw helpers ─────────────────────────────────────────────────────────────
@@ -900,20 +1102,72 @@ static void DrawDownloading() {
     SDL_RenderPresent(gRen);
 }
 
+static void DrawRestorePicker() {
+    HitClear();
+    SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
+    SDL_RenderClear(gRen);
+    DrawHeader("restore backup");
+
+    if (gRestoreList.empty()) {
+        DrawTextC("No backups found.", SCREEN_W/2, SCREEN_H/2 - 10, COL_DIM, Font::Lg);
+        DrawFooter("B  back");
+        return;
+    }
+
+    const int listW = 640, listX = (SCREEN_W - listW) / 2;
+    const int rowH = 58, rowGap = 5;
+    const int listY = 84;
+    const int RVIS  = 7;
+
+    for (int i = 0; i < RVIS; i++) {
+        int idx = gRestoreScroll + i;
+        if (idx >= (int)gRestoreList.size()) break;
+        bool sel = (idx == gRestoreSel);
+        int ry = listY + i * (rowH + rowGap);
+        HitAdd(listX, ry, listW, rowH, TRestorePickSel, idx);
+        FillRect(listX, ry, listW, rowH, sel ? COL_SEL : COL_PANEL);
+        DrawRect(listX, ry, listW, rowH, sel ? COL_GOLD : COL_BORDER);
+
+        std::string name = gRestoreList[idx];
+        size_t sl = name.rfind('/');
+        if (sl != std::string::npos) name = name.substr(sl + 1);
+        if (name.size() > 5 && name.substr(0, 5) == "save_") name = name.substr(5);
+        for (char& c : name) if (c == '_') c = ' ';
+
+        DrawText(name, listX + 18, ry + rowH/2, sel ? COL_TEXT : COL_DIM, Font::Md);
+        if (idx == 0)
+            DrawText("newest", listX + listW - 110, ry + rowH/2, COL_DIM, Font::Sm);
+        if (sel)
+            DrawText("A  restore", listX + listW - 110, ry + rowH/2, COL_GOLD, Font::Sm);
+    }
+
+    if ((int)gRestoreList.size() > RVIS) {
+        int total = (int)gRestoreList.size();
+        int barAreaH = RVIS * (rowH + rowGap) - rowGap;
+        int barH = std::max(16, barAreaH * RVIS / total);
+        int barY = listY + barAreaH * gRestoreScroll / total;
+        FillRect(listX + listW + 6, barY, 4, barH, COL_BORDER);
+    }
+
+    DrawFooter("Up/Down  navigate    A  restore    B  cancel");
+}
+
 static void DrawSettings() {
     HitClear();
     SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
     SDL_RenderClear(gRen);
 
-    if (gShowFileBrowser) { DrawFileBrowser(); SDL_RenderPresent(gRen); return; }
+    if (gShowFileBrowser)    { DrawFileBrowser();    SDL_RenderPresent(gRen); return; }
+    if (gShowRestorePicker)  { DrawRestorePicker();  SDL_RenderPresent(gRen); return; }
 
     DrawHeader("settings");
 
     static const struct { const char* label; const char* desc; } ITEMS[] = {
-        { "Export Path",  "folder used when exporting textures" },
-        { "Max Backups",  "maximum number of save backups to keep (1–99)" },
+        { "Export Path",     "folder used when exporting textures" },
+        { "Max Backups",     "maximum number of save backups to keep (1–99)" },
+        { "Restore Backup",  "restore a previous save backup for the selected user" },
     };
-    static const int ITEM_COUNT = 2;
+    static const int ITEM_COUNT = 3;
 
     const int listW = 720, listX = (SCREEN_W - listW) / 2;
     const int rowH  = 72,  rowGap = 6;
@@ -942,6 +1196,11 @@ static void DrawSettings() {
             }
             DrawText(disp, listX + listW - vw - 16, ry + 14, sel ? COL_ACCENT : COL_DIM, Font::Sm);
             DrawText("A  change", listX + listW - 100, ry + 44, sel ? COL_GOLD : COL_DIM, Font::Sm);
+        } else if (i == 2) {
+            int cnt = BackupService::CountBackups();
+            std::string v = (cnt == 0) ? "none" : std::to_string(cnt) + " available";
+            DrawText(v,          listX + listW - 130, ry + 14, sel ? COL_ACCENT : COL_DIM, Font::Sm);
+            DrawText("A  open",  listX + listW - 100, ry + 44, sel ? COL_GOLD   : COL_DIM, Font::Sm);
         } else if (i == 1) {
             // Max backups — left/right number selector
             const int arrowW = 36, numW = 48, ctrlH = 36;
@@ -968,7 +1227,7 @@ static void DrawSettings() {
         DrawTextC(gSettingsMsg, SCREEN_W/2, listY + ITEM_COUNT*(rowH+rowGap) + 16,
                   gSettingsMsgCol, Font::Sm);
 
-    DrawFooter("Up/Down  navigate    Left/Right  adjust    A  change path    B  back");
+    DrawFooter("Up/Down  navigate    Left/Right  adjust    A  action    B  back");
     SDL_RenderPresent(gRen);
 }
 
@@ -1123,9 +1382,35 @@ static const int VISIBLE = LIST_H/ITEM_H;
 static void TSelUgc(int idx) {
     if (idx>=0 && idx<(int)gEntries.size()) {
         gEntrySel=idx;
-        if (gEntrySel>=gEntryScroll+VISIBLE) gEntryScroll=gEntrySel-VISIBLE+1;
-        if (gEntrySel<gEntryScroll) gEntryScroll=gEntrySel;
+        // Scroll position is in filtered space; keep selected entry visible
+        int p = UgcFilterPos(gEntrySel);
+        if (p >= 0) {
+            if (p >= gEntryScroll+VISIBLE) gEntryScroll = p - VISIBLE + 1;
+            if (p <  gEntryScroll)         gEntryScroll = p;
+        }
         LoadPreview(gEntries[gEntrySel]);
+    }
+}
+
+static void TUgcOpenSearch(int) {
+    std::string q = ShowKeyboard("Filter textures (substring)", gUgcFilter, 30);
+    for (auto& c : q) if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
+    gUgcFilter = q;
+    RebuildUgcFilter();
+    gEntryScroll = 0;
+    if (!gFilteredEntries.empty() && UgcFilterPos(gEntrySel) < 0) {
+        gEntrySel = gFilteredEntries[0];
+        if (!gEntries.empty()) LoadPreview(gEntries[gEntrySel]);
+    }
+}
+static void TUgcClearSearch(int) {
+    gUgcFilter.clear();
+    RebuildUgcFilter();
+    gEntryScroll = 0;
+    int p = UgcFilterPos(gEntrySel);
+    if (p >= 0) {
+        if (p >= gEntryScroll+VISIBLE) gEntryScroll = p - VISIBLE + 1;
+        if (p <  gEntryScroll)         gEntryScroll = p;
     }
 }
 
@@ -1242,23 +1527,70 @@ static void DrawOnSwitch() {
 
     // ── UGC tab ──────────────────────────────────────────────────────────────
     if (gOnSwitchMode == OnSwitchMode::UGC) {
-        FillRect(LIST_X-4,LIST_Y,LIST_W+8,LIST_H+4,COL_PANEL);
-        DrawRect(LIST_X-4,LIST_Y,LIST_W+8,LIST_H+4,COL_BORDER);
-        for (int i=0;i<VISIBLE;i++){
-            int idx=gEntryScroll+i;
-            if (idx>=(int)gEntries.size()) break;
-            bool sel=(idx==gEntrySel);
-            HitAdd(LIST_X,LIST_Y+LIST_PAD_TOP+i*ITEM_H,LIST_W,ITEM_H-1, TSelUgc, idx);
-            FillRect(LIST_X,LIST_Y+LIST_PAD_TOP+i*ITEM_H,LIST_W,ITEM_H-1, sel?COL_SEL:COL_BG);
-            if(sel) DrawRect(LIST_X,LIST_Y+LIST_PAD_TOP+i*ITEM_H,LIST_W,ITEM_H-1,COL_GOLD);
-            { std::string dn=MiiManager::GetUgcName(gEntries[idx].stem); if(dn.empty())dn=FormatStem(gEntries[idx].stem);
-              TTF_Font* f=GetFont(Font::Sm); int fw=0,fh=0; if(f)TTF_SizeUTF8(f,dn.c_str(),&fw,&fh);
-              DrawText(dn, LIST_X+6, LIST_Y+LIST_PAD_TOP+i*ITEM_H+(ITEM_H-fh)/2, sel?COL_TEXT:COL_DIM); }
+        // Search bar — standalone, sits above the list panel with a clear gap
+        const int SEARCH_H = 30;
+        const int SEARCH_GAP = 10;
+        int sbX = LIST_X, sbY = LIST_Y, sbW = LIST_W;
+        bool searchActive = !gUgcFilter.empty();
+        // Hit-area: tap to open keyboard; clear button hits separately when active
+        int clearW = searchActive ? 28 : 0;
+        HitAdd(sbX, sbY, sbW - clearW, SEARCH_H, TUgcOpenSearch, 0);
+        FillRect(sbX, sbY, sbW, SEARCH_H, COL_BG);
+        DrawRect(sbX, sbY, sbW, SEARCH_H, searchActive ? COL_ACCENT : COL_BORDER);
+        TTF_Font* fsm0 = GetFont(Font::Sm);
+        int sh = 0;
+        if (searchActive) {
+            std::string lbl = std::string("Filter:  ") + gUgcFilter;
+            int tw0=0; if (fsm0) TTF_SizeUTF8(fsm0, lbl.c_str(), &tw0, &sh);
+            DrawText(lbl, sbX+8, sbY+(SEARCH_H-sh)/2, COL_ACCENT);
+            // Clear (✕) button
+            HitAdd(sbX+sbW-clearW, sbY, clearW, SEARCH_H, TUgcClearSearch, 0);
+            DrawRect(sbX+sbW-clearW, sbY, clearW, SEARCH_H, COL_BORDER);
+            DrawTextC("X", sbX+sbW-clearW/2, sbY+SEARCH_H/2, COL_DIM, Font::Md);
+        } else {
+            const char* placeholder = "Tap or  -  to search...";
+            int tw0=0; if (fsm0) TTF_SizeUTF8(fsm0, placeholder, &tw0, &sh);
+            DrawText(placeholder, sbX+8, sbY+(SEARCH_H-sh)/2, COL_DIM);
         }
-        if ((int)gEntries.size()>VISIBLE){
-            int barH=LIST_H*VISIBLE/gEntries.size();
-            int barY=LIST_Y+LIST_H*gEntryScroll/gEntries.size();
-            FillRect(LIST_X+LIST_W+2,barY,4,barH,COL_BORDER);
+
+        // List panel below the search bar (with a clear gap so the two read as separate)
+        int listPanelY = LIST_Y + SEARCH_H + SEARCH_GAP;
+        int listPanelH = LIST_H - SEARCH_H - SEARCH_GAP;
+        FillRect(LIST_X-4, listPanelY, LIST_W+8, listPanelH+4, COL_PANEL);
+        DrawRect(LIST_X-4, listPanelY, LIST_W+8, listPanelH+4, COL_BORDER);
+
+        const int LIST_TOP_Y = listPanelY + 4;
+        const int LIST_VIS_H = listPanelH - 4;
+        const int LIST_VISIBLE = LIST_VIS_H / ITEM_H;
+        int totalFiltered = (int)gFilteredEntries.size();
+
+        if (gEntryScroll < 0) gEntryScroll = 0;
+        if (totalFiltered > 0 && gEntryScroll > totalFiltered - LIST_VISIBLE)
+            gEntryScroll = std::max(0, totalFiltered - LIST_VISIBLE);
+
+        for (int i = 0; i < LIST_VISIBLE; i++) {
+            int filtPos = gEntryScroll + i;
+            if (filtPos >= totalFiltered) break;
+            int realIdx = gFilteredEntries[filtPos];
+            bool sel = (realIdx == gEntrySel);
+            int ry = LIST_TOP_Y + i*ITEM_H;
+            HitAdd(LIST_X, ry, LIST_W, ITEM_H-1, TSelUgc, realIdx);
+            FillRect(LIST_X, ry, LIST_W, ITEM_H-1, sel?COL_SEL:COL_BG);
+            if (sel) DrawRect(LIST_X, ry, LIST_W, ITEM_H-1, COL_GOLD);
+            std::string dn = MiiManager::GetUgcName(gEntries[realIdx].stem);
+            if (dn.empty()) dn = FormatStem(gEntries[realIdx].stem);
+            TTF_Font* f = GetFont(Font::Sm); int fw=0,fh=0; if(f)TTF_SizeUTF8(f,dn.c_str(),&fw,&fh);
+            DrawText(dn, LIST_X+6, ry+(ITEM_H-fh)/2, sel?COL_TEXT:COL_DIM);
+        }
+
+        if (totalFiltered == 0 && !gEntries.empty()) {
+            DrawTextC("no matches", LIST_X+LIST_W/2, LIST_TOP_Y + LIST_VIS_H/2, COL_DIM, Font::Md);
+        }
+
+        if (totalFiltered > LIST_VISIBLE) {
+            int barH = listPanelH * LIST_VISIBLE / totalFiltered;
+            int barY = listPanelY + listPanelH * gEntryScroll / totalFiltered;
+            FillRect(LIST_X+LIST_W+2, barY, 4, barH, COL_BORDER);
         }
         FillRect(PREVIEW_X,PREVIEW_Y,PREVIEW_W,PREVIEW_H,{8,8,8,255});
         DrawRect(PREVIEW_X,PREVIEW_Y,PREVIEW_W,PREVIEW_H,COL_BORDER);
@@ -1284,16 +1616,25 @@ static void DrawOnSwitch() {
             if (!gEntries.empty()) {
                 int cx   = PREVIEW_X + PREVIEW_W/2;
                 int btnY = imgY + imgH + kBtnGap;
-                const int btnW=220, btnGap=24;
-                FillRect(cx-btnW-btnGap/2, btnY, btnW, kBtnH, COL_SEL);
-                DrawRect(cx-btnW-btnGap/2, btnY, btnW, kBtnH, COL_ACCENT);
-                DrawTextC("A   import PNG", cx-btnW-btnGap/2+btnW/2, btnY+kBtnH/2, COL_ACCENT, Font::Md);
-                FillRect(cx+btnGap/2, btnY, btnW, kBtnH, COL_PANEL);
-                DrawRect(cx+btnGap/2, btnY, btnW, kBtnH, COL_GOLD);
-                DrawTextC("Y   export PNG", cx+btnGap/2+btnW/2, btnY+kBtnH/2, COL_GOLD, Font::Md);
+                const int btnW=200, btnGap=16, bgSep=48;
+                // import+export tight together, remove BG separated by extra gap
+                int bx0 = cx - (3*btnW + btnGap + btnGap + bgSep)/2;
+                int bxBg = bx0 + 2*btnW + btnGap + bgSep;
+                // A: import
+                FillRect(bx0,                btnY, btnW, kBtnH, COL_PANEL);
+                DrawRect(bx0,                btnY, btnW, kBtnH, COL_ACCENT);
+                DrawTextC("A  import", bx0+btnW/2, btnY+kBtnH/2, COL_ACCENT, Font::Md);
+                // Y: export
+                FillRect(bx0+btnW+btnGap,    btnY, btnW, kBtnH, COL_PANEL);
+                DrawRect(bx0+btnW+btnGap,    btnY, btnW, kBtnH, COL_GOLD);
+                DrawTextC("Y  export", bx0+btnW+btnGap+btnW/2, btnY+kBtnH/2, COL_GOLD, Font::Md);
+                // X: remove BG (separated)
+                FillRect(bxBg,               btnY, btnW, kBtnH, COL_SEL);
+                DrawRect(bxBg,               btnY, btnW, kBtnH, {90,140,200,255});
+                DrawTextC("X  remove BG", bxBg+btnW/2, btnY+kBtnH/2, {90,140,200,255}, Font::Md);
             }
         }
-        DrawFooter("ZL/ZR  scroll    Up/Down  select    A  import PNG    Y  export PNG    -  export dir    L/R  tab    B/+  back");
+        DrawFooter("ZL/ZR  scroll    Up/Down  select    A  import    Y  export    X  remove BG    -  search    L/R  tab    B/+  back");
     }
 
     // ── WebUI tab ─────────────────────────────────────────────────────────────
@@ -1766,15 +2107,21 @@ static void BlOpenPicker(int blSel, int miiIdx) {
     } else {
         return;
     }
+    gBlFilter.clear();
+    BlRebuildFilter();
     gBlPickerSel = 0;
-    for (int i = 0; i < (int)gBlPickerHashes.size(); i++)
-        if (gBlPickerHashes[i] == curHash) { gBlPickerSel = i; break; }
+    for (int i = 0; i < (int)gBlFiltered.size(); i++)
+        if (gBlPickerHashes[gBlFiltered[i]] == curHash) { gBlPickerSel = i; break; }
     gBlPickerScroll = gBlPickerSel;
     gBlPickerOpen = true;
 }
 
 static void DrawMiiStats() {
     HitClear();
+    // Auto-fade transient messages (e.g. habit toggle confirmations)
+    if (gMiiStatsMsgFrames > 0) {
+        if (--gMiiStatsMsgFrames == 0) { gMiiStatsMsg.clear(); gMiiStatsMsgCol = COL_TEXT; }
+    }
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
     SDL_RenderClear(gRen);
     if (gShowFileBrowser) { DrawFileBrowser(); SDL_RenderPresent(gRen); return; }
@@ -1833,7 +2180,7 @@ static void DrawMiiStats() {
     // Middle: field list for selected mii (hidden in Social/Belongings — panel expands)
     int midX = SE_LIST_X + MSE_LIST_W + 12;
     int midW = 340;
-    bool midHidden = (gMiiStatsSubTab == MiiStatsSubTab::Social || gMiiStatsSubTab == MiiStatsSubTab::Belongings);
+    bool midHidden = (gMiiStatsSubTab == MiiStatsSubTab::Social || gMiiStatsSubTab == MiiStatsSubTab::Belongings || gMiiStatsSubTab == MiiStatsSubTab::Habits);
     if (!midHidden) {
         FillRect(midX, SE_TOP_Y, midW, SCREEN_H-SE_TOP_Y-32, {8,8,8,255});
         DrawRect(midX, SE_TOP_Y, midW, SCREEN_H-SE_TOP_Y-32, COL_BORDER);
@@ -1974,11 +2321,11 @@ static void DrawMiiStats() {
     FillRect(panelX, SE_TOP_Y, panelW, SCREEN_H-SE_TOP_Y-32, {6,6,6,255});
     DrawRect(panelX, SE_TOP_Y, panelW, SCREEN_H-SE_TOP_Y-32, COL_BORDER);
 
-    // Sub-tab bar: [Stats] [Words] [Relations] [Social] [Belongings]
+    // Sub-tab bar: [Stats] [Belongings] [Habits] [Words] [Relations] [Social]
     {
-        int stW=88, stH=22, stGap=4, stX=editX+8, stY=SE_TOP_Y+6;
-        const char* stLabels[] = {"Stats","Belongings","Words","Relations","Social"};
-        for (int ti=0; ti<5; ti++) {
+        int stW=84, stH=22, stGap=4, stX=editX+8, stY=SE_TOP_Y+6;
+        const char* stLabels[] = {"Stats","Belongings","Habits","Words","Relations","Social"};
+        for (int ti=0; ti<MII_SUBTAB_COUNT; ti++) {
             bool sSel = ((int)gMiiStatsSubTab == ti);
             int sx = stX + ti*(stW+stGap);
             HitAdd(sx, stY, stW, stH, TSetSocialView, ti);
@@ -2354,11 +2701,15 @@ static void DrawMiiStats() {
                 // ── Item picker overlay ──────────────────────────────────────────
                 const int PK_ROW_H = 30;
                 const int PK_HDR_H = 32;
+                const int PK_FOOT_H = 22;
                 int listTop = panelTop + PK_HDR_H;
-                int listH   = panelH - PK_HDR_H;
+                int listH   = panelH - PK_HDR_H - PK_FOOT_H;
                 int pkVis   = listH / PK_ROW_H;
-                int total   = (int)gBlPickerHashes.size();
+                int total   = (int)gBlFiltered.size();
+                int totalAll = (int)gBlPickerHashes.size();
 
+                if (gBlPickerSel < 0) gBlPickerSel = 0;
+                if (total > 0 && gBlPickerSel >= total) gBlPickerSel = total - 1;
                 if (gBlPickerScroll < 0) gBlPickerScroll = 0;
                 if (total > 0 && gBlPickerScroll > total - pkVis) gBlPickerScroll = std::max(0, total - pkVis);
 
@@ -2367,25 +2718,44 @@ static void DrawMiiStats() {
                                        (gBlSel == 8) ? "Coord" : "Pocket";
                 FillRect(panelX+2, panelTop, panelW-4, PK_HDR_H, {28,28,28,255});
                 DrawRect(panelX+2, panelTop, panelW-4, PK_HDR_H, COL_BORDER);
-                std::string hdrStr = std::string("  ") + slotName + "  —  select item";
+                std::string hdrStr = std::string("  ") + slotName;
+                if (!gBlFilter.empty()) hdrStr += "  —  filter: \"" + gBlFilter + "\"";
+                else                    hdrStr += "  —  select item";
                 int hw=0,hh=0; if(fsm) TTF_SizeUTF8(fsm, hdrStr.c_str(), &hw, &hh);
-                DrawText(hdrStr, panelX+10, panelTop+(PK_HDR_H-hh)/2, COL_GOLD);
-                std::string cntStr = std::to_string(total) + " items";
+                DrawText(hdrStr, panelX+10, panelTop+(PK_HDR_H-hh)/2,
+                         gBlFilter.empty() ? COL_GOLD : COL_ACCENT);
+                std::string cntStr = gBlFilter.empty()
+                    ? (std::to_string(total) + " items")
+                    : (std::to_string(total) + " of " + std::to_string(totalAll) + " items");
                 int cw=0,cntH=0; if(fsm) TTF_SizeUTF8(fsm, cntStr.c_str(), &cw, &cntH);
                 DrawText(cntStr, panelX+panelW-cw-14, panelTop+(PK_HDR_H-cntH)/2, COL_DIM);
 
-                // Item list
+                // Item list (uses filtered indices)
                 for (int i = 0; i < pkVis; i++) {
-                    int idx = gBlPickerScroll + i;
-                    if (idx >= total) break;
-                    bool sel = (idx == gBlPickerSel);
+                    int filtIdx = gBlPickerScroll + i;
+                    if (filtIdx >= total) break;
+                    int idx = gBlFiltered[filtIdx];
+                    bool sel = (filtIdx == gBlPickerSel);
                     int ry = listTop + i * PK_ROW_H;
-                    HitAdd(panelX+2, ry, panelW-4, PK_ROW_H-1, TBLPickSel, idx);
                     FillRect(panelX+2, ry, panelW-4, PK_ROW_H-1, sel?COL_SEL:COL_BG);
                     if (sel) DrawRect(panelX+2, ry, panelW-4, PK_ROW_H-1, COL_GOLD);
+                    // Big "select" button on the left — same size as in the main belongings list
+                    const int SEL_W = 18;
+                    int selBoxX = panelX + 8;
+                    int selBoxY = ry + (PK_ROW_H - SEL_W)/2;
+                    FillRect(selBoxX, selBoxY, SEL_W, SEL_W, sel?COL_GOLD:COL_PANEL);
+                    DrawRect(selBoxX, selBoxY, SEL_W, SEL_W, sel?COL_GOLD:COL_BORDER);
+                    if (sel) FillRect(selBoxX+5, selBoxY+5, SEL_W-10, SEL_W-10, {10,10,10,255});
+                    HitAdd(panelX+2, ry, 110, PK_ROW_H-1, TBLPickSel, filtIdx);
                     int lw=0,lh=0; if(fsm) TTF_SizeUTF8(fsm, gBlPickerLabels[idx], &lw, &lh);
-                    DrawText(gBlPickerLabels[idx], panelX+14, ry+(PK_ROW_H-lh)/2,
+                    DrawText(gBlPickerLabels[idx], panelX+44, ry+(PK_ROW_H-lh)/2,
                              sel ? COL_GOLD : COL_TEXT);
+                }
+
+                // No-results hint
+                if (total == 0) {
+                    DrawTextC("no matches — press X to clear filter",
+                              panelX+panelW/2, listTop+listH/2, COL_DIM, Font::Md);
                 }
 
                 // Scrollbar
@@ -2394,6 +2764,14 @@ static void DrawMiiStats() {
                     int sbY = listTop + listH * gBlPickerScroll / total;
                     FillRect(panelX+panelW-5, sbY, 3, sbH, COL_BORDER);
                 }
+
+                // Footer hint
+                int footY = panelTop + panelH - PK_FOOT_H;
+                FillRect(panelX+2, footY, panelW-4, PK_FOOT_H, {18,18,18,255});
+                const char* foot = gBlFilter.empty()
+                    ? "A  confirm    -  search    B  cancel"
+                    : "A  confirm    -  edit filter    X  clear filter    B  cancel";
+                DrawTextC(foot, panelX+panelW/2, footY+PK_FOOT_H/2, COL_DIM, Font::Sm);
             } else {
                 // ── Normal Belongings list ───────────────────────────────────────
                 const int BL_VIS = panelH / BL_ROW_H;
@@ -2427,7 +2805,15 @@ static void DrawMiiStats() {
                     } else {
                         FillRect(panelX+2, ry, panelW-4, BL_ROW_H-1, sel?COL_SEL:COL_BG);
                         if (sel) DrawRect(panelX+2, ry, panelW-4, BL_ROW_H-1, COL_GOLD);
-                        HitAdd(panelX+2, ry, panelW-4, BL_ROW_H-1, TBLSel, itemSel);
+                        // Big "select" button on the left — easy to hit with a finger.
+                        // Right ~75% of the row stays clear so drag-to-scroll works.
+                        const int SEL_W = 22;
+                        int selBoxX = panelX + 8;
+                        int selBoxY = ry + (BL_ROW_H - SEL_W)/2;
+                        FillRect(selBoxX, selBoxY, SEL_W, SEL_W, sel?COL_GOLD:COL_PANEL);
+                        DrawRect(selBoxX, selBoxY, SEL_W, SEL_W, sel?COL_GOLD:COL_BORDER);
+                        if (sel) FillRect(selBoxX+6, selBoxY+6, SEL_W-12, SEL_W-12, {10,10,10,255});
+                        HitAdd(panelX+2, ry, 110, BL_ROW_H-1, TBLSel, itemSel);
 
                         if (itemSel < 8) {
                             // Cloth worn slot — label gray, item white, color accent
@@ -2438,10 +2824,10 @@ static void DrawMiiStats() {
                             for (int k = 0; k < BL_CLOTH_COUNT; k++)
                                 if (BL_CLOTH_ITEMS[k].nameHash == ih) { cc = BL_CLOTH_ITEMS[k].colorCount; break; }
                             int pw=0,ph=0; if(fsm) TTF_SizeUTF8(fsm, ws.name, &pw, &ph);
-                            DrawText(ws.name, panelX+12, ry+(BL_ROW_H-ph)/2, COL_DIM);
+                            DrawText(ws.name, panelX+50, ry+(BL_ROW_H-ph)/2, COL_DIM);
                             const char* lbl = BlClothLabel(ih);
                             int lw=0,lh=0; if(fsm) TTF_SizeUTF8(fsm,lbl,&lw,&lh);
-                            DrawText(lbl, panelX+14+pw, ry+(BL_ROW_H-lh)/2, sel?COL_GOLD:COL_TEXT);
+                            DrawText(lbl, panelX+50+pw, ry+(BL_ROW_H-lh)/2, sel?COL_GOLD:COL_TEXT);
                             std::string cv = "color " + std::to_string(ci+1) + "/" + std::to_string(cc);
                             int vw=0,vh=0; if(fsm) TTF_SizeUTF8(fsm,cv.c_str(),&vw,&vh);
                             DrawText(cv, panelX+panelW-vw-14, ry+(BL_ROW_H-vh)/2, sel?COL_ACCENT:COL_TEXT);
@@ -2454,10 +2840,10 @@ static void DrawMiiStats() {
                                 if (BL_COORD_ITEMS[k].keyHash == ih) { cc = BL_COORD_ITEMS[k].colorCount; break; }
                             const char* pfx = "Coord";
                             int pw=0,ph=0; if(fsm) TTF_SizeUTF8(fsm,pfx,&pw,&ph);
-                            DrawText(pfx, panelX+12, ry+(BL_ROW_H-ph)/2, COL_DIM);
+                            DrawText(pfx, panelX+50, ry+(BL_ROW_H-ph)/2, COL_DIM);
                             const char* lbl = BlCoordLabel(ih);
                             int lw=0,lh=0; if(fsm) TTF_SizeUTF8(fsm,lbl,&lw,&lh);
-                            DrawText(lbl, panelX+14+pw, ry+(BL_ROW_H-lh)/2, sel?COL_GOLD:COL_TEXT);
+                            DrawText(lbl, panelX+50+pw, ry+(BL_ROW_H-lh)/2, sel?COL_GOLD:COL_TEXT);
                             std::string cv = "color " + std::to_string(ci+1) + "/" + std::to_string(cc);
                             int vw=0,vh=0; if(fsm) TTF_SizeUTF8(fsm,cv.c_str(),&vw,&vh);
                             DrawText(cv, panelX+panelW-vw-14, ry+(BL_ROW_H-vh)/2, sel?COL_ACCENT:COL_TEXT);
@@ -2468,16 +2854,16 @@ static void DrawMiiStats() {
                             uint32_t sid = SaveEditor::GetUIntAt(gMiiSav, BL_H_GOODS_ID, ai);
                             std::string pfx = "Pocket " + std::to_string(slot+1);
                             int pw=0,ph=0; if(fsm) TTF_SizeUTF8(fsm,pfx.c_str(),&pw,&ph);
-                            DrawText(pfx, panelX+12, ry+(BL_ROW_H-ph)/2, COL_DIM);
+                            DrawText(pfx, panelX+50, ry+(BL_ROW_H-ph)/2, COL_DIM);
                             const char* lbl = BlGoodsLabel(sid);
                             int lw=0,lh=0; if(fsm) TTF_SizeUTF8(fsm,lbl,&lw,&lh);
-                            DrawText(lbl, panelX+14+pw, ry+(BL_ROW_H-lh)/2, sel?COL_GOLD:COL_TEXT);
+                            DrawText(lbl, panelX+50+pw, ry+(BL_ROW_H-lh)/2, sel?COL_GOLD:COL_TEXT);
                         } else {
                             // Action row
                             int act = itemSel - 21;
                             const char* lbl = ACT_LABELS[act];
                             int lw=0,lh=0; if(fsm) TTF_SizeUTF8(fsm,lbl,&lw,&lh);
-                            DrawText(lbl, panelX+12, ry+(BL_ROW_H-lh)/2, sel?COL_TEXT:COL_DIM);
+                            DrawText(lbl, panelX+50, ry+(BL_ROW_H-lh)/2, sel?COL_TEXT:COL_DIM);
                         }
                     }
                 }
@@ -2490,6 +2876,108 @@ static void DrawMiiStats() {
             }
             if (!gMiiStatsMsg.empty())
                 DrawTextC(gMiiStatsMsg, panelX+panelW/2, panelTop+panelH-22, gMiiStatsMsgCol, Font::Sm);
+        } else if (gMiiStatsSubTab == MiiStatsSubTab::Habits) {
+            // ── Habits panel ────────────────────────────────────────────────────
+            EnsureHabitHashes();
+            TTF_Font* fsm = GetFont(Font::Sm);
+            TTF_Font* fmd = GetFont(Font::Md);
+
+            // Category strip (top row)
+            const int CAT_H = 34, CAT_GAP = 4;
+            int catStripY = panelTop;
+            int catX0 = panelX + 8;
+            int catW  = (panelW - 16 - (HABIT_CAT_COUNT-1)*CAT_GAP) / HABIT_CAT_COUNT;
+            for (int c = 0; c < HABIT_CAT_COUNT; c++) {
+                int cx = catX0 + c*(catW+CAT_GAP);
+                bool sel = (c == gHabitCatSel);
+                // Indicator: gold dot if any habit is currently active in this category
+                bool catHasActive = false;
+                for (int i = 0; i < HABIT_COUNT; i++) {
+                    if (HABITS[i].category != c) continue;
+                    if (SaveEditor::GetBoolAt(gMiiSav, gHabitHashes[i].isChecked, miiSlotIdx, false)) {
+                        catHasActive = true; break;
+                    }
+                }
+                HitAdd(cx, catStripY, catW, CAT_H, TSelHabitCat, c);
+                FillRect(cx, catStripY, catW, CAT_H, sel?COL_SEL:COL_PANEL);
+                DrawRect(cx, catStripY, catW, CAT_H, sel?COL_GOLD:COL_BORDER);
+                DrawTextC(HABIT_CAT_LABEL[c], cx+catW/2, catStripY+CAT_H/2,
+                          sel?COL_GOLD:(catHasActive?COL_ACCENT:COL_DIM), Font::Sm);
+                if (catHasActive) {
+                    int dotX = cx+catW-9, dotY = catStripY+5;
+                    FillRect(dotX, dotY, 4, 4, COL_GOLD);
+                }
+            }
+
+            // Item list (selected category)
+            std::vector<int> items = HabitsInCategory(gHabitCatSel);
+            int listTop = catStripY + CAT_H + 8;
+            int listH   = panelH - (CAT_H + 8) - 36;
+            const int ROW_H = 34;
+            int visRows = listH / ROW_H;
+            if ((int)items.size() <= visRows) gHabitScroll = 0;
+            else {
+                if (gHabitItemSel < gHabitScroll) gHabitScroll = gHabitItemSel;
+                if (gHabitItemSel >= gHabitScroll+visRows) gHabitScroll = gHabitItemSel-visRows+1;
+            }
+            if (gHabitItemSel >= (int)items.size()) gHabitItemSel = std::max(0,(int)items.size()-1);
+
+            for (int i = 0; i < visRows && i + gHabitScroll < (int)items.size(); i++) {
+                int idx = items[i + gHabitScroll];
+                bool selRow = (i + gHabitScroll == gHabitItemSel);
+                int ry = listTop + i*ROW_H;
+                bool isOwn     = SaveEditor::GetBoolAt(gMiiSav, gHabitHashes[idx].isOwn,     miiSlotIdx, false);
+                bool isChecked = SaveEditor::GetBoolAt(gMiiSav, gHabitHashes[idx].isChecked, miiSlotIdx, false);
+
+                // Row backdrop (no hit — the two boxes on the left are the only tap targets)
+                FillRect(panelX+8, ry, panelW-16, ROW_H-2, selRow?COL_SEL:COL_BG);
+                if (selRow) DrawRect(panelX+8, ry, panelW-16, ROW_H-2, COL_GOLD);
+
+                // Big touch zones — 50px wide, full row height — with the visible 22×22 box centered.
+                int rcy = ry + ROW_H/2;
+                const int BOX_VIS = 22;          // visible box edge
+                const int HIT_W   = 50;          // touch hit width per box
+
+                // Active (gold) box
+                int aZoneX = panelX + 8;
+                int aBoxX  = aZoneX + (HIT_W - BOX_VIS)/2;
+                HitAdd(aZoneX, ry, HIT_W, ROW_H-2, TSelHabitItem, i + gHabitScroll);
+                FillRect(aBoxX, rcy-BOX_VIS/2, BOX_VIS, BOX_VIS, isChecked?COL_GOLD:COL_PANEL);
+                DrawRect(aBoxX, rcy-BOX_VIS/2, BOX_VIS, BOX_VIS, isChecked?COL_GOLD:COL_BORDER);
+                if (isChecked) FillRect(aBoxX+6, rcy-5, 10, 10, {10,10,10,255});
+
+                // Owned (blue) box
+                const SDL_Color C_OWN = {90,140,200,255};
+                int oZoneX = aZoneX + HIT_W + 4;
+                int oBoxX  = oZoneX + (HIT_W - BOX_VIS)/2;
+                HitAdd(oZoneX, ry, HIT_W, ROW_H-2, TToggleHabitOwn, i + gHabitScroll);
+                FillRect(oBoxX, rcy-BOX_VIS/2, BOX_VIS, BOX_VIS, isOwn?C_OWN:COL_PANEL);
+                DrawRect(oBoxX, rcy-BOX_VIS/2, BOX_VIS, BOX_VIS, isOwn?C_OWN:COL_BORDER);
+                if (isOwn) FillRect(oBoxX+6, rcy-5, 10, 10, {10,10,10,255});
+
+                // Label
+                SDL_Color lblCol = isChecked ? COL_GOLD : (isOwn ? COL_TEXT : COL_DIM);
+                DrawText(HABITS[idx].label, oZoneX + HIT_W + 8, ry+(ROW_H-14)/2-2, lblCol, Font::Sm);
+            }
+
+            if (items.empty()) {
+                DrawTextC("no habits in this category", panelX+panelW/2, listTop+listH/2, COL_DIM, Font::Md);
+            }
+
+            // Scrollbar
+            if ((int)items.size() > visRows) {
+                int sbH = listH * visRows / (int)items.size();
+                int sbY = listTop + listH * gHabitScroll / (int)items.size();
+                FillRect(panelX+panelW-5, sbY, 3, sbH, COL_BORDER);
+            }
+
+            // Footer hint inside panel
+            const char* hint = "A  toggle active    X  toggle owned    -  clear category    Left/Right  switch category";
+            DrawTextC(hint, panelX+panelW/2, panelTop+panelH-14, COL_DIM, Font::Sm);
+
+            (void)fmd;
+            if (!gMiiStatsMsg.empty())
+                DrawTextC(gMiiStatsMsg, panelX+panelW/2, panelTop+panelH-32, gMiiStatsMsgCol, Font::Sm);
         } else {
             // Stats editor
             const auto& fd = MII_STATS_FIELDS[gMiiStatsFieldSel];
@@ -2765,6 +3253,108 @@ static void DrawThumbTip() {
     DrawTextC(label, SCREEN_W/2, by + btnH/2, btnText, Font::Md);
     SDL_RenderPresent(gRen);
 }
+
+// ── Background-removal modal ───────────────────────────────────────────────
+
+static void TConfirmBgRemove(int);
+static void TCancelBgRemove(int) { gShowBgRemovePrompt = false; }
+
+static void DrawBgRemovePrompt() {
+    HitClear();
+    SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
+    SDL_RenderClear(gRen);
+    const int mW = 580, mH = 230;
+    int mx = (SCREEN_W - mW) / 2, my = (SCREEN_H - mH) / 2;
+    FillRect(mx, my, mW, mH, {18, 22, 30, 255});
+    DrawRect(mx, my, mW, mH, COL_ACCENT);
+    DrawTextC("Remove Background?", SCREEN_W/2, my + 36, COL_ACCENT, Font::Lg);
+    DrawTextC("The selected texture will be modified in-place.", SCREEN_W/2, my + 88, COL_TEXT, Font::Md);
+    DrawTextC("This may take up to 30 seconds.", SCREEN_W/2, my + 114, COL_DIM, Font::Sm);
+    const int bW = 180, bH = 46, gap = 28;
+    int by2 = my + mH - 62;
+    HitAdd(mx + mW/2 - bW - gap/2, by2, bW, bH, TConfirmBgRemove, 0);
+    FillRect(mx + mW/2 - bW - gap/2, by2, bW, bH, COL_SEL);
+    DrawRect(mx + mW/2 - bW - gap/2, by2, bW, bH, COL_ACCENT);
+    DrawTextC("A  Confirm", mx + mW/2 - gap/2 - bW/2, by2 + bH/2, COL_ACCENT, Font::Md);
+    HitAdd(mx + mW/2 + gap/2, by2, bW, bH, TCancelBgRemove, 0);
+    FillRect(mx + mW/2 + gap/2, by2, bW, bH, COL_SEL);
+    DrawRect(mx + mW/2 + gap/2, by2, bW, bH, {90,140,200,255});
+    DrawTextC("B  Cancel", mx + mW/2 + gap/2 + bW/2, by2 + bH/2, {90,140,200,255}, Font::Md);
+    DrawFooter("A  confirm    B  cancel");
+    SDL_RenderPresent(gRen);
+}
+
+static void DrawBgRemoving() {
+    SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
+    SDL_RenderClear(gRen);
+    DrawTextC("Removing background...", SCREEN_W/2, SCREEN_H/2 - 18, COL_ACCENT, Font::Lg);
+    DrawTextC("This may take up to 30 seconds.", SCREEN_W/2, SCREEN_H/2 + 22, COL_DIM, Font::Md);
+    SDL_RenderPresent(gRen);
+}
+
+struct BgAnimState { int frame = 0; };
+
+static void OnBgRemoveProgress(int done, int total, void* ud) {
+    static const char kSpinner[] = "|/-\\";
+    auto* s = static_cast<BgAnimState*>(ud);
+    s->frame++;
+    SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
+    SDL_RenderClear(gRen);
+    DrawTextC("Removing background...", SCREEN_W/2, SCREEN_H/2 - 60, COL_ACCENT, Font::Lg);
+    // Spinner
+    char spin[2] = {kSpinner[s->frame % 4], '\0'};
+    DrawTextC(spin, SCREEN_W/2, SCREEN_H/2 - 10, {90,140,200,255}, Font::Lg);
+    // Progress bar
+    const int barW = 480, barH = 12;
+    int barX = (SCREEN_W - barW) / 2, barY = SCREEN_H/2 + 20;
+    float pct = (total > 0) ? (float)done / total : 0.f;
+    FillRect(barX, barY, barW, barH, COL_PANEL);
+    DrawRect(barX, barY, barW, barH, COL_BORDER);
+    if (pct > 0.f) FillRect(barX+1, barY+1, (int)((barW-2)*pct), barH-2, {90,140,200,255});
+    DrawTextC("This may take up to 30 seconds.", SCREEN_W/2, SCREEN_H/2 + 52, COL_DIM, Font::Md);
+    SDL_RenderPresent(gRen);
+}
+
+static void TConfirmBgRemove(int) {
+    gShowBgRemovePrompt = false;
+    if (gEntries.empty()) return;
+    const auto& e = gEntries[gEntrySel];
+
+    // Show loading screen before blocking inference
+    DrawBgRemoving();
+
+    // Decode current texture to sRGB
+    RgbaImage img;
+    std::string err = TextureProcessor::DecodeFile(e.ugctexPath, img);
+    if (!err.empty()) { gOnSwitchMsg = err; gOnSwitchMsgCol = COL_RED; return; }
+
+    // Run u2netp inference with animated progress
+    BgAnimState bgAnim{};
+    err = U2Net::RemoveBackground(img, kBgModelPath, OnBgRemoveProgress, &bgAnim);
+    if (!err.empty()) { gOnSwitchMsg = "BG remove: " + err; gOnSwitchMsgCol = COL_RED; return; }
+
+    // Re-encode and overwrite files on disk
+    TextureProcessor::ImportOptions opts;
+    opts.destStem           = e.directory() + "/" + e.stem;
+    opts.writeCanvas        = e.hasCanvas();
+    opts.writeThumb         = e.hasThumb();
+    opts.thumbPath          = e.thumbPath;
+    opts.noSrgb             = false;
+    opts.originalUgctexPath = e.ugctexPath;
+    err = TextureProcessor::ImportRgbaImage(img, opts);
+    if (!err.empty()) { gOnSwitchMsg = err; gOnSwitchMsgCol = COL_RED; return; }
+
+    // Reload preview and mark dirty
+    gEntries = UgcScanner::Scan(SAVE_UGC_PATH);
+    MiiManager::LoadUgcNames();
+    RebuildUgcFilter();
+    if (gEntrySel >= (int)gEntries.size()) gEntrySel = (int)gEntries.size() - 1;
+    if (!gEntries.empty()) LoadPreview(gEntries[gEntrySel]);
+    gUgcDirty = true;
+    gOnSwitchMsg = "Background removed — save or discard on exit";
+    gOnSwitchMsgCol = COL_GREEN;
+}
+
 static void DrawBackPrompt() {
     HitClear();
     SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
@@ -2778,8 +3368,8 @@ static void DrawBackPrompt() {
     const int bW=180, bH=48, gap=30, bOff=90;
     const char* yesLbl = gBackPromptToUserPick ? "A  Save & Back" : "A  Save & Exit";
     const char* noLbl  = gBackPromptToUserPick ? "B  Discard & Back" : "B  Discard & Exit";
-    const char* footer = gBackPromptToUserPick ? "A  save & back    B  discard & back"
-                                               : "A  save & exit    B  discard & exit";
+    const char* footer = gBackPromptToUserPick ? "A  save & back    B  discard & back    X  cancel"
+                                               : "A  save & exit    B  discard & exit    X  cancel";
     HitAdd(mx+mW/2-bW-gap/2, my+mH-bOff, bW, bH, TAckBackYes, 0);
     FillRect(mx+mW/2-bW-gap/2, my+mH-bOff, bW, bH, COL_SEL);
     DrawRect(mx+mW/2-bW-gap/2, my+mH-bOff, bW, bH, COL_GREEN);
@@ -2924,7 +3514,7 @@ static void ApplyTouchScroll(float ddx, float ddy) {
                 const int listTop  = panelTop + PK_HDR_H;
                 const int listH    = panelH - PK_HDR_H;
                 if (s_touch.startY < listTop || s_touch.startY >= listTop + listH) return;
-                const int total = (int)gBlPickerHashes.size();
+                const int total = (int)gBlFiltered.size();
                 s_touch.accumY += ddy;
                 {
                     const int pkVis = listH / 30;
@@ -3022,9 +3612,12 @@ static void ProcessTouch(int tx, int ty, u64& kDown) {
             int imgH = PREVIEW_H - 28 - kBtnSlot;
             int cx   = PREVIEW_X + PREVIEW_W/2;
             int btnY = imgY + imgH + kBtnGap;
-            const int btnW=220, btnGap=24;
-            if (hit(cx-btnW-btnGap/2, btnY, btnW, kBtnH)) kDown |= HidNpadButton_A;
-            if (hit(cx+btnGap/2,      btnY, btnW, kBtnH)) kDown |= HidNpadButton_Y;
+            const int btnW=200, btnGap=16, bgSep=48;
+            int bx0  = cx - (3*btnW + btnGap + btnGap + bgSep)/2;
+            int bxBg = bx0 + 2*btnW + btnGap + bgSep;
+            if (hit(bx0,             btnY, btnW, kBtnH)) kDown |= HidNpadButton_A;
+            if (hit(bx0+btnW+btnGap, btnY, btnW, kBtnH)) kDown |= HidNpadButton_Y;
+            if (hit(bxBg,            btnY, btnW, kBtnH)) kDown |= HidNpadButton_X;
         }
     }
 }
@@ -3033,6 +3626,7 @@ static void ProcessTouch(int tx, int ty, u64& kDown) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 int main(int,char**) {
+    romfsInit();
     nifmInitialize(NifmServiceType_User);
     socketInitialize(socketGetDefaultInitConfig());
     SDL_Init(SDL_INIT_VIDEO|SDL_INIT_JOYSTICK);
@@ -3196,7 +3790,43 @@ int main(int,char**) {
             break;
 
         case Screen::Settings:
-            if (gShowFileBrowser) {
+            if (gShowRestorePicker) {
+                const int RVIS = 7;
+                if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp)) {
+                    if (gRestoreSel > 0) { gRestoreSel--; if (gRestoreSel < gRestoreScroll) gRestoreScroll = gRestoreSel; }
+                }
+                if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown)) {
+                    if (gRestoreSel+1 < (int)gRestoreList.size()) {
+                        gRestoreSel++;
+                        if (gRestoreSel >= gRestoreScroll+RVIS) gRestoreScroll = gRestoreSel-RVIS+1;
+                    }
+                }
+                if (kDown&HidNpadButton_B) { gShowRestorePicker = false; }
+                if (kDown&HidNpadButton_A && !gRestoreList.empty()) {
+                    if (gUsers.empty()) {
+                        gSettingsMsg = "No user selected."; gSettingsMsgCol = COL_RED;
+                        gShowRestorePicker = false;
+                    } else {
+                        std::string merr = SaveMount::Mount(gUsers[gUserSel].uid);
+                        if (!merr.empty()) {
+                            gSettingsMsg = "Mount failed: " + merr; gSettingsMsgCol = COL_RED;
+                            gShowRestorePicker = false;
+                        } else {
+                            SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
+                            SDL_RenderClear(gRen);
+                            DrawTextC("Restoring backup...", SCREEN_W/2, SCREEN_H/2 - 18, COL_ACCENT, Font::Lg);
+                            DrawTextC("Please wait.", SCREEN_W/2, SCREEN_H/2 + 22, COL_DIM, Font::Md);
+                            SDL_RenderPresent(gRen);
+                            std::string rerr = BackupService::RestoreBackup(gRestoreList[gRestoreSel], "tomodata:/");
+                            SaveMount::Commit();
+                            SaveMount::Unmount();
+                            gShowRestorePicker = false;
+                            if (rerr.empty()) { gSettingsMsg = "Backup restored successfully."; gSettingsMsgCol = COL_GREEN; }
+                            else              { gSettingsMsg = "Restore failed: " + rerr;       gSettingsMsgCol = COL_RED; }
+                        }
+                    }
+                }
+            } else if (gShowFileBrowser) {
                 int pvis = (SCREEN_H - 148) / 26;
                 if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp)) {
                     if (gBrowseSel > 0) { gBrowseSel--; if (gBrowseSel < gBrowseScroll) gBrowseScroll = gBrowseSel; }
@@ -3237,7 +3867,13 @@ int main(int,char**) {
                 if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))
                     gSettingsSel = std::max(0, gSettingsSel - 1);
                 if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
-                    gSettingsSel = std::min(1, gSettingsSel + 1);
+                    gSettingsSel = std::min(2, gSettingsSel + 1);
+                if (gSettingsSel == 2 && kDown&HidNpadButton_A) {
+                    gRestoreList   = BackupService::ListBackups();
+                    gRestoreSel    = 0;
+                    gRestoreScroll = 0;
+                    gShowRestorePicker = true;
+                }
                 if (gSettingsSel == 0 && kDown&HidNpadButton_A) {
                     gBrowseForExportDir = true; gBrowseForMii = false;
                     std::string sp = gExportPath;
@@ -3293,6 +3929,8 @@ int main(int,char**) {
                 HttpServer::Start(HTTP_PORT, SAVE_UGC_PATH);
                 gEntries=UgcScanner::Scan(SAVE_UGC_PATH);
                 MiiManager::LoadUgcNames();
+                gUgcFilter.clear();
+                RebuildUgcFilter();
                 gMiis=MiiManager::ListMiis();
                 gEntrySel=0; gEntryScroll=0;
                 gOnSwitchMsg="";
@@ -3312,8 +3950,24 @@ int main(int,char**) {
                 if (!importErr.empty()) LogERR("Import: "+importErr);
                 else { LogOK("Import OK"); gEntries=UgcScanner::Scan(SAVE_UGC_PATH);
                        MiiManager::LoadUgcNames();
+                       RebuildUgcFilter();
+                       if (!gEntries.empty()) LoadPreview(gEntries[gEntrySel < (int)gEntries.size() ? gEntrySel : 0]); }
+            }
+            if (HttpServer::HasPendingBgRemove()) {
+                auto job = HttpServer::TakePendingBgRemove();
+                DrawBgRemoving();
+                RgbaImage img;
+                std::string bgErr = TextureProcessor::DecodeFile(job.ugctexPath, img, false);
+                BgAnimState bgAnim{};
+                if (bgErr.empty()) bgErr = U2Net::RemoveBackground(img, kBgModelPath, OnBgRemoveProgress, &bgAnim);
+                if (bgErr.empty()) bgErr = TextureProcessor::ImportRgbaImage(img, job.opts);
+                HttpServer::FinishBgRemove(bgErr);
+                if (!bgErr.empty()) LogERR("BgRemove: "+bgErr);
+                else { LogOK("BgRemove OK"); gEntries=UgcScanner::Scan(SAVE_UGC_PATH);
+                       MiiManager::LoadUgcNames();
+                       RebuildUgcFilter();
                        if (!gEntries.empty()) LoadPreview(gEntries[gEntrySel < (int)gEntries.size() ? gEntrySel : 0]);
-                       if (!gThumbTipSeen) { gShowThumbTip=true; gThumbTipCountdown=120; } }
+                       gUgcDirty=true; }
             }
             if (HttpServer::HasPendingCommit()) {
                 HttpServer::ClearPendingCommit();
@@ -3362,10 +4016,18 @@ int main(int,char**) {
                 if (gShowSaveWarning) DrawSaveWarning();
                 break;
             }
+            // Background-removal confirm modal
+            if (gShowBgRemovePrompt) {
+                if (kDown & HidNpadButton_A) TConfirmBgRemove(0);
+                if (kDown & HidNpadButton_B) TCancelBgRemove(0);
+                if (gShowBgRemovePrompt) DrawBgRemovePrompt();
+                break;
+            }
             // Back-prompt modal
             if (gShowBackPrompt) {
                 if (kDown & HidNpadButton_A) TAckBackYes(0);
                 if (kDown & HidNpadButton_B) TAckBackNo(0);
+                if (kDown & HidNpadButton_X) gShowBackPrompt = false;
                 if (gShowBackPrompt) DrawBackPrompt();
                 break;
             }
@@ -3441,49 +4103,39 @@ int main(int,char**) {
                 if (kDown&HidNpadButton_L){
                     gOnSwitchMode=OnSwitchMode::WebUI; gOnSwitchMsg=""; break;
                 }
-                if (kNav&HidNpadButton_ZL && !gEntries.empty()) {
-                    gEntrySel = (gEntrySel>0) ? gEntrySel-1 : (int)gEntries.size()-1;
-                    if(gEntrySel<gEntryScroll) gEntryScroll=gEntrySel;
-                    if(gEntrySel>=(int)gEntries.size()-1) gEntryScroll=std::max(0,(int)gEntries.size()-VISIBLE);
+                // Filtered-list navigation helpers (gEntrySel is real index, gEntryScroll is filtered position)
+                auto navPrev = [&](){
+                    if (gFilteredEntries.empty()) return;
+                    int p = UgcFilterPos(gEntrySel);
+                    if (p < 0) p = 0;
+                    p = (p > 0) ? p - 1 : (int)gFilteredEntries.size() - 1;
+                    gEntrySel = gFilteredEntries[p];
+                    if (p < gEntryScroll) gEntryScroll = p;
+                    if (p >= gEntryScroll + VISIBLE) gEntryScroll = p - VISIBLE + 1;
                     LoadPreview(gEntries[gEntrySel]);
-                }
-                if (kNav&HidNpadButton_ZR && !gEntries.empty()) {
-                    gEntrySel = (gEntrySel+1<(int)gEntries.size()) ? gEntrySel+1 : 0;
-                    if(gEntrySel>=gEntryScroll+VISIBLE) gEntryScroll=gEntrySel-VISIBLE+1;
-                    if(gEntrySel==0) gEntryScroll=0;
+                };
+                auto navNext = [&](){
+                    if (gFilteredEntries.empty()) return;
+                    int p = UgcFilterPos(gEntrySel);
+                    if (p < 0) p = 0;
+                    p = (p + 1 < (int)gFilteredEntries.size()) ? p + 1 : 0;
+                    gEntrySel = gFilteredEntries[p];
+                    if (p >= gEntryScroll + VISIBLE) gEntryScroll = p - VISIBLE + 1;
+                    if (p < gEntryScroll) gEntryScroll = p;
                     LoadPreview(gEntries[gEntrySel]);
+                };
+                if ((kNav&HidNpadButton_ZL) || (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))) navPrev();
+                if ((kNav&HidNpadButton_ZR) || (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))) navNext();
+                if (kDown&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft) && !gFilteredEntries.empty()){
+                    gEntrySel = gFilteredEntries.front(); gEntryScroll = 0; LoadPreview(gEntries[gEntrySel]);
                 }
-                if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp)){
-                    if (!gEntries.empty()) {
-                        gEntrySel = (gEntrySel>0) ? gEntrySel-1 : (int)gEntries.size()-1;
-                        if(gEntrySel<gEntryScroll) gEntryScroll=gEntrySel;
-                        if(gEntrySel>=(int)gEntries.size()-1) gEntryScroll=std::max(0,(int)gEntries.size()-VISIBLE);
-                        LoadPreview(gEntries[gEntrySel]);
-                    }
-                }
-                if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown)){
-                    if (!gEntries.empty()) {
-                        gEntrySel = (gEntrySel+1<(int)gEntries.size()) ? gEntrySel+1 : 0;
-                        if(gEntrySel>=gEntryScroll+VISIBLE) gEntryScroll=gEntrySel-VISIBLE+1;
-                        if(gEntrySel==0) gEntryScroll=0;
-                        LoadPreview(gEntries[gEntrySel]);
-                    }
-                }
-                if (kDown&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft) && !gEntries.empty()){
-                    gEntrySel=0; gEntryScroll=0; LoadPreview(gEntries[0]);
-                }
-                if (kDown&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight) && !gEntries.empty()){
-                    gEntrySel=(int)gEntries.size()-1;
-                    gEntryScroll=std::max(0,(int)gEntries.size()-VISIBLE);
+                if (kDown&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight) && !gFilteredEntries.empty()){
+                    gEntrySel = gFilteredEntries.back();
+                    gEntryScroll = std::max(0, (int)gFilteredEntries.size() - VISIBLE);
                     LoadPreview(gEntries[gEntrySel]);
                 }
                 if (kDown&HidNpadButton_Minus){
-                    gBrowseForExportDir=true; gBrowseForMii=false;
-                    struct stat _st; std::string _sp=gExportPath;
-                    if (stat(_sp.c_str(),&_st)!=0||!S_ISDIR(_st.st_mode)){
-                        size_t _p=_sp.rfind('/'); _sp=(_p&&_p!=std::string::npos)?_sp.substr(0,_p):"/";
-                    }
-                    BrowseRefresh(_sp); gShowFileBrowser=true;
+                    TUgcOpenSearch(0);
                 }
                 if (kDown&HidNpadButton_A){
                     gBrowseForMii=false; gBrowseForExportDir=false;
@@ -3505,6 +4157,16 @@ int main(int,char**) {
                         if(surf){IMG_SavePNG(surf,outPath.c_str());SDL_FreeSurface(surf);
                             gOnSwitchMsg="Exported to: "+outPath;gOnSwitchMsgCol=COL_GREEN;
                             LogOK("Exported to: "+outPath);}
+                    }
+                }
+                if (kDown&HidNpadButton_X && !gEntries.empty()) {
+                    FILE* mf = fopen(kBgModelPath, "rb");
+                    if (!mf) {
+                        gOnSwitchMsg = "u2netp.bin missing from romfs (corrupt install?)";
+                        gOnSwitchMsgCol = COL_RED;
+                    } else {
+                        fclose(mf);
+                        gShowBgRemovePrompt = true;
                     }
                 }
                 if (kDown&(HidNpadButton_B|HidNpadButton_Plus)){
@@ -3746,7 +4408,7 @@ int main(int,char**) {
                     gOnSwitchMsg=""; break;
                 }
                 // Y cycles Stats → Words → Relations → Social → Stats
-                if (kDown&HidNpadButton_Y) { gMiiStatsSubTab=(MiiStatsSubTab)(((int)gMiiStatsSubTab+1)%5); gSocialScroll=0; gBlPickerOpen=false; if(gMiiStatsSubTab!=MiiStatsSubTab::Social) gSocialExpanded=false; }
+                if (kDown&HidNpadButton_Y) { gMiiStatsSubTab=(MiiStatsSubTab)(((int)gMiiStatsSubTab+1)%MII_SUBTAB_COUNT); gSocialScroll=0; gBlPickerOpen=false; if(gMiiStatsSubTab!=MiiStatsSubTab::Social) gSocialExpanded=false; }
                 // X toggles global graph in Social sub-tab only
                 if (kDown&HidNpadButton_X && gMiiStatsSubTab==MiiStatsSubTab::Social) gSocialExpanded=!gSocialExpanded;
                 // ZL/ZR switch selected mii
@@ -3795,7 +4457,7 @@ int main(int,char**) {
                     // gMiiRelSel additionally clamped to valid range in draw phase
                 } else if (gMiiStatsSubTab==MiiStatsSubTab::Belongings) {
                     if (gBlPickerOpen) {
-                        int total = (int)gBlPickerHashes.size();
+                        int total = (int)gBlFiltered.size();
                         const int pk_vis_nav = (SCREEN_H - (SE_TOP_Y + 32) - 32 - 32) / 30;
                         auto pkScrollTo = [&]() {
                             if (gBlPickerSel < gBlPickerScroll) gBlPickerScroll = gBlPickerSel;
@@ -3823,6 +4485,17 @@ int main(int,char**) {
                         if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
                             { gBlSel = (gBlSel + 1 < BL_SEL_MAX) ? gBlSel + 1 : 0; blScrollTo(); }
                     }
+                } else if (gMiiStatsSubTab==MiiStatsSubTab::Habits) {
+                    int catSize = 0;
+                    for (int i = 0; i < HABIT_COUNT; i++) if (HABITS[i].category == gHabitCatSel) catSize++;
+                    if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))
+                        gHabitItemSel = (gHabitItemSel > 0) ? gHabitItemSel-1 : std::max(0, catSize-1);
+                    if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
+                        gHabitItemSel = (gHabitItemSel+1 < catSize) ? gHabitItemSel+1 : 0;
+                    if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))
+                        { gHabitCatSel = (gHabitCatSel>0) ? gHabitCatSel-1 : HABIT_CAT_COUNT-1; gHabitItemSel=0; gHabitScroll=0; }
+                    if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight))
+                        { gHabitCatSel = (gHabitCatSel+1<HABIT_CAT_COUNT) ? gHabitCatSel+1 : 0; gHabitItemSel=0; gHabitScroll=0; }
                 }
                 // Edit (Words sub-tab)
                 if (gMiiStatsSubTab==MiiStatsSubTab::Words && gMiiSav.loaded && !gMiis.empty() && gMiiStatsMiiSel<(int)gMiis.size()) {
@@ -3995,10 +4668,26 @@ int main(int,char**) {
                     };
 
                     if (gBlPickerOpen) {
-                        // A = confirm, B = cancel
-                        if (kDown&HidNpadButton_A) {
-                            applyPickerItem(gBlPickerHashes[gBlPickerSel]);
+                        // A = confirm, B = cancel, Y = search, X = clear filter
+                        if (kDown&HidNpadButton_A && !gBlFiltered.empty()) {
+                            int realIdx = gBlFiltered[std::max(0, std::min(gBlPickerSel, (int)gBlFiltered.size()-1))];
+                            applyPickerItem(gBlPickerHashes[realIdx]);
                             gBlPickerOpen = false;
+                        }
+                        if (kDown&HidNpadButton_Minus) {
+                            std::string q = ShowKeyboard("Filter items (substring, case-insensitive)", gBlFilter, 30);
+                            // lowercase
+                            for (auto& c : q) if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
+                            gBlFilter = q;
+                            BlRebuildFilter();
+                            gBlPickerSel = 0;
+                            gBlPickerScroll = 0;
+                        }
+                        if (kDown&HidNpadButton_X && !gBlFilter.empty()) {
+                            gBlFilter.clear();
+                            BlRebuildFilter();
+                            gBlPickerSel = 0;
+                            gBlPickerScroll = 0;
                         }
                     } else {
                         // A = open item picker
@@ -4073,6 +4762,63 @@ int main(int,char**) {
                             gMiiSavDirty = true;
                             gMiiStatsMsg = "All coordinates locked"; gMiiStatsMsgCol = COL_GREEN;
                         }
+                    }
+                }
+                // Edit (Habits sub-tab)
+                if (gMiiStatsSubTab==MiiStatsSubTab::Habits && gMiiSav.loaded && !gMiis.empty() && gMiiStatsMiiSel<(int)gMiis.size()) {
+                    EnsureHabitHashes();
+                    int miiIdx = gMiis[gMiiStatsMiiSel].slot - 1;
+                    std::vector<int> items = HabitsInCategory(gHabitCatSel);
+                    if (gHabitItemSel >= (int)items.size()) gHabitItemSel = std::max(0,(int)items.size()-1);
+
+                    // A: toggle active habit (radio: ensure exclusive within category)
+                    if (kDown&HidNpadButton_A && !items.empty()) {
+                        int chosen = items[gHabitItemSel];
+                        for (int idx : items) {
+                            bool active = (idx == chosen);
+                            SaveEditor::SetBoolAt(gMiiSav, gHabitHashes[idx].isChecked, miiIdx, active);
+                            if (active) {
+                                SaveEditor::SetBoolAt(gMiiSav, gHabitHashes[idx].isOwn, miiIdx, true);
+                                SaveEditor::SetEnumAt(gMiiSav, gHabitHashes[idx].state, miiIdx, gHabitStateOwnH);
+                            }
+                        }
+                        gMiiSavDirty = true;
+                        gMiiStatsMsg = std::string("Active: ") + HABITS[chosen].label;
+                        gMiiStatsMsgCol = COL_GREEN;
+                        gMiiStatsMsgFrames = 120; // ~2s at 60fps
+                    }
+
+                    // X: toggle owned (without affecting active selection unless un-owning the active one)
+                    if (kDown&HidNpadButton_X && !items.empty()) {
+                        int chosen = items[gHabitItemSel];
+                        bool isOwn = SaveEditor::GetBoolAt(gMiiSav, gHabitHashes[chosen].isOwn, miiIdx, false);
+                        if (isOwn) {
+                            uint32_t st = SaveEditor::GetEnumAt(gMiiSav, gHabitHashes[chosen].state, miiIdx, gHabitStateNeverOwnedH);
+                            SaveEditor::SetBoolAt(gMiiSav, gHabitHashes[chosen].isOwn, miiIdx, false);
+                            SaveEditor::SetBoolAt(gMiiSav, gHabitHashes[chosen].isChecked, miiIdx, false);
+                            if (st == gHabitStateOwnH)
+                                SaveEditor::SetEnumAt(gMiiSav, gHabitHashes[chosen].state, miiIdx, gHabitStateUnownH);
+                        } else {
+                            SaveEditor::SetBoolAt(gMiiSav, gHabitHashes[chosen].isOwn, miiIdx, true);
+                            SaveEditor::SetEnumAt(gMiiSav, gHabitHashes[chosen].state, miiIdx, gHabitStateOwnH);
+                        }
+                        gMiiSavDirty = true;
+                        gMiiStatsMsg = std::string(isOwn?"Removed: ":"Added: ") + HABITS[chosen].label;
+                        gMiiStatsMsgCol = COL_GREEN;
+                        gMiiStatsMsgFrames = 120;
+                    }
+
+                    // Minus: clear category (all habits in this category → NeverOwned)
+                    if (kDown&HidNpadButton_Minus && !items.empty()) {
+                        for (int idx : items) {
+                            SaveEditor::SetBoolAt(gMiiSav, gHabitHashes[idx].isChecked, miiIdx, false);
+                            SaveEditor::SetBoolAt(gMiiSav, gHabitHashes[idx].isOwn, miiIdx, false);
+                            SaveEditor::SetEnumAt(gMiiSav, gHabitHashes[idx].state, miiIdx, gHabitStateNeverOwnedH);
+                        }
+                        gMiiSavDirty = true;
+                        gMiiStatsMsg = std::string("Cleared: ") + HABIT_CAT_LABEL[gHabitCatSel];
+                        gMiiStatsMsgCol = COL_GREEN;
+                        gMiiStatsMsgFrames = 120;
                     }
                 }
                 // Edit field (Stats sub-tab only)
@@ -4292,5 +5038,6 @@ int main(int,char**) {
     SDL_DestroyWindow(win);
     IMG_Quit();
     SDL_Quit();
+    romfsExit();
     return 0;
 }

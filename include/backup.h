@@ -6,7 +6,6 @@
 #include <cstdint>
 
 #define BACKUP_ROOT    "/switch/TomoToolNX/Backup"
-#define BACKUP_IMPORTS "/switch/TomoToolNX/Backup/imports"
 
 
 namespace BackupService {
@@ -46,9 +45,13 @@ void DeleteOldestBackup();
 // Delete the entire backup root folder (save backups + imports).
 void DeleteBackup();
 
-// ── Per-import UGC backup ─────────────────────────────────────────────────────
+// ── Restore ───────────────────────────────────────────────────────────────────
 
-// Backs up ugctex/thumb/canvas for a single entry to BACKUP_IMPORTS/<nnn>/.
-std::string BackupEntry(const UgcTextureEntry& entry);
+// List all timestamped save backups, newest first (returns full paths).
+std::vector<std::string> ListBackups();
+
+// Synchronously copy backupPath over saveMountRoot.
+// Returns empty string on success, error message on failure.
+std::string RestoreBackup(const std::string& backupPath, const std::string& saveMountRoot);
 
 } // namespace BackupService

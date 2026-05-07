@@ -72,6 +72,10 @@ void     SetEnumAt  (SavFile& s, uint32_t h, int idx, uint32_t v);
 void     SetUInt64At(SavFile& s, uint32_t h, int idx, uint64_t v);
 int      ArraySize (const SavFile& s, uint32_t h);  // element count of any array entry
 
+// BoolArray (DT_BoolArray, bit-packed, 4-byte aligned)
+bool     GetBoolAt  (const SavFile& s, uint32_t h, int idx, bool def = false);
+void     SetBoolAt  (SavFile& s, uint32_t h, int idx, bool v);
+
 // Reads/writes EnumArray or UIntArray (identical 4-byte layout — game uses either).
 uint32_t GetAnyEnumAt(const SavFile& s, uint32_t h, int idx, uint32_t def = 0);
 void     SetAnyEnumAt(SavFile& s, uint32_t h, int idx, uint32_t v);

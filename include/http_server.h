@@ -62,6 +62,17 @@ ImportJob TakePendingImport();
 // Pass empty string on success, error message on failure.
 void FinishImport(const std::string& result);
 
+// ── BgRemove job (queued by server thread, executed by main thread) ──────────
+// Inference is blocking and must run on the main thread.
+struct BgRemoveJob {
+    std::string ugctexPath;
+    TextureProcessor::ImportOptions opts;
+};
+
+bool HasPendingBgRemove();
+BgRemoveJob TakePendingBgRemove();
+void FinishBgRemove(const std::string& result);
+
 // ── Activity log (ring buffer, read by main thread for on-screen display) ──
 struct LogEntry {
     std::string text;
