@@ -228,6 +228,7 @@ static void TSelHabitItem(int posInCat);
 static void TToggleHabitOwn(int posInCat);
 static void TBLSel(int idx);
 static void TBLPickSel(int idx);
+static void BlOpenPicker(int blSel, int miiIdx);
 static void TAckSaveWarning(int);
 static void TPlayerKbd(int);
 static void TMiiStatsKbd(int);
@@ -758,8 +759,17 @@ static void TSetSocialView(int v) {
     gSocialScroll = 0;
     if (gMiiStatsSubTab != MiiStatsSubTab::Social) gSocialExpanded = false;
 }
-static void TBLSel(int idx) { gBlSel = idx; }
-static void TBLPickSel(int idx) { if (idx >= 0 && idx < (int)gBlFiltered.size()) gBlPickerSel = idx; }
+static void TBLSel(int idx) {
+    gBlSel = idx;
+    if (idx < 21 && !gMiis.empty() && gMiiStatsMiiSel < (int)gMiis.size())
+        BlOpenPicker(idx, gMiis[gMiiStatsMiiSel].slot - 1);
+}
+static void TBLPickSel(int idx) {
+    if (idx >= 0 && idx < (int)gBlFiltered.size()) {
+        gBlPickerSel = idx;
+        gSimKDown |= HidNpadButton_A; // confirm immediately on tap
+    }
+}
 
 // Rebuild gBlFiltered from gBlPickerLabels using gBlFilter (case-insensitive substring).
 // Empty filter → identity (all indices). Always at least keeps "(none)"/"(empty)" sentinel at index 0.
@@ -2746,7 +2756,7 @@ static void DrawMiiStats() {
                     FillRect(selBoxX, selBoxY, SEL_W, SEL_W, sel?COL_GOLD:COL_PANEL);
                     DrawRect(selBoxX, selBoxY, SEL_W, SEL_W, sel?COL_GOLD:COL_BORDER);
                     if (sel) FillRect(selBoxX+5, selBoxY+5, SEL_W-10, SEL_W-10, {10,10,10,255});
-                    HitAdd(panelX+2, ry, 110, PK_ROW_H-1, TBLPickSel, filtIdx);
+                    HitAdd(panelX+2, ry, panelW-4, PK_ROW_H-1, TBLPickSel, filtIdx);
                     int lw=0,lh=0; if(fsm) TTF_SizeUTF8(fsm, gBlPickerLabels[idx], &lw, &lh);
                     DrawText(gBlPickerLabels[idx], panelX+44, ry+(PK_ROW_H-lh)/2,
                              sel ? COL_GOLD : COL_TEXT);
@@ -2813,7 +2823,7 @@ static void DrawMiiStats() {
                         FillRect(selBoxX, selBoxY, SEL_W, SEL_W, sel?COL_GOLD:COL_PANEL);
                         DrawRect(selBoxX, selBoxY, SEL_W, SEL_W, sel?COL_GOLD:COL_BORDER);
                         if (sel) FillRect(selBoxX+6, selBoxY+6, SEL_W-12, SEL_W-12, {10,10,10,255});
-                        HitAdd(panelX+2, ry, 110, BL_ROW_H-1, TBLSel, itemSel);
+                        HitAdd(panelX+2, ry, panelW-4, BL_ROW_H-1, TBLSel, itemSel);
 
                         if (itemSel < 8) {
                             // Cloth worn slot — label gray, item white, color accent
@@ -2958,6 +2968,11 @@ static void DrawMiiStats() {
                 // Label
                 SDL_Color lblCol = isChecked ? COL_GOLD : (isOwn ? COL_TEXT : COL_DIM);
                 DrawText(HABITS[idx].label, oZoneX + HIT_W + 8, ry+(ROW_H-14)/2-2, lblCol, Font::Sm);
+                // Label area hit — tapping the text also toggles active (same as the gold checkbox)
+                int lblHitX = oZoneX + HIT_W;
+                int lblHitW = (panelX + panelW - 8) - lblHitX;
+                if (lblHitW > 0)
+                    HitAdd(lblHitX, ry, lblHitW, ROW_H-2, TSelHabitItem, i + gHabitScroll);
             }
 
             if (items.empty()) {
@@ -3451,13 +3466,18 @@ static struct {
     SDL_FingerID fid      = 0;
 } s_touch;
 
+// Mark s_touch.dragging only when a scroll variable actually changes value.
+// Called unconditionally from FINGERMOTION so any drift that doesn't complete a
+// scroll step is invisible to the tap-fire logic.
 static void ApplyTouchScroll(float ddx, float ddy) {
     if (gScreen == Screen::UserPick) {
+        int prev = gUserSel;
         s_touch.accumX += ddx;
         while (s_touch.accumX >=  100.f && gUserSel > 0)
             { s_touch.accumX -= 100.f; gUserSel--; }
         while (s_touch.accumX <= -100.f && gUserSel < (int)gUsers.size()-1)
             { s_touch.accumX += 100.f; gUserSel++; }
+        if (gUserSel != prev) s_touch.dragging = true;
         return;
     }
     if (gScreen != Screen::OnSwitch) return;
@@ -3467,29 +3487,34 @@ static void ApplyTouchScroll(float ddx, float ddy) {
         if (s_touch.startY < itemTop || s_touch.startY >= SCREEN_H-30) return;
         const int ph   = 26;
         const int pvis = (SCREEN_H - (gBrowseForExportDir ? 166 : 148)) / ph;
+        int prev = gBrowseScroll;
         s_touch.accumY += ddy;
         while (s_touch.accumY >=  ph) { s_touch.accumY -= ph; gBrowseScroll = std::max(0, gBrowseScroll-1); }
         while (s_touch.accumY <= -ph) { s_touch.accumY += ph; gBrowseScroll = std::min(gBrowseScroll+1, std::max(0,(int)gBrowseEntries.size()-pvis)); }
+        if (gBrowseScroll != prev) s_touch.dragging = true;
         return;
     }
 
     if (gOnSwitchMode == OnSwitchMode::UGC && !gEntries.empty()) {
         if (s_touch.startX < LIST_X || s_touch.startX >= LIST_X+LIST_W) return;
         if (s_touch.startY < LIST_Y || s_touch.startY >= LIST_Y+LIST_H) return;
+        int prev = gEntryScroll;
         s_touch.accumY += ddy;
         while (s_touch.accumY >=  ITEM_H) { s_touch.accumY -= ITEM_H; gEntryScroll = std::max(0, gEntryScroll-1); }
         while (s_touch.accumY <= -ITEM_H) { s_touch.accumY += ITEM_H; gEntryScroll = std::min(gEntryScroll+1, std::max(0,(int)gEntries.size()-VISIBLE)); }
+        if (gEntryScroll != prev) s_touch.dragging = true;
     }
 
     if (gOnSwitchMode == OnSwitchMode::MiiStats) {
-        // Mii selector (left panel) — same speed as texture tab (ITEM_H per item)
         if (s_touch.startX >= SE_LIST_X && s_touch.startX < SE_LIST_X + MSE_LIST_W
             && s_touch.startY >= SE_TOP_Y && s_touch.startY < SCREEN_H - 32
             && !gMiis.empty()) {
             int mseVis = (SCREEN_H - SE_TOP_Y - 32) / ITEM_H;
+            int prev = gMiiStatsScroll;
             s_touch.accumY += ddy;
             while (s_touch.accumY >=  ITEM_H) { s_touch.accumY -= ITEM_H; gMiiStatsScroll = std::max(0, gMiiStatsScroll - 1); }
             while (s_touch.accumY <= -ITEM_H) { s_touch.accumY += ITEM_H; gMiiStatsScroll = std::min(gMiiStatsScroll + 1, std::max(0, (int)gMiis.size() - mseVis)); }
+            if (gMiiStatsScroll != prev) s_touch.dragging = true;
             return;
         }
 
@@ -3504,9 +3529,11 @@ static void ApplyTouchScroll(float ddx, float ddy) {
             if (s_touch.startX < midX2 || s_touch.startX >= midX2 + midW2) return;
             if (s_touch.startY < SE_TOP_Y || s_touch.startY >= SCREEN_H - 32) return;
             const int relVis = (SCREEN_H - 32 - (SE_TOP_Y + 2)) / 34;
+            int prev = gMiiRelScroll;
             s_touch.accumY += ddy;
             while (s_touch.accumY >=  ITEM_H) { s_touch.accumY -= ITEM_H; gMiiRelScroll = std::max(0, gMiiRelScroll - 1); }
             while (s_touch.accumY <= -ITEM_H) { s_touch.accumY += ITEM_H; gMiiRelScroll = std::min(gMiiRelScroll + 1, std::max(0, gMiiRelCount - relVis)); }
+            if (gMiiRelScroll != prev) s_touch.dragging = true;
         } else if (gMiiStatsSubTab == MiiStatsSubTab::Belongings) {
             if (s_touch.startX < blPanX || s_touch.startX >= blPanX + blPanW) return;
             if (gBlPickerOpen) {
@@ -3515,21 +3542,41 @@ static void ApplyTouchScroll(float ddx, float ddy) {
                 const int listH    = panelH - PK_HDR_H;
                 if (s_touch.startY < listTop || s_touch.startY >= listTop + listH) return;
                 const int total = (int)gBlFiltered.size();
+                int prev = gBlPickerScroll;
                 s_touch.accumY += ddy;
                 {
                     const int pkVis = listH / 30;
                     while (s_touch.accumY >=  ITEM_H) { s_touch.accumY -= ITEM_H; gBlPickerScroll = std::max(0, gBlPickerScroll - 1); }
                     while (s_touch.accumY <= -ITEM_H) { s_touch.accumY += ITEM_H; gBlPickerScroll = std::min(gBlPickerScroll + 1, std::max(0, total - pkVis)); }
                 }
+                if (gBlPickerScroll != prev) s_touch.dragging = true;
             } else {
                 if (s_touch.startY < panelTop || s_touch.startY >= panelTop + panelH) return;
+                int prev = gBlScroll;
                 s_touch.accumY += ddy;
                 {
                     const int bl_vis = panelH / BL_ROW_H;
                     while (s_touch.accumY >=  ITEM_H) { s_touch.accumY -= ITEM_H; gBlScroll = std::max(0, gBlScroll - 1); }
                     while (s_touch.accumY <= -ITEM_H) { s_touch.accumY += ITEM_H; gBlScroll = std::min(gBlScroll + 1, std::max(0, BL_VIS_ROWS - bl_vis)); }
                 }
+                if (gBlScroll != prev) s_touch.dragging = true;
             }
+        } else if (gMiiStatsSubTab == MiiStatsSubTab::Habits) {
+            if (s_touch.startX < blPanX || s_touch.startX >= blPanX + blPanW) return;
+            const int HAB_CAT_H  = 34;
+            const int habListTop = panelTop + HAB_CAT_H + 8;
+            const int habListH   = panelH - (HAB_CAT_H + 8) - 36;
+            if (s_touch.startY < habListTop || s_touch.startY >= habListTop + habListH) return;
+            const int HAB_ROW_H = 34;
+            int catSize = 0;
+            for (int i = 0; i < HABIT_COUNT; i++)
+                if (HABITS[i].category == gHabitCatSel) catSize++;
+            int visRows = habListH / HAB_ROW_H;
+            int prev = gHabitScroll;
+            s_touch.accumY += ddy;
+            while (s_touch.accumY >=  HAB_ROW_H) { s_touch.accumY -= HAB_ROW_H; gHabitScroll = std::max(0, gHabitScroll - 1); }
+            while (s_touch.accumY <= -HAB_ROW_H) { s_touch.accumY += HAB_ROW_H; gHabitScroll = std::min(gHabitScroll + 1, std::max(0, catSize - visRows)); }
+            if (gHabitScroll != prev) s_touch.dragging = true;
         }
     }
 }
@@ -3695,22 +3742,17 @@ int main(int,char**) {
         {
             SDL_Event ev;
             while (SDL_PollEvent(&ev)) {
-                if (ev.type == SDL_FINGERDOWN && !s_touch.active) {
+                if (ev.type == SDL_FINGERDOWN) {
+                    // Always reset on any new finger — prevents stuck-active state when
+                    // a previous FINGERUP was silently dropped by the platform.
                     s_touch = { true, false,
                                 ev.tfinger.x*SCREEN_W, ev.tfinger.y*SCREEN_H,
                                 0.f, 0.f, ev.tfinger.fingerId };
                 }
                 else if (ev.type == SDL_FINGERMOTION && s_touch.active
                          && ev.tfinger.fingerId == s_touch.fid) {
-                    float cx = ev.tfinger.x * SCREEN_W;
-                    float cy = ev.tfinger.y * SCREEN_H;
-                    float d2 = (cx-s_touch.startX)*(cx-s_touch.startX)
-                             + (cy-s_touch.startY)*(cy-s_touch.startY);
-                    if (!s_touch.dragging && d2 > 576.f) // 24 px radius — finger drift tolerance for taps
-                        s_touch.dragging = true;
-                    if (s_touch.dragging)
-                        ApplyTouchScroll(ev.tfinger.dx * SCREEN_W,
-                                         ev.tfinger.dy * SCREEN_H);
+                    ApplyTouchScroll(ev.tfinger.dx * SCREEN_W,
+                                     ev.tfinger.dy * SCREEN_H);
                 }
                 else if (ev.type == SDL_FINGERUP && s_touch.active
                          && ev.tfinger.fingerId == s_touch.fid) {
