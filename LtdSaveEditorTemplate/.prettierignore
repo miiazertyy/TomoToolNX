@@ -1,6 +1,0 @@
-dist
-node_modules
-package-lock.json
-*.svg
-src/lib/ugc/wasm/assembly
-src/lib/ugc/wasm/build
