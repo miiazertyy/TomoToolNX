@@ -16,13 +16,18 @@ And more!
 
 ## Requirements
 
-devkitPro with `devkitA64`, libnx, and the following portlibs:
+- [MSYS2](https://www.msys2.org/) (required to build on Windows)
+- [devkitPro](https://devkitpro.org/wiki/Getting_Started) with `devkitA64` and `libnx`
+
+Install the required portlibs via `dkp-pacman` (run inside the MSYS2 devkitPro shell):
 
 ```sh
 dkp-pacman -S switch-sdl2 switch-sdl2_image switch-sdl2_ttf switch-freetype switch-harfbuzz switch-zstd switch-curl switch-mbedtls
 ```
 
 ## Build
+
+Run inside the MSYS2 devkitPro shell:
 
 ```sh
 make
