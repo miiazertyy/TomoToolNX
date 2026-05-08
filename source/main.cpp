@@ -805,7 +805,7 @@ static void BlRebuildFilter() {
     }
 }
 static void TAckSaveWarning(int) {
-    gSaveWarningAcked = true; gShowSaveWarning = false; SaveConfig();
+    gSaveWarningAcked = true; gShowSaveWarning = false; SaveConfig(); HttpServer::SetSaveWarnAcked(true);
     gOnSwitchMode = gSaveWarningTarget;
     if (gSaveWarningTarget == OnSwitchMode::Player && !gPlayerSav.loaded) {
         std::string err;
@@ -936,7 +936,7 @@ static void BrowseRefresh(const std::string& path) {
     gBrowseSel = 0;
     gBrowseScroll = 0;
 
-    std::string ext = gBrowseForMii ? ".ltd" : ".png";
+    static const char* kUgcImportExts[] = {".png",".ltdf",".ltdc",".ltdg",".ltdi",".ltde",".ltdo",".ltdl",nullptr};
 
     DIR* d = opendir(gBrowseCurPath.c_str());
     if (!d) return;
@@ -957,9 +957,16 @@ static void BrowseRefresh(const std::string& path) {
         } else {
             std::string lower = name;
             for (auto& c : lower) c = (char)tolower((unsigned char)c);
-            if (lower.size() >= ext.size() &&
-                lower.compare(lower.size() - ext.size(), ext.size(), ext) == 0)
-                files.push_back(name);
+            bool keep = false;
+            if (gBrowseForMii) {
+                keep = lower.size() >= 4 && lower.compare(lower.size()-4, 4, ".ltd") == 0;
+            } else if (!gBrowseForExportDir) {
+                for (int ei = 0; kUgcImportExts[ei]; ei++) {
+                    size_t el = strlen(kUgcImportExts[ei]);
+                    if (lower.size() >= el && lower.compare(lower.size()-el, el, kUgcImportExts[ei]) == 0) { keep = true; break; }
+                }
+            }
+            if (keep) files.push_back(name);
         }
     }
     closedir(d);
@@ -1039,6 +1046,69 @@ static void DoOnSwitchImport(const std::string& pngPath) {
     if (!gEntries.empty()) LoadPreview(gEntries[gEntrySel]);
     gOnSwitchMsg="Imported — save or discard on exit"; gOnSwitchMsgCol=COL_GREEN;
     LogOK("Import OK: "+stem);
+}
+
+static void DoUgcExportLtd() {
+    if (gEntries.empty() || gEntrySel < 0 || gEntrySel >= (int)gEntries.size()) return;
+    const std::string& stem = gEntries[gEntrySel].stem;
+    static const char* kPfx[] = {"Food","Cloth","Goods","Interior","Exterior","MapObject","MapFloor"};
+    static const char* kExt[] = {".ltdf",".ltdc",".ltdg",".ltdi",".ltde",".ltdo",".ltdl"};
+    int kind = -1, slot = 0;
+    if (stem.size() > 3 && stem.substr(0,3) == "Ugc") {
+        std::string rest = stem.substr(3);
+        for (int k = 0; k < 7; k++) {
+            size_t pl = strlen(kPfx[k]);
+            if (rest.size() > pl && rest.substr(0,pl) == kPfx[k]) {
+                kind = k; slot = atoi(rest.substr(pl).c_str()); break;
+            }
+        }
+    }
+    if (kind < 0) { gOnSwitchMsg="Not a UGC item"; gOnSwitchMsgCol=COL_RED; return; }
+    std::string outPath = gExportPath + "/" + stem;
+    std::string err = MiiManager::ExportUgc(kind, slot + 1, outPath);
+    if (!err.empty()) { gOnSwitchMsg=err; gOnSwitchMsgCol=COL_RED; LogERR("Export .ltd failed: "+err); return; }
+    gOnSwitchMsg = "Exported: " + stem + kExt[kind];
+    gOnSwitchMsgCol = COL_GREEN;
+    LogOK("Exported .ltd: " + outPath + kExt[kind]);
+}
+static void TDoUgcExportLtd(int) { DoUgcExportLtd(); }
+
+static void DoUgcImportLtd(const std::string& ltdPath) {
+    if (gEntries.empty() || gEntrySel < 0 || gEntrySel >= (int)gEntries.size()) return;
+    const std::string& stem = gEntries[gEntrySel].stem;
+    static const char* kPfx[] = {"Food","Cloth","Goods","Interior","Exterior","MapObject","MapFloor"};
+    static const char* kExt[] = {".ltdf",".ltdc",".ltdg",".ltdi",".ltde",".ltdo",".ltdl"};
+    int kind = -1, slot = 0;
+    if (stem.size() > 3 && stem.substr(0,3) == "Ugc") {
+        std::string rest = stem.substr(3);
+        for (int k = 0; k < 7; k++) {
+            size_t pl = strlen(kPfx[k]);
+            if (rest.size() > pl && rest.substr(0,pl) == kPfx[k]) {
+                kind = k; slot = atoi(rest.substr(pl).c_str()); break;
+            }
+        }
+    }
+    if (kind < 0) { gOnSwitchMsg="Not a UGC slot"; gOnSwitchMsgCol=COL_RED; return; }
+    // Validate that the file extension matches the expected kind
+    std::string lower = ltdPath;
+    for (auto& c : lower) c = (char)tolower((unsigned char)c);
+    size_t el = strlen(kExt[kind]);
+    if (lower.size() < el || lower.compare(lower.size()-el, el, kExt[kind]) != 0) {
+        gOnSwitchMsg = std::string("Wrong file type for ") + kPfx[kind] + " slot (expected " + kExt[kind] + ")";
+        gOnSwitchMsgCol = COL_RED; return;
+    }
+    LogINF("Importing .ltd: " + ltdPath + " → " + stem);
+    std::string err = MiiManager::ImportUgc(kind, slot + 1, ltdPath, false);
+    if (!err.empty()) { gOnSwitchMsg=err; gOnSwitchMsgCol=COL_RED; LogERR("Import .ltd failed: "+err); return; }
+    gUgcDirty = true;
+    gPlayerSavDirty = true;
+    gEntries = UgcScanner::Scan(SAVE_UGC_PATH);
+    RebuildUgcFilter();
+    if (gEntrySel >= (int)gEntries.size()) gEntrySel = (int)gEntries.size()-1;
+    if (!gEntries.empty()) LoadPreview(gEntries[gEntrySel]);
+    gOnSwitchMsg = "Imported " + stem + " — save or discard on exit";
+    gOnSwitchMsgCol = COL_GREEN;
+    LogOK("Import .ltd OK: " + stem);
 }
 
 // ─── Draw helpers ─────────────────────────────────────────────────────────────
@@ -1464,7 +1534,7 @@ static void DrawFileBrowser() {
     if (gBrowseForExportDir)
         DrawTextC("select export folder", SCREEN_W/2, 52, COL_GOLD, Font::Md);
     else
-        DrawTextC(gBrowseForMii ? "select .ltd" : "select PNG", SCREEN_W/2, 52, COL_DIM, Font::Md);
+        DrawTextC(gBrowseForMii ? "select .ltd" : "select PNG or .ltd", SCREEN_W/2, 52, COL_DIM, Font::Md);
     DrawTextC(gBrowseCurPath, SCREEN_W/2, 72, COL_DIM);
     if (gBrowseForExportDir)
         DrawTextC("current: "+gExportPath, SCREEN_W/2, 90, COL_DIM);
@@ -1626,25 +1696,30 @@ static void DrawOnSwitch() {
             if (!gEntries.empty()) {
                 int cx   = PREVIEW_X + PREVIEW_W/2;
                 int btnY = imgY + imgH + kBtnGap;
-                const int btnW=200, btnGap=16, bgSep=48;
-                // import+export tight together, remove BG separated by extra gap
-                int bx0 = cx - (3*btnW + btnGap + btnGap + bgSep)/2;
-                int bxBg = bx0 + 2*btnW + btnGap + bgSep;
+                const int btnW=155, btnGap=12, bgSep=36;
+                int bx0  = cx - (4*btnW + 3*btnGap + bgSep)/2;
+                int bxLtd = bx0 + 2*(btnW+btnGap);
+                int bxBg  = bxLtd + btnW + btnGap + bgSep;
                 // A: import
-                FillRect(bx0,                btnY, btnW, kBtnH, COL_PANEL);
-                DrawRect(bx0,                btnY, btnW, kBtnH, COL_ACCENT);
+                FillRect(bx0,             btnY, btnW, kBtnH, COL_PANEL);
+                DrawRect(bx0,             btnY, btnW, kBtnH, COL_ACCENT);
                 DrawTextC("A  import", bx0+btnW/2, btnY+kBtnH/2, COL_ACCENT, Font::Md);
-                // Y: export
-                FillRect(bx0+btnW+btnGap,    btnY, btnW, kBtnH, COL_PANEL);
-                DrawRect(bx0+btnW+btnGap,    btnY, btnW, kBtnH, COL_GOLD);
-                DrawTextC("Y  export", bx0+btnW+btnGap+btnW/2, btnY+kBtnH/2, COL_GOLD, Font::Md);
-                // X: remove BG (separated)
-                FillRect(bxBg,               btnY, btnW, kBtnH, COL_SEL);
-                DrawRect(bxBg,               btnY, btnW, kBtnH, {90,140,200,255});
+                // Y: export PNG
+                FillRect(bx0+btnW+btnGap, btnY, btnW, kBtnH, COL_PANEL);
+                DrawRect(bx0+btnW+btnGap, btnY, btnW, kBtnH, COL_GOLD);
+                DrawTextC("Y  export pic", bx0+btnW+btnGap+btnW/2, btnY+kBtnH/2, COL_GOLD, Font::Md);
+                // export .ltd (touch)
+                FillRect(bxLtd,           btnY, btnW, kBtnH, COL_PANEL);
+                DrawRect(bxLtd,           btnY, btnW, kBtnH, COL_GOLD);
+                DrawTextC("export .ltd", bxLtd+btnW/2, btnY+kBtnH/2, COL_GOLD, Font::Md);
+                HitAdd(bxLtd, btnY, btnW, kBtnH, TDoUgcExportLtd, 0);
+                // X: remove BG (separated by gap)
+                FillRect(bxBg,            btnY, btnW, kBtnH, COL_SEL);
+                DrawRect(bxBg,            btnY, btnW, kBtnH, {90,140,200,255});
                 DrawTextC("X  remove BG", bxBg+btnW/2, btnY+kBtnH/2, {90,140,200,255}, Font::Md);
             }
         }
-        DrawFooter("ZL/ZR  scroll    Up/Down  select    A  import    Y  export    X  remove BG    -  search    L/R  tab    B/+  back");
+        DrawFooter("ZL/ZR  scroll    Up/Down  select    A  import    Y  export pic    export .ltd  (touch)    X  remove BG    -  search    L/R  tab    B/+  back");
     }
 
     // ── WebUI tab ─────────────────────────────────────────────────────────────
@@ -2280,8 +2355,8 @@ static void DrawMiiStats() {
             if (filtRow > 0 && gMiiRelSel >= filtRow) gMiiRelSel = filtRow-1;
             if (filtRow == 0)
                 DrawTextC("no relations", midX+midW/2, SE_TOP_Y+80, COL_DIM);
-        } else {
-            // Stats fields list
+        } else if (!midHidden) {
+            // Stats fields list (only when the middle panel is visible)
             for (int i = 0; i < MII_STATS_FIELD_COUNT; i++) {
                 bool sel = (i == gMiiStatsFieldSel);
                 int ry = SE_TOP_Y + 2 + i * 34;
@@ -2338,7 +2413,8 @@ static void DrawMiiStats() {
         for (int ti=0; ti<MII_SUBTAB_COUNT; ti++) {
             bool sSel = ((int)gMiiStatsSubTab == ti);
             int sx = stX + ti*(stW+stGap);
-            HitAdd(sx, stY, stW, stH, TSetSocialView, ti);
+            // Hit area is taller than the visual so it's easier to tap on touchscreen
+            HitAdd(sx, stY-4, stW, stH+8, TSetSocialView, ti);
             FillRect(sx, stY, stW, stH, sSel?COL_SEL:COL_PANEL);
             DrawRect(sx, stY, stW, stH, sSel?COL_GOLD:COL_BORDER);
             DrawTextC(stLabels[ti], sx+stW/2, stY+stH/2, sSel?COL_GOLD:COL_DIM);
@@ -2815,14 +2891,6 @@ static void DrawMiiStats() {
                     } else {
                         FillRect(panelX+2, ry, panelW-4, BL_ROW_H-1, sel?COL_SEL:COL_BG);
                         if (sel) DrawRect(panelX+2, ry, panelW-4, BL_ROW_H-1, COL_GOLD);
-                        // Big "select" button on the left — easy to hit with a finger.
-                        // Right ~75% of the row stays clear so drag-to-scroll works.
-                        const int SEL_W = 22;
-                        int selBoxX = panelX + 8;
-                        int selBoxY = ry + (BL_ROW_H - SEL_W)/2;
-                        FillRect(selBoxX, selBoxY, SEL_W, SEL_W, sel?COL_GOLD:COL_PANEL);
-                        DrawRect(selBoxX, selBoxY, SEL_W, SEL_W, sel?COL_GOLD:COL_BORDER);
-                        if (sel) FillRect(selBoxX+6, selBoxY+6, SEL_W-12, SEL_W-12, {10,10,10,255});
                         HitAdd(panelX+2, ry, panelW-4, BL_ROW_H-1, TBLSel, itemSel);
 
                         if (itemSel < 8) {
@@ -2834,10 +2902,10 @@ static void DrawMiiStats() {
                             for (int k = 0; k < BL_CLOTH_COUNT; k++)
                                 if (BL_CLOTH_ITEMS[k].nameHash == ih) { cc = BL_CLOTH_ITEMS[k].colorCount; break; }
                             int pw=0,ph=0; if(fsm) TTF_SizeUTF8(fsm, ws.name, &pw, &ph);
-                            DrawText(ws.name, panelX+50, ry+(BL_ROW_H-ph)/2, COL_DIM);
+                            DrawText(ws.name, panelX+12, ry+(BL_ROW_H-ph)/2, COL_DIM);
                             const char* lbl = BlClothLabel(ih);
                             int lw=0,lh=0; if(fsm) TTF_SizeUTF8(fsm,lbl,&lw,&lh);
-                            DrawText(lbl, panelX+50+pw, ry+(BL_ROW_H-lh)/2, sel?COL_GOLD:COL_TEXT);
+                            DrawText(lbl, panelX+12+pw, ry+(BL_ROW_H-lh)/2, sel?COL_GOLD:COL_TEXT);
                             std::string cv = "color " + std::to_string(ci+1) + "/" + std::to_string(cc);
                             int vw=0,vh=0; if(fsm) TTF_SizeUTF8(fsm,cv.c_str(),&vw,&vh);
                             DrawText(cv, panelX+panelW-vw-14, ry+(BL_ROW_H-vh)/2, sel?COL_ACCENT:COL_TEXT);
@@ -2850,10 +2918,10 @@ static void DrawMiiStats() {
                                 if (BL_COORD_ITEMS[k].keyHash == ih) { cc = BL_COORD_ITEMS[k].colorCount; break; }
                             const char* pfx = "Coord";
                             int pw=0,ph=0; if(fsm) TTF_SizeUTF8(fsm,pfx,&pw,&ph);
-                            DrawText(pfx, panelX+50, ry+(BL_ROW_H-ph)/2, COL_DIM);
+                            DrawText(pfx, panelX+12, ry+(BL_ROW_H-ph)/2, COL_DIM);
                             const char* lbl = BlCoordLabel(ih);
                             int lw=0,lh=0; if(fsm) TTF_SizeUTF8(fsm,lbl,&lw,&lh);
-                            DrawText(lbl, panelX+50+pw, ry+(BL_ROW_H-lh)/2, sel?COL_GOLD:COL_TEXT);
+                            DrawText(lbl, panelX+12+pw, ry+(BL_ROW_H-lh)/2, sel?COL_GOLD:COL_TEXT);
                             std::string cv = "color " + std::to_string(ci+1) + "/" + std::to_string(cc);
                             int vw=0,vh=0; if(fsm) TTF_SizeUTF8(fsm,cv.c_str(),&vw,&vh);
                             DrawText(cv, panelX+panelW-vw-14, ry+(BL_ROW_H-vh)/2, sel?COL_ACCENT:COL_TEXT);
@@ -2864,16 +2932,16 @@ static void DrawMiiStats() {
                             uint32_t sid = SaveEditor::GetUIntAt(gMiiSav, BL_H_GOODS_ID, ai);
                             std::string pfx = "Pocket " + std::to_string(slot+1);
                             int pw=0,ph=0; if(fsm) TTF_SizeUTF8(fsm,pfx.c_str(),&pw,&ph);
-                            DrawText(pfx, panelX+50, ry+(BL_ROW_H-ph)/2, COL_DIM);
+                            DrawText(pfx, panelX+12, ry+(BL_ROW_H-ph)/2, COL_DIM);
                             const char* lbl = BlGoodsLabel(sid);
                             int lw=0,lh=0; if(fsm) TTF_SizeUTF8(fsm,lbl,&lw,&lh);
-                            DrawText(lbl, panelX+50+pw, ry+(BL_ROW_H-lh)/2, sel?COL_GOLD:COL_TEXT);
+                            DrawText(lbl, panelX+12+pw, ry+(BL_ROW_H-lh)/2, sel?COL_GOLD:COL_TEXT);
                         } else {
                             // Action row
                             int act = itemSel - 21;
                             const char* lbl = ACT_LABELS[act];
                             int lw=0,lh=0; if(fsm) TTF_SizeUTF8(fsm,lbl,&lw,&lh);
-                            DrawText(lbl, panelX+50, ry+(BL_ROW_H-lh)/2, sel?COL_TEXT:COL_DIM);
+                            DrawText(lbl, panelX+12, ry+(BL_ROW_H-lh)/2, sel?COL_TEXT:COL_DIM);
                         }
                     }
                 }
@@ -3551,32 +3619,7 @@ static void ApplyTouchScroll(float ddx, float ddy) {
                 }
                 if (gBlPickerScroll != prev) s_touch.dragging = true;
             } else {
-                if (s_touch.startY < panelTop || s_touch.startY >= panelTop + panelH) return;
-                int prev = gBlScroll;
-                s_touch.accumY += ddy;
-                {
-                    const int bl_vis = panelH / BL_ROW_H;
-                    while (s_touch.accumY >=  ITEM_H) { s_touch.accumY -= ITEM_H; gBlScroll = std::max(0, gBlScroll - 1); }
-                    while (s_touch.accumY <= -ITEM_H) { s_touch.accumY += ITEM_H; gBlScroll = std::min(gBlScroll + 1, std::max(0, BL_VIS_ROWS - bl_vis)); }
-                }
-                if (gBlScroll != prev) s_touch.dragging = true;
             }
-        } else if (gMiiStatsSubTab == MiiStatsSubTab::Habits) {
-            if (s_touch.startX < blPanX || s_touch.startX >= blPanX + blPanW) return;
-            const int HAB_CAT_H  = 34;
-            const int habListTop = panelTop + HAB_CAT_H + 8;
-            const int habListH   = panelH - (HAB_CAT_H + 8) - 36;
-            if (s_touch.startY < habListTop || s_touch.startY >= habListTop + habListH) return;
-            const int HAB_ROW_H = 34;
-            int catSize = 0;
-            for (int i = 0; i < HABIT_COUNT; i++)
-                if (HABITS[i].category == gHabitCatSel) catSize++;
-            int visRows = habListH / HAB_ROW_H;
-            int prev = gHabitScroll;
-            s_touch.accumY += ddy;
-            while (s_touch.accumY >=  HAB_ROW_H) { s_touch.accumY -= HAB_ROW_H; gHabitScroll = std::max(0, gHabitScroll - 1); }
-            while (s_touch.accumY <= -HAB_ROW_H) { s_touch.accumY += HAB_ROW_H; gHabitScroll = std::min(gHabitScroll + 1, std::max(0, catSize - visRows)); }
-            if (gHabitScroll != prev) s_touch.dragging = true;
         }
     }
 }
@@ -3659,9 +3702,9 @@ static void ProcessTouch(int tx, int ty, u64& kDown) {
             int imgH = PREVIEW_H - 28 - kBtnSlot;
             int cx   = PREVIEW_X + PREVIEW_W/2;
             int btnY = imgY + imgH + kBtnGap;
-            const int btnW=200, btnGap=16, bgSep=48;
-            int bx0  = cx - (3*btnW + btnGap + btnGap + bgSep)/2;
-            int bxBg = bx0 + 2*btnW + btnGap + bgSep;
+            const int btnW=155, btnGap=12, bgSep=36;
+            int bx0  = cx - (4*btnW + 3*btnGap + bgSep)/2;
+            int bxBg = bx0 + 3*(btnW+btnGap) + bgSep;
             if (hit(bx0,             btnY, btnW, kBtnH)) kDown |= HidNpadButton_A;
             if (hit(bx0+btnW+btnGap, btnY, btnW, kBtnH)) kDown |= HidNpadButton_Y;
             if (hit(bxBg,            btnY, btnW, kBtnH)) kDown |= HidNpadButton_X;
@@ -3969,6 +4012,7 @@ int main(int,char**) {
                 gIP=SaveMount::GetLocalIP();
                 if (gIP.empty()) gIP="?.?.?.?";
                 HttpServer::Start(HTTP_PORT, SAVE_UGC_PATH);
+                HttpServer::SetSaveWarnAcked(gSaveWarningAcked);
                 gEntries=UgcScanner::Scan(SAVE_UGC_PATH);
                 MiiManager::LoadUgcNames();
                 gUgcFilter.clear();
@@ -4020,6 +4064,12 @@ int main(int,char**) {
                 HttpServer::ClearPendingMiiRefresh();
                 gMiis = MiiManager::ListMiis();
                 if (gMiiStatsMiiSel >= (int)gMiis.size()) gMiiStatsMiiSel = (int)gMiis.size()-1;
+                if (!gMiiSavDirty) {
+                    gMiiSav = SaveEditor::SavFile{};
+                    std::string lerr;
+                    if (SaveEditor::Load(SAVE_MII_SAV, gMiiSav, lerr))
+                        gMiiSavDirty = true;
+                }
                 LogOK("Mii list updated");
             }
             if (HttpServer::HasPendingPlayerSavReload()) {
@@ -4101,8 +4151,15 @@ int main(int,char**) {
                         if (gBrowseForMii) gBrowseLtdPath=gBrowseCurPath;
                         else gBrowsePngPath=gBrowseCurPath;
                         gShowFileBrowser=false;
-                        if (gBrowseForMii) DoMiiImport(fullPath);
-                        else DoOnSwitchImport(fullPath);
+                        if (gBrowseForMii) {
+                            DoMiiImport(fullPath);
+                        } else {
+                            std::string lower=entry.name;
+                            for(auto& c:lower)c=(char)tolower((unsigned char)c);
+                            bool isLtd = lower.size()>=5 && lower.compare(lower.size()-5,4,".ltd")==0;
+                            if(isLtd) DoUgcImportLtd(fullPath);
+                            else DoOnSwitchImport(fullPath);
+                        }
                     }
                 }
                 if (kDown&HidNpadButton_B && gBrowseCurPath!="/"){

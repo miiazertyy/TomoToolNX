@@ -46,9 +46,8 @@ static void MkdirP(const std::string& path) { mkdir(path.c_str(), 0777); }
 // For heap-based array fields the slot is the heap offset; callers add +4 to skip the count.
 
 static int OffsetLocator(const std::vector<uint8_t>& data, const char* hashHex) {
-    if (data.size() < 0x20) return -1;
+    if (data.size() < 8) return -1;
 
-    // Parse hex string to 4 bytes, then byte-reverse for little-endian comparison
     uint8_t hash[4];
     for (int i = 0; i < 4; i++) {
         unsigned int v = 0;
@@ -57,15 +56,7 @@ static int OffsetLocator(const std::vector<uint8_t>& data, const char* hashHex) 
     }
     uint8_t le[4] = {hash[3], hash[2], hash[1], hash[0]};
 
-    // Read saveDataOff from header (bytes 8-11, LE) to bound the index section.
-    // The index runs from 0x20 to saveDataOff; heap data starts after that.
-    // Only scan the index, in 8-byte-aligned steps matching the entry layout,
-    // to avoid false positives from heap payload containing a matching byte pattern.
-    uint32_t saveDataOff = (uint32_t)data[8]  | ((uint32_t)data[9]  << 8)
-                         | ((uint32_t)data[10] << 16) | ((uint32_t)data[11] << 24);
-    if (saveDataOff > (uint32_t)data.size()) saveDataOff = (uint32_t)data.size();
-
-    for (size_t i = 0x20; i + 8 <= (size_t)saveDataOff; i += 8) {
+    for (size_t i = 0; i + 8 <= data.size(); i++) {
         if (memcmp(data.data() + i, le, 4) == 0) {
             uint32_t offset = 0;
             memcpy(&offset, data.data() + i + 4, 4);

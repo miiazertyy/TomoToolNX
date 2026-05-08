@@ -82,4 +82,7 @@ struct LogEntry {
 // Drain all pending log entries into `out`. Call from main thread each frame.
 void DrainLog(std::vector<LogEntry>& out);
 
+// Sync the save-warning ack state so the WebUI can skip showing the warning.
+void SetSaveWarnAcked(bool v);
+
 } // namespace HttpServer

@@ -39,6 +39,7 @@ static bool        s_pendingCommit          = false;
 static bool        s_pendingMiiRefresh      = false;
 static bool        s_pendingPlayerSavReload = false;
 static bool        s_pendingMiiSavReload    = false;
+static bool        s_saveWarnAcked          = false;
 static int         s_port          = 8080;
 static std::string s_ugcPath;
 static Mutex       s_mutex;
@@ -109,7 +110,7 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .entry:hover{background:var(--surface)}
 .entry.active{background:var(--surface2);border-left:2px solid var(--accent)}
 .entry-name{font-size:13px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.toolbar{background:var(--surface);padding:9px 16px;padding-bottom:max(9px,env(safe-area-inset-bottom,0px));display:flex;gap:8px;border-top:1px solid var(--border);align-items:center;flex-shrink:0}
+.toolbar{background:var(--surface);padding:9px 16px;padding-bottom:max(9px,env(safe-area-inset-bottom,0px));display:flex;flex-wrap:wrap;gap:8px;border-top:1px solid var(--border);align-items:center;flex-shrink:0}
 .btn{padding:6px 14px;border:1px solid var(--border);border-radius:3px;font-size:12px;font-family:inherit;letter-spacing:.06em;cursor:pointer;background:var(--surface2);color:var(--text);transition:border-color .15s,color .15s}
 .btn:disabled{opacity:.35;cursor:not-allowed}
 .btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
@@ -310,8 +311,9 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
   </div>
   <div class="info-bar" id="info-bar"></div>
   <div class="toolbar" style="border-top:none;padding-bottom:9px">
-    <button class="btn btn-cyan" id="btn-import" disabled onclick="doImport()">import pic</button>
+    <button class="btn btn-cyan" id="btn-import" disabled onclick="doImport()">import</button>
     <button class="btn btn-gold" id="btn-export" disabled onclick="doExport()">export pic</button>
+    <button class="btn btn-gold" id="btn-export-ltd" disabled onclick="doExportLtd()">export .ltd</button>
     <button class="btn btn-blue" id="btn-removebg" disabled onclick="doRemoveBg()">remove BG</button>
     <button class="btn" onclick="loadList()">refresh</button>
     <div class="status info" id="status"></div>
@@ -380,10 +382,10 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
   </div>
 </div>
 <div class="drop-overlay" id="drop-overlay">
-  <div class="drop-ol-title">drop to import</div>
+  <div class="drop-ol-title">drop to import (pic or .ltdx)</div>
   <div class="drop-ol-sub" id="drop-ol-sub"></div>
 </div>
-<input type="file" id="file-input" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="fileChosen()">
+<input type="file" id="file-input" accept="image/png,image/jpeg,image/webp,.ltdf,.ltdc,.ltdg,.ltdi,.ltde,.ltdo,.ltdl" style="display:none" onchange="fileChosen()">
 <input type="file" id="mii-file-input" accept=".ltd" style="display:none" onchange="miiFileChosen()">
 
 <script>
@@ -438,6 +440,7 @@ async function selectEntry(e){
   document.querySelectorAll('#list .entry').forEach((el,i)=>el.classList.toggle('active',entries[i].stem===e.stem));
   document.getElementById('btn-import').disabled=false;
   document.getElementById('btn-export').disabled=false;
+  document.getElementById('btn-export-ltd').disabled=(ugcKindFromStem(e.stem)<0);
   document.getElementById('btn-removebg').disabled=false;
   document.getElementById('placeholder').style.display='none';
   document.getElementById('preview-img').style.display='none';
@@ -449,9 +452,10 @@ async function selectEntry(e){
   img.src='/api/preview?stem='+encodeURIComponent(e.stem)+'&t='+Date.now();
 }
 function doExport(){if(!selected)return;const a=document.createElement('a');a.href='/api/export?stem='+encodeURIComponent(selected.stem);a.download=selected.stem+'.png';a.click();setStatus('exported','ok');}
+function doExportLtd(){if(!selected)return;const k=ugcKindFromStem(selected.stem);if(k<0){setStatus('not a UGC item','err');return;}const a=document.createElement('a');a.href='/api/ugc/itemexport?stem='+encodeURIComponent(selected.stem);a.download=selected.stem+UGC_ITEM_EXTS[k];a.click();setStatus('exported .ltd','ok');}
 function doImport(){if(!selected)return;document.getElementById('file-input').click();}
 async function doRemoveBg(){if(!selected)return;showSpinner('removing background... (~30s)');const d=await(await fetch('/api/removebg?stem='+encodeURIComponent(selected.stem),{method:'POST'})).json();modalClose();if(d.ok){setStatus('background removed','ok');await loadList();const fresh=entries.find(e=>e.stem===selected.stem);if(fresh)selectEntry(fresh);}else setStatus('failed: '+d.error,'err');}
-function fileChosen(){const fi=document.getElementById('file-input');if(!fi.files.length)return;pendingFile=fi.files[0];fi.value='';uploadFile();}
+function fileChosen(){const fi=document.getElementById('file-input');if(!fi.files.length)return;const f=fi.files[0];fi.value='';const ext=f.name.slice(f.name.lastIndexOf('.')).toLowerCase();if(UGC_ITEM_EXTS.includes(ext)){uploadUgcItemFile(f);}else{pendingFile=f;uploadFile();}}
 async function uploadFile(){
   showSpinner('importing...');
   const fd=new FormData();fd.append('file',pendingFile);fd.append('stem',selected.stem);
@@ -462,6 +466,23 @@ async function uploadFile(){
   pendingFile=null;
 }
 function setStatus(msg,cls){const el=document.getElementById('status');el.textContent=msg;el.className='status '+cls;}
+
+// ── UGC item import (.ltdf/.ltdc/etc.) ────────────────────────────────────────
+const UGC_ITEM_PFXS=['Food','Cloth','Goods','Interior','Exterior','MapObject','MapFloor'];
+const UGC_ITEM_EXTS=['.ltdf','.ltdc','.ltdg','.ltdi','.ltde','.ltdo','.ltdl'];
+function ugcKindFromStem(stem){
+  const rest=stem&&stem.startsWith('Ugc')?stem.slice(3):stem||'';
+  for(let k=0;k<UGC_ITEM_PFXS.length;k++){if(rest.startsWith(UGC_ITEM_PFXS[k]))return k;}
+  return -1;
+}
+async function uploadUgcItemFile(file){
+  showSpinner('importing item...');
+  const fd=new FormData();fd.append('file',file);fd.append('stem',selected.stem);fd.append('isAdding','false');
+  const d=await(await fetch('/api/ugc/itemimport',{method:'POST',body:fd})).json();
+  modalClose();
+  if(d.ok){setStatus('item imported','ok');await loadList();}
+  else setStatus('failed: '+d.error,'err');
+}
 
 // ── Miis ───────────────────────────────────────────────────────────────────────
 let miiEntries=[], pendingMiiSlot=null;
@@ -499,7 +520,7 @@ async function uploadMiiFile(file){
 }
 function setMiiStatus(msg,cls){const el=document.getElementById('mii-io-status');if(!el)return;el.textContent=msg;el.className='status '+cls;}
 function restartServer(){alert('Press X on the console to restart the server.');}
-function initSaveWarn(){if(!localStorage.getItem('saveWarnSeen'))document.getElementById('save-warn').style.display='block';}
+async function initSaveWarn(){try{const d=await(await fetch('/api/config')).json();if(d.saveWarnAcked){localStorage.setItem('saveWarnSeen','1');return;}}catch(e){}if(!localStorage.getItem('saveWarnSeen'))document.getElementById('save-warn').style.display='block';}
 function dismissSaveWarn(){document.getElementById('save-warn').style.display='none';localStorage.setItem('saveWarnSeen','1');}
 
 // ── Modal ──────────────────────────────────────────────────────────────────────
@@ -527,10 +548,12 @@ document.addEventListener('dragleave',e=>{if(--_dragN<=0){_dragN=0;_hideDrop();}
 document.addEventListener('drop',e=>{
   e.preventDefault();_dragN=0;_hideDrop();
   const f=e.dataTransfer.files[0];
-  if(!f||!['image/png','image/jpeg','image/webp'].includes(f.type))return;
+  if(!f)return;
   if(!document.getElementById('panel-ugc').classList.contains('active'))return;
   if(!selected){setStatus('select a texture first','err');return;}
-  pendingFile=f;uploadFile();
+  const ext=f.name.slice(f.name.lastIndexOf('.')).toLowerCase();
+  if(UGC_ITEM_EXTS.includes(ext)){uploadUgcItemFile(f);return;}
+  if(['image/png','image/jpeg','image/webp'].includes(f.type)){pendingFile=f;uploadFile();return;}
 });
 function _showDrop(){
   if(!document.getElementById('panel-ugc').classList.contains('active'))return;
@@ -3899,10 +3922,18 @@ static void HandleSaveUpload(int fd, const Request& req) {
     Send200(fd,"application/json","{\"ok\":true}");
 }
 
+static void HandleConfig(int fd) {
+    mutexLock(&s_mutex);
+    bool acked = s_saveWarnAcked;
+    mutexUnlock(&s_mutex);
+    Send200(fd, "application/json", std::string("{\"saveWarnAcked\":") + (acked ? "true" : "false") + "}");
+}
+
 static void HandleConnection(int fd){
     mutexLock(&s_mutex); s_lastConnectTick = armGetSystemTick(); mutexUnlock(&s_mutex);
     Request req;if(!ReadRequest(fd,req)){close(fd);return;}
     if(req.method=="GET"&&req.path=="/"){SrvLog("WebUI: page loaded");Send200(fd,"text/html; charset=utf-8",std::string(HTML_UI));}
+    else if(req.method=="GET"&&req.path=="/api/config")HandleConfig(fd);
     else if(req.method=="GET"&&req.path=="/api/list")HandleList(fd);
     else if(req.method=="GET"&&req.path=="/api/preview")HandlePreview(fd,req.query);
     else if(req.method=="GET"&&req.path=="/api/export")HandleExport(fd,req.query);
@@ -3967,4 +3998,5 @@ BgRemoveJob TakePendingBgRemove(){mutexLock(&s_bgMutex);BgRemoveJob j=s_bgJob;s_
 void FinishBgRemove(const std::string& result){mutexLock(&s_bgMutex);s_bgResult=result;s_bgState=ImportState::Done;mutexUnlock(&s_bgMutex);}
 void DrainLog(std::vector<LogEntry>& out){mutexLock(&s_logMutex);while(s_logRead<s_logWrite)out.push_back(s_logRing[s_logRead++%LOG_RING_SIZE]);mutexUnlock(&s_logMutex);}
 uint64_t LastConnectTick(){mutexLock(&s_mutex);u64 t=s_lastConnectTick;mutexUnlock(&s_mutex);return t;}
+void SetSaveWarnAcked(bool v){mutexLock(&s_mutex);s_saveWarnAcked=v;mutexUnlock(&s_mutex);}
 } // namespace HttpServer
