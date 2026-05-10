@@ -316,8 +316,39 @@ std::vector<uint8_t> Bc1Decode(const std::vector<uint8_t>& bd, int W, int H) {
     return out;
 }
 
-static void Bc1EncodeBlock(const uint8_t blk[64], bool hasAlpha,
+static void AssignBc1Indices(const uint8_t blk[64], uint16_t c0, uint16_t c1,
+                              bool use3Color, uint8_t* out, int off) {
+    auto [r0,g0,b0]=Rgb565Decode(c0); auto [r1,g1,b1]=Rgb565Decode(c1);
+    int pr2,pg2,pb2,pr3,pg3,pb3;
+    if(c0>c1){pr2=(2*r0+r1)/3;pg2=(2*g0+g1)/3;pb2=(2*b0+b1)/3;
+              pr3=(r0+2*r1)/3;pg3=(g0+2*g1)/3;pb3=(b0+2*b1)/3;}
+    else{pr2=(r0+r1)/2;pg2=(g0+g1)/2;pb2=(b0+b1)/2;pr3=pg3=pb3=0;}
+    uint32_t indices=0;
+    for(int i=0;i<16;i++){
+        const uint8_t* p=blk+i*4;
+        int r=p[0],g=p[1],b=p[2],a=p[3],best;
+        if(a<128&&use3Color){best=3;}
+        else{
+            int d0=ColorDistSq(r,g,b,r0,g0,b0),d1=ColorDistSq(r,g,b,r1,g1,b1),
+                d2=ColorDistSq(r,g,b,pr2,pg2,pb2); best=0; int bd=d0;
+            if(d1<bd){bd=d1;best=1;} if(d2<bd){bd=d2;best=2;}
+            if(!use3Color){int d3=ColorDistSq(r,g,b,pr3,pg3,pb3);if(d3<bd)best=3;}
+        }
+        indices|=(uint32_t)(best<<(2*i));
+    }
+    memcpy(out+off,&c0,2); memcpy(out+off+2,&c1,2); memcpy(out+off+4,&indices,4);
+}
+
+static void EnforceMode(uint16_t& c0, uint16_t& c1, bool use3Color) {
+    if(use3Color){ if(c0>c1) std::swap(c0,c1); if(c0==c1){if(c1<0xFFFF)c1++;else if(c0>0)c0--;} }
+    else { if(c0<c1) std::swap(c0,c1); if(c0==c1){if(c0<0xFFFF)c0++;else c1--;} }
+}
+
+static void Bc1EncodeBlock(const uint8_t blk[64], bool hasAlpha, Bc1Mode mode,
                             uint8_t* out, int off) {
+    bool use3 = (mode==Bc1Mode::ThreeColor) || (mode==Bc1Mode::Auto && hasAlpha);
+    if(mode==Bc1Mode::FourColor) use3=false;
+
     int minR=255,minG=255,minB=255,maxR=0,maxG=0,maxB=0,oc=0;
     for(int i=0;i<16;i++){
         const uint8_t* p=blk+i*4;
@@ -329,30 +360,75 @@ static void Bc1EncodeBlock(const uint8_t blk[64], bool hasAlpha,
     if(oc==0){ memset(out+off,0,4); memset(out+off+4,0xFF,4); return; }
     uint16_t c0=Rgb565Encode((uint8_t)maxR,(uint8_t)maxG,(uint8_t)maxB);
     uint16_t c1=Rgb565Encode((uint8_t)minR,(uint8_t)minG,(uint8_t)minB);
-    if(hasAlpha){ if(c0>c1) std::swap(c0,c1); if(c0==c1){if(c1<0xFFFF)c1++;else if(c0>0)c0--;} }
-    else { if(c0<c1) std::swap(c0,c1); if(c0==c1){if(c0<0xFFFF)c0++;else c1--;} }
-    auto [r0,g0,b0]=Rgb565Decode(c0); auto [r1,g1,b1]=Rgb565Decode(c1);
-    int pr2,pg2,pb2,pr3,pg3,pb3; bool t3;
-    if(c0>c1){pr2=(2*r0+r1)/3;pg2=(2*g0+g1)/3;pb2=(2*b0+b1)/3;
-              pr3=(r0+2*r1)/3;pg3=(g0+2*g1)/3;pb3=(b0+2*b1)/3;t3=false;}
-    else{pr2=(r0+r1)/2;pg2=(g0+g1)/2;pb2=(b0+b1)/2;pr3=pg3=pb3=0;t3=true;}
-    uint32_t indices=0;
-    for(int i=0;i<16;i++){
-        const uint8_t* p=blk+i*4;
-        int r=p[0],g=p[1],b=p[2],a=p[3],best;
-        if(a<128&&t3){best=3;}
-        else{
-            int d0=ColorDistSq(r,g,b,r0,g0,b0),d1=ColorDistSq(r,g,b,r1,g1,b1),
-                d2=ColorDistSq(r,g,b,pr2,pg2,pb2); best=0; int bd=d0;
-            if(d1<bd){bd=d1;best=1;} if(d2<bd){bd=d2;best=2;}
-            if(!t3){int d3=ColorDistSq(r,g,b,pr3,pg3,pb3);if(d3<bd)best=3;}
-        }
-        indices|=(uint32_t)(best<<(2*i));
-    }
-    memcpy(out+off,&c0,2); memcpy(out+off+2,&c1,2); memcpy(out+off+4,&indices,4);
+    EnforceMode(c0,c1,use3);
+    AssignBc1Indices(blk,c0,c1,use3,out,off);
 }
 
-std::vector<uint8_t> Bc1Encode(const std::vector<uint8_t>& rgba, int W, int H) {
+// PCA-based encoder: finds the principal color axis for better endpoint placement,
+// which fixes washed-out colors in dark/gradient textures.
+static void Bc1EncodeBlockRgbcx(const uint8_t blk[64], Bc1Mode mode,
+                                  uint8_t* out, int off) {
+    int oc=0; bool hasAlpha=false;
+    for(int i=0;i<16;i++){if(blk[i*4+3]<128){hasAlpha=true;}else{oc++;}}
+    if(oc==0){ memset(out+off,0,4); memset(out+off+4,0xFF,4); return; }
+
+    bool use3 = (mode==Bc1Mode::ThreeColor) || (mode==Bc1Mode::Auto && hasAlpha);
+    if(mode==Bc1Mode::FourColor) use3=false;
+
+    // Compute mean of opaque pixels
+    float mr=0,mg=0,mb=0;
+    for(int i=0;i<16;i++){
+        if(blk[i*4+3]<128) continue;
+        mr+=blk[i*4]; mg+=blk[i*4+1]; mb+=blk[i*4+2];
+    }
+    mr/=oc; mg/=oc; mb/=oc;
+
+    // Compute 3x3 covariance matrix
+    float cov[3][3]={};
+    for(int i=0;i<16;i++){
+        if(blk[i*4+3]<128) continue;
+        float dr=blk[i*4]-mr, dg=blk[i*4+1]-mg, db=blk[i*4+2]-mb;
+        cov[0][0]+=dr*dr; cov[0][1]+=dr*dg; cov[0][2]+=dr*db;
+        cov[1][1]+=dg*dg; cov[1][2]+=dg*db;
+        cov[2][2]+=db*db;
+    }
+    cov[1][0]=cov[0][1]; cov[2][0]=cov[0][2]; cov[2][1]=cov[1][2];
+
+    // Power iteration to find principal axis (8 steps)
+    float ax=0.577f,ay=0.577f,az=0.577f;
+    for(int it=0;it<8;it++){
+        float nx=cov[0][0]*ax+cov[0][1]*ay+cov[0][2]*az;
+        float ny=cov[1][0]*ax+cov[1][1]*ay+cov[1][2]*az;
+        float nz=cov[2][0]*ax+cov[2][1]*ay+cov[2][2]*az;
+        float len=sqrtf(nx*nx+ny*ny+nz*nz);
+        if(len<1e-6f) break;
+        ax=nx/len; ay=ny/len; az=nz/len;
+    }
+
+    // Project pixels onto axis; find min/max
+    float minT=1e30f,maxT=-1e30f;
+    for(int i=0;i<16;i++){
+        if(blk[i*4+3]<128) continue;
+        float t=(blk[i*4]-mr)*ax+(blk[i*4+1]-mg)*ay+(blk[i*4+2]-mb)*az;
+        if(t<minT) minT=t;
+        if(t>maxT) maxT=t;
+    }
+
+    auto clamp8=[](float v)->uint8_t{return(uint8_t)std::max(0.f,std::min(255.f,v));};
+    uint16_t c0,c1;
+    if(maxT==minT){
+        // Solid color block — both endpoints identical, assign directly
+        c0=c1=Rgb565Encode(clamp8(mr),clamp8(mg),clamp8(mb));
+    } else {
+        c0=Rgb565Encode(clamp8(mr+maxT*ax),clamp8(mg+maxT*ay),clamp8(mb+maxT*az));
+        c1=Rgb565Encode(clamp8(mr+minT*ax),clamp8(mg+minT*ay),clamp8(mb+minT*az));
+    }
+    EnforceMode(c0,c1,use3);
+    AssignBc1Indices(blk,c0,c1,use3,out,off);
+}
+
+std::vector<uint8_t> Bc1Encode(const std::vector<uint8_t>& rgba, int W, int H,
+                                Bc1Encoder enc, Bc1Mode mode) {
     int bx=W/4,by=H/4;
     std::vector<uint8_t> out((size_t)bx*by*8);
     uint8_t blk[64];
@@ -364,7 +440,11 @@ std::vector<uint8_t> Bc1Encode(const std::vector<uint8_t>& rgba, int W, int H) {
             memcpy(blk+dst,rgba.data()+src,4);
             if(rgba[src+3]<128) ha=true;
         }
-        Bc1EncodeBlock(blk,ha,out.data(),(iy*bx+ix)*8);
+        int off=(iy*bx+ix)*8;
+        if(enc==Bc1Encoder::Rgbcx)
+            Bc1EncodeBlockRgbcx(blk,mode,out.data(),off);
+        else
+            Bc1EncodeBlock(blk,ha,mode,out.data(),off);
     }
     return out;
 }
@@ -658,7 +738,7 @@ std::string ImportRgbaImage(const RgbaImage& src, const ImportOptions& opts) {
 
         std::vector<uint8_t> blocks = (layout.Format == TextureFormat::Bc3)
             ? Bc3Encode(rgba, uW, uH)
-            : Bc1Encode(rgba, uW, uH);
+            : Bc1Encode(rgba, uW, uH, opts.encoder, opts.bc1Mode);
 
         int vbw=uW/4, vbh=uH/4;
         const std::vector<uint8_t>* base = originalSwizzled.empty() ? nullptr : &originalSwizzled;

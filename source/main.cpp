@@ -16,6 +16,8 @@
 #include "qrcode.hpp"
 #include "updater.h"
 
+#include "mtp_server.h"
+
 #include "save_editor.h"
 #include "belongings_data.h"
 #include "habits_data.h"
@@ -119,6 +121,107 @@ static void DrawRect(int x,int y,int w,int h,SDL_Color c){
     SDL_Rect r{x,y,w,h};SDL_RenderDrawRect(gRen,&r);
 }
 
+// ─── Gear / settings icon ─────────────────────────────────────────────────────
+// Draws a polished gear silhouette centered at (cx,cy) with outer radius r.
+// 8 teeth, proper hub hole, clean proportions matching the WebUI SVG gear.
+static void DrawGearIcon(int cx, int cy, int r, SDL_Color col) {
+    if (r < 4) return;
+    SDL_SetRenderDrawColor(gRen, col.r, col.g, col.b, col.a);
+
+    // Proportions tuned to match the WebUI feather gear icon
+    float rOuter  = (float)r;
+    float rInner  = rOuter * 0.68f;  // ring inner edge
+    float rHub    = rOuter * 0.30f;  // centre hole
+    float toothH  = rOuter * 0.24f;  // how far teeth stick out beyond rOuter
+    float toothHW = rOuter * 0.16f;  // half-width of each tooth
+    int   nTeeth  = 8;
+
+    // Scan-line fill: for each row, compute X spans for ring + teeth + hub hole
+    for (int dy = -(int)(rOuter + toothH) - 1; dy <= (int)(rOuter + toothH) + 1; dy++) {
+        float y = (float)dy;
+        // Collect all x-interval pairs [xL, xR] filled on this row
+        struct Span { float l, r; };
+        Span spans[16]; int nSpans = 0;
+
+        // 1. Ring band (rHub < dist < rInner) — annulus scan
+        float dOuter = rOuter*rOuter - y*y;
+        float dInner = rInner*rInner - y*y;
+        float dHub   = rHub  *rHub   - y*y;
+        if (dOuter > 0.f) {
+            float xO = sqrtf(dOuter);
+            float xI = (dInner > 0.f) ? sqrtf(dInner) : 0.f;
+            float xH = (dHub   > 0.f) ? sqrtf(dHub)   : 0.f;
+            // left arm of ring: from -xO to -(xI or 0), minus hub
+            if (xO > xH) {
+                spans[nSpans++] = { -(xO), -(std::max(xI, xH)) };
+            }
+            // right arm of ring
+            if (xO > xH) {
+                spans[nSpans++] = { std::max(xI, xH), xO };
+            }
+            // inner ring (between xI and xH) if ring reaches there
+            if (dInner > 0.f && xI > xH) {
+                spans[nSpans++] = { -xI, -xH };
+                spans[nSpans++] = {  xH,  xI };
+            }
+        }
+
+        // 2. Teeth: rectangular blocks rotated around the gear
+        for (int ti = 0; ti < nTeeth; ti++) {
+            float a  = (float)(2.0 * M_PI * ti / nTeeth);
+            float nx = cosf(a), ny = sinf(a);   // radial outward direction
+            float tx = -sinf(a), ty = cosf(a);  // tangential direction
+
+            // Tooth rectangle from rInner to rOuter+toothH, half-width toothHW
+            float corners[4][2] = {
+                { nx*(rOuter+toothH) + tx*toothHW,  ny*(rOuter+toothH) + ty*toothHW  },
+                { nx*(rOuter+toothH) - tx*toothHW,  ny*(rOuter+toothH) - ty*toothHW  },
+                { nx*(rInner*0.92f)  - tx*toothHW,  ny*(rInner*0.92f)  - ty*toothHW  },
+                { nx*(rInner*0.92f)  + tx*toothHW,  ny*(rInner*0.92f)  + ty*toothHW  },
+            };
+
+            float minY = corners[0][1], maxY = corners[0][1];
+            for (int k = 1; k < 4; k++) {
+                if (corners[k][1] < minY) minY = corners[k][1];
+                if (corners[k][1] > maxY) maxY = corners[k][1];
+            }
+            if (y < minY - 0.5f || y > maxY + 0.5f) continue;
+
+            float xL =  1e9f, xR = -1e9f;
+            for (int e = 0; e < 4; e++) {
+                float y0 = corners[e][1], y1 = corners[(e+1)%4][1];
+                float x0 = corners[e][0], x1 = corners[(e+1)%4][0];
+                float dy2 = y1 - y0;
+                if (fabsf(dy2) < 0.001f) continue;
+                float t = (y - y0) / dy2;
+                if (t < -0.001f || t > 1.001f) continue;
+                float xi = x0 + (x1-x0)*t;
+                if (xi < xL) xL = xi;
+                if (xi > xR) xR = xi;
+            }
+            if (xR > xL) {
+                // Clip tooth to outside rHub to keep hole clean
+                float xH2 = (dHub > 0.f) ? sqrtf(dHub) : 0.f;
+                if (xR > xH2)  spans[nSpans++] = { std::max(xL,  xH2), xR };
+                if (xL < -xH2) spans[nSpans++] = { xL, std::min(xR, -xH2) };
+            }
+        }
+
+        // Render all spans for this row
+        for (int s = 0; s < nSpans; s++) {
+            int x0 = cx + (int)floorf(spans[s].l);
+            int x1 = cx + (int)ceilf (spans[s].r);
+            if (x1 >= x0) {
+                SDL_Rect sr{ x0, cy + dy, x1 - x0 + 1, 1 };
+                SDL_RenderFillRect(gRen, &sr);
+            }
+        }
+    }
+}
+
+
+
+
 
 
 
@@ -151,7 +254,7 @@ static void LogERR(const std::string& m){Log(m,COL_RED);}
 
 // ─── On-Switch editor state ───────────────────────────────────────────────────
 
-enum class OnSwitchMode { UGC, Mii, Player, MiiStats, WebUI };
+enum class OnSwitchMode { UGC, Mii, Player, MiiStats, WebUI, TexSettings };
 static OnSwitchMode gOnSwitchMode = OnSwitchMode::WebUI;
 
 static std::vector<UgcTextureEntry> gEntries;
@@ -163,6 +266,9 @@ static SDL_Texture* gPreviewTex  = nullptr;
 static std::string  gPreviewStem;
 static std::string  gOnSwitchMsg;
 static SDL_Color    gOnSwitchMsgCol = COL_TEXT;
+static bool         gPreviewNoSrgb  = false; // color encoding toggle: false=sRGB, true=Linear
+static TextureProcessor::Bc1Encoder gEncMode = TextureProcessor::Bc1Encoder::Custom;
+static TextureProcessor::Bc1Mode    gBc1Mode = TextureProcessor::Bc1Mode::Auto;
 
 // File browser
 struct BrowseEntry { std::string name; bool isDir; };
@@ -185,14 +291,14 @@ static std::vector<MiiManager::MiiSlot> gMiis;
 // Function pointers avoid std::function overhead under -fno-exceptions/-fno-rtti.
 typedef void (*TouchFn)(int);
 struct TouchHit { int x,y,w,h; TouchFn fn; int param; };
-static TouchHit gHits[160];
+static TouchHit gHits[256];
 static int      gHitCount = 0;
 static u64      gSimKDown = 0;
 static int      gTouchScale = 1; // multiplier for nudge actions
 
 static void HitClear() { gHitCount = 0; }
 static void HitAdd(int x,int y,int w,int h, TouchFn fn, int param=0) {
-    if (gHitCount < 160) gHits[gHitCount++] = {x,y,w,h,fn,param};
+    if (gHitCount < 256) gHits[gHitCount++] = {x,y,w,h,fn,param};
 }
 static void HitFire(int tx, int ty) {
     for (int i = 0; i < gHitCount; i++) {
@@ -302,6 +408,7 @@ static bool gShowBgRemovePrompt = false;
 
 static constexpr const char* kBgModelPath = "romfs:/u2netp.bin";
 static int  gMaxBackups        = 8;
+
 
 static int         gSettingsSel    = 0;
 static std::string gSettingsMsg;
@@ -916,7 +1023,7 @@ static int UgcFilterPos(int realIdx) {
 static void LoadPreview(const UgcTextureEntry& e) {
     FreePreview();
     RgbaImage img;
-    std::string err = TextureProcessor::DecodeFile(e.ugctexPath, img, false);
+    std::string err = TextureProcessor::DecodeFile(e.ugctexPath, img, gPreviewNoSrgb);
     if (!err.empty()) { gOnSwitchMsg=err; gOnSwitchMsgCol=COL_RED; return; }
     SDL_Surface* surf = SDL_CreateRGBSurfaceFrom(
         img.pixels.data(), img.width, img.height, 32, img.width*4,
@@ -1009,8 +1116,12 @@ static void DoMiiImport(const std::string& ltdPath) {
     // so the normal save/discard prompt will commit (or revert) on exit.
     gMiiSav = SaveEditor::SavFile{};
     std::string lerr;
-    SaveEditor::Load(SAVE_MII_SAV, gMiiSav, lerr);
-    gMiiSavDirty = true;
+    if (!SaveEditor::Load(SAVE_MII_SAV, gMiiSav, lerr)) {
+        gMiiStatsMsg = "Reload error: " + lerr; gMiiStatsMsgCol = COL_RED;
+        LogERR("Mii save reload failed: " + lerr);
+    } else {
+        gMiiSavDirty = true;
+    }
     gMiis = MiiManager::ListMiis();
     if (gMiiStatsMiiSel >= (int)gMiis.size()) gMiiStatsMiiSel=(int)gMiis.size()-1;
     gMiiStatsMsg="Mii imported — save or discard on exit"; gMiiStatsMsgCol=COL_GREEN;
@@ -1027,8 +1138,10 @@ static void DoOnSwitchImport(const std::string& pngPath) {
     opts.writeCanvas        = gEntries[gEntrySel].hasCanvas();
     opts.writeThumb         = gEntries[gEntrySel].hasThumb();
     opts.thumbPath          = gEntries[gEntrySel].thumbPath;
-    opts.noSrgb             = false;
+    opts.noSrgb             = gPreviewNoSrgb;
     opts.originalUgctexPath = gEntries[gEntrySel].ugctexPath;
+    opts.encoder            = gEncMode;
+    opts.bc1Mode            = gBc1Mode;
 
     LogINF("Importing "+stem+"...");
     std::string err = TextureProcessor::ImportPng(opts);
@@ -1072,6 +1185,8 @@ static void DoUgcExportLtd() {
     LogOK("Exported .ltd: " + outPath + kExt[kind]);
 }
 static void TDoUgcExportLtd(int) { DoUgcExportLtd(); }
+static void TSetEncMode(int v) { gEncMode = (TextureProcessor::Bc1Encoder)v; }
+static void TSetBc1Mode(int v) { gBc1Mode = (TextureProcessor::Bc1Mode)v; }
 
 static void DoUgcImportLtd(const std::string& ltdPath) {
     if (gEntries.empty() || gEntrySel < 0 || gEntrySel >= (int)gEntries.size()) return;
@@ -1230,6 +1345,7 @@ static void DrawRestorePicker() {
     }
 
     DrawFooter("Up/Down  navigate    A  restore    B  cancel");
+    SDL_RenderPresent(gRen);
 }
 
 static void DrawSettings() {
@@ -1242,29 +1358,35 @@ static void DrawSettings() {
 
     DrawHeader("settings");
 
-    static const struct { const char* label; const char* desc; } ITEMS[] = {
+    struct SettingsItem { const char* label; const char* desc; };
+    static const SettingsItem ITEMS[] = {
         { "Export Path",     "folder used when exporting textures" },
-        { "Max Backups",     "maximum number of save backups to keep (1–99)" },
+        { "Max Backups",     "maximum number of save backups to keep (1-99)" },
         { "Restore Backup",  "restore a previous save backup for the selected user" },
+        { "Encoder",         "BC1 texture encoder used when importing images" },
+        { "BC1 Mode",        "block mode selection for the Custom encoder" },
     };
-    static const int ITEM_COUNT = 3;
+    static const int ITEM_COUNT = 5;
 
     const int listW = 720, listX = (SCREEN_W - listW) / 2;
-    const int rowH  = 72,  rowGap = 6;
-    int listY = 72;
+    const int rowH  = 68,  rowGap = 5;
+    int listY = 68;
 
     for (int i = 0; i < ITEM_COUNT; i++) {
         bool sel = (i == gSettingsSel);
+        // BC1 Mode row is greyed out when encoder is not Custom
+        bool disabled = (i == 4 && gEncMode != TextureProcessor::Bc1Encoder::Custom);
         int ry = listY + i * (rowH + rowGap);
         HitAdd(listX, ry, listW, rowH, TSelSettingsItem, i);
         FillRect(listX, ry, listW, rowH, sel ? COL_SEL : COL_PANEL);
         DrawRect(listX, ry, listW, rowH, sel ? COL_GOLD : COL_BORDER);
 
-        DrawText(ITEMS[i].label, listX + 16, ry + 12, sel ? COL_TEXT : COL_DIM, Font::Md);
-        DrawText(ITEMS[i].desc,  listX + 16, ry + 42, COL_DIM, Font::Sm);
+        SDL_Color labelCol = disabled ? COL_DIM : (sel ? COL_TEXT : COL_DIM);
+        SDL_Color descCol  = disabled ? SDL_Color{50,50,50,255} : COL_DIM;
+        DrawText(ITEMS[i].label, listX + 16, ry + 10, labelCol, Font::Md);
+        DrawText(ITEMS[i].desc,  listX + 16, ry + 40, descCol,  Font::Sm);
 
         if (i == 0) {
-            // Export path — show current path right-aligned, "A  change" hint
             TTF_Font* fsm = GetFont(Font::Sm);
             int vw = 0, vh = 0;
             if (fsm) TTF_SizeUTF8(fsm, gExportPath.c_str(), &vw, &vh);
@@ -1274,37 +1396,74 @@ static void DrawSettings() {
                 disp = ".." + disp.substr(disp.size() - (disp.size() * 3 / 4));
                 TTF_SizeUTF8(fsm, disp.c_str(), &vw, &vh);
             }
-            DrawText(disp, listX + listW - vw - 16, ry + 14, sel ? COL_ACCENT : COL_DIM, Font::Sm);
-            DrawText("A  change", listX + listW - 100, ry + 44, sel ? COL_GOLD : COL_DIM, Font::Sm);
+            DrawText(disp,        listX + listW - vw - 16, ry + 12, sel ? COL_ACCENT : COL_DIM, Font::Sm);
+            DrawText("A  change", listX + listW - 100,     ry + 40, sel ? COL_GOLD   : COL_DIM, Font::Sm);
         } else if (i == 2) {
             int cnt = BackupService::CountBackups();
             std::string v = (cnt == 0) ? "none" : std::to_string(cnt) + " available";
-            DrawText(v,          listX + listW - 130, ry + 14, sel ? COL_ACCENT : COL_DIM, Font::Sm);
-            DrawText("A  open",  listX + listW - 100, ry + 44, sel ? COL_GOLD   : COL_DIM, Font::Sm);
+            DrawText(v,          listX + listW - 130, ry + 12, sel ? COL_ACCENT : COL_DIM, Font::Sm);
+            DrawText("A  open",  listX + listW - 100, ry + 40, sel ? COL_GOLD   : COL_DIM, Font::Sm);
         } else if (i == 1) {
-            // Max backups — left/right number selector
-            const int arrowW = 36, numW = 48, ctrlH = 36;
+            const int arrowW = 36, numW = 48, ctrlH = 34;
             int ctrlX = listX + listW - arrowW - numW - arrowW - 20;
             int ctrlY = ry + (rowH - ctrlH) / 2;
-            // Left arrow
             HitAdd(ctrlX, ctrlY, arrowW, ctrlH, TSimBtn, (int)HidNpadButton_Left);
             FillRect(ctrlX, ctrlY, arrowW, ctrlH, COL_PANEL);
             DrawRect(ctrlX, ctrlY, arrowW, ctrlH, sel ? COL_GOLD : COL_BORDER);
             DrawTextC("<", ctrlX + arrowW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
-            // Number
             FillRect(ctrlX + arrowW, ctrlY, numW, ctrlH, COL_PANEL);
             DrawRect(ctrlX + arrowW, ctrlY, numW, ctrlH, sel ? COL_GOLD : COL_BORDER);
             DrawTextC(std::to_string(gMaxBackups), ctrlX + arrowW + numW/2, ctrlY + ctrlH/2, sel ? COL_TEXT : COL_DIM, Font::Md);
-            // Right arrow
             HitAdd(ctrlX + arrowW + numW, ctrlY, arrowW, ctrlH, TSimBtn, (int)HidNpadButton_Right);
             FillRect(ctrlX + arrowW + numW, ctrlY, arrowW, ctrlH, COL_PANEL);
             DrawRect(ctrlX + arrowW + numW, ctrlY, arrowW, ctrlH, sel ? COL_GOLD : COL_BORDER);
             DrawTextC(">", ctrlX + arrowW + numW + arrowW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
+        } else if (i == 3) {
+            // Encoder: Custom | rgbcx  (Left/Right to cycle)
+            struct { const char* name; TextureProcessor::Bc1Encoder val; } ENC_OPTS[] = {
+                { "Custom", TextureProcessor::Bc1Encoder::Custom },
+                { "rgbcx",  TextureProcessor::Bc1Encoder::Rgbcx  },
+            };
+            const int nOpts = 2;
+            const int btnW = 80, btnH = 30, btnGap = 6;
+            int bx = listX + listW - nOpts*(btnW+btnGap) - 10;
+            int by = ry + (rowH - btnH) / 2;
+            for (int k = 0; k < nOpts; k++) {
+                bool on = (gEncMode == ENC_OPTS[k].val);
+                FillRect(bx, by, btnW, btnH, on ? COL_SEL : COL_PANEL);
+                DrawRect(bx, by, btnW, btnH, on ? COL_GOLD : COL_BORDER);
+                DrawTextC(ENC_OPTS[k].name, bx + btnW/2, by + btnH/2, on ? COL_GOLD : COL_DIM, Font::Sm);
+                bx += btnW + btnGap;
+            }
+            DrawText("Left/Right", listX + listW - nOpts*(btnW+btnGap) - 10 - 100, ry + 40, sel ? COL_GOLD : COL_DIM, Font::Sm);
+        } else if (i == 4) {
+            // BC1 mode: Auto | 4-color | 3-color
+            struct { const char* name; TextureProcessor::Bc1Mode val; } BC1_OPTS[] = {
+                { "Auto",    TextureProcessor::Bc1Mode::Auto       },
+                { "4-color", TextureProcessor::Bc1Mode::FourColor  },
+                { "3-color", TextureProcessor::Bc1Mode::ThreeColor },
+            };
+            const int nOpts = 3;
+            const int btnW = 72, btnH = 30, btnGap = 5;
+            int bx = listX + listW - nOpts*(btnW+btnGap) - 10;
+            int by = ry + (rowH - btnH) / 2;
+            for (int k = 0; k < nOpts; k++) {
+                bool on = (!disabled && gBc1Mode == BC1_OPTS[k].val);
+                SDL_Color bc = disabled ? SDL_Color{40,40,40,255} : (on ? COL_SEL   : COL_PANEL);
+                SDL_Color br = disabled ? SDL_Color{50,50,50,255} : (on ? COL_GOLD  : COL_BORDER);
+                SDL_Color tc = disabled ? SDL_Color{60,60,60,255} : (on ? COL_GOLD  : COL_DIM);
+                FillRect(bx, by, btnW, btnH, bc);
+                DrawRect(bx, by, btnW, btnH, br);
+                DrawTextC(BC1_OPTS[k].name, bx + btnW/2, by + btnH/2, tc, Font::Sm);
+                bx += btnW + btnGap;
+            }
+            if (!disabled)
+                DrawText("Left/Right", listX + listW - nOpts*(btnW+btnGap) - 10 - 100, ry + 40, sel ? COL_GOLD : COL_DIM, Font::Sm);
         }
     }
 
     if (!gSettingsMsg.empty())
-        DrawTextC(gSettingsMsg, SCREEN_W/2, listY + ITEM_COUNT*(rowH+rowGap) + 16,
+        DrawTextC(gSettingsMsg, SCREEN_W/2, listY + ITEM_COUNT*(rowH+rowGap) + 10,
                   gSettingsMsgCol, Font::Sm);
 
     DrawFooter("Up/Down  navigate    Left/Right  adjust    A  action    B  back");
@@ -1369,14 +1528,14 @@ static void DrawUserPick() {
     if (scroll + MAX_VIS < n)
         DrawTextC(">", startX+totalW+18, startY+CARD_H/2, COL_DIM, Font::Md);
 
-    // Settings button — bottom right
-    const int sBtnW = 170, sBtnH = 40;
+    // Settings button — normal text button in bottom-right above footer
+    const int sBtnW = 110, sBtnH = 36;
     int sBtnX = SCREEN_W - sBtnW - 14;
-    int sBtnY = SCREEN_H - 30 - sBtnH - 10;
+    int sBtnY = SCREEN_H - 30 - sBtnH - 8;
     HitAdd(sBtnX, sBtnY, sBtnW, sBtnH, TOpenSettings, 0);
     FillRect(sBtnX, sBtnY, sBtnW, sBtnH, COL_PANEL);
     DrawRect(sBtnX, sBtnY, sBtnW, sBtnH, COL_BORDER);
-    DrawTextC("X  Settings", sBtnX + sBtnW/2, sBtnY + sBtnH/2, COL_DIM, Font::Sm);
+    DrawTextC("settings", sBtnX + sBtnW/2, sBtnY + sBtnH/2, COL_DIM, Font::Sm);
 
     DrawFooter("Left/Right  navigate    A  select    X  settings    +  quit");
     SDL_RenderPresent(gRen);
@@ -1513,6 +1672,7 @@ static void LoadConfig() {
         if (key == "thumb_tip_seen")   gThumbTipSeen    = (val == "1");
         if (key == "save_warn_acked")  gSaveWarningAcked = (val == "1");
         if (key == "max_backups")    { int v = atoi(val.c_str()); if (v >= 1 && v <= 99) gMaxBackups = v; }
+
     }
     fclose(f);
 }
@@ -1564,6 +1724,124 @@ static void DrawFileBrowser() {
         DrawFooter("Up/Down  navigate    A  open / select    B  back    X  cancel");
 }
 
+// ─── Texture encoding settings tab ───────────────────────────────────────────
+static void DrawTexSettings() {
+    HitClear();
+    SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
+    SDL_RenderClear(gRen);
+    DrawHeader("encoding");
+
+    // Tab bar (same as DrawOnSwitch, with gear tab selected)
+    {
+        int tw=140, th=22, gap=4, gearTw=32;
+        int totalW=tw*4+gap*4+gearTw, tx=SCREEN_W/2-totalW/2, ty=28;
+        struct { const char* label; OnSwitchMode mode; } tabs[]={
+            {"webui",OnSwitchMode::WebUI},{"textures",OnSwitchMode::UGC},
+            {"mii",OnSwitchMode::MiiStats},{"player",OnSwitchMode::Player}};
+        for (auto& t : tabs) {
+            bool sel=gOnSwitchMode==t.mode;
+            HitAdd(tx,ty,tw,th,TSetMode,(int)t.mode);
+            FillRect(tx,ty,tw,th,sel?COL_SEL:COL_PANEL);
+            DrawRect(tx,ty,tw,th,sel?COL_GOLD:COL_BORDER);
+            DrawTextC(t.label,tx+tw/2,ty+th/2,sel?COL_GOLD:COL_DIM);
+            tx+=tw+gap;
+        }
+        {
+            bool sel=true; // always selected here
+            HitAdd(tx,ty,gearTw,th,TSetMode,(int)OnSwitchMode::TexSettings);
+            FillRect(tx,ty,gearTw,th,COL_SEL);
+            DrawRect(tx,ty,gearTw,th,COL_ACCENT);
+            DrawGearIcon(tx+gearTw/2,ty+th/2,th*38/100,COL_ACCENT);
+            (void)sel;
+        }
+    }
+
+    // Content area
+    const int contentX = (SCREEN_W - 720) / 2;
+    const int contentY = 68;
+    const int sectionW = 720;
+
+    // ── Section: Encoder ─────────────────────────────────────────────────────
+    {
+        const int secH = 90, btnW = 110, btnH = 30, btnGap = 8;
+        int sy = contentY;
+
+        FillRect(contentX, sy, sectionW, secH, COL_PANEL);
+        DrawRect(contentX, sy, sectionW, secH, COL_BORDER);
+
+        // Left side: title + description stacked
+        DrawText("Encoder",   contentX + 16, sy + 10, COL_TEXT, Font::Md);
+        DrawText("BC1 encoder used when importing textures", contentX + 16, sy + 34, COL_DIM, Font::Sm);
+
+        // Right side: toggle buttons, vertically centred in the card
+        struct { const char* name; TextureProcessor::Bc1Encoder val; } ENC_OPTS[] = {
+            { "Custom", TextureProcessor::Bc1Encoder::Custom },
+            { "rgbcx",  TextureProcessor::Bc1Encoder::Rgbcx  },
+        };
+        int bx = contentX + sectionW - 2*(btnW+btnGap) - 16;
+        int by = sy + (secH - btnH) / 2;
+        for (int k = 0; k < 2; k++) {
+            bool on = (gEncMode == ENC_OPTS[k].val);
+            FillRect(bx, by, btnW, btnH, on ? COL_SEL   : COL_BG);
+            DrawRect(bx, by, btnW, btnH, on ? COL_ACCENT : COL_BORDER);
+            DrawTextC(ENC_OPTS[k].name, bx + btnW/2, by + btnH/2, on ? COL_ACCENT : COL_DIM, Font::Md);
+            HitAdd(bx, by, btnW, btnH, TSetEncMode, k);
+            bx += btnW + btnGap;
+        }
+
+        // Hint line below description
+        const char* encHint = (gEncMode == TextureProcessor::Bc1Encoder::Custom)
+            ? "Bounding-box encoder. Fast, reliable for most textures."
+            : "PCA-based encoder. Better color accuracy on dark and gradient textures.";
+        DrawText(encHint, contentX + 16, sy + 58, COL_DIM, Font::Sm);
+    }
+
+    // ── Section: BC1 Mode ────────────────────────────────────────────────────
+    {
+        bool disabled = (gEncMode != TextureProcessor::Bc1Encoder::Custom);
+        const int secH = 90, btnW = 96, btnH = 30, btnGap = 8;
+        int sy = contentY + 98;
+
+        SDL_Color panelBdr = disabled ? SDL_Color{45,45,45,255} : COL_BORDER;
+        FillRect(contentX, sy, sectionW, secH, COL_PANEL);
+        DrawRect(contentX, sy, sectionW, secH, panelBdr);
+
+        SDL_Color lblCol = disabled ? COL_DIM  : COL_TEXT;
+        SDL_Color dscCol = disabled ? SDL_Color{55,55,55,255} : COL_DIM;
+        DrawText("BC1 Mode", contentX + 16, sy + 10, lblCol, Font::Md);
+        DrawText("Block mode selection (Custom encoder only)", contentX + 16, sy + 34, dscCol, Font::Sm);
+
+        struct { const char* name; TextureProcessor::Bc1Mode val; } BC1_OPTS[] = {
+            { "Auto",    TextureProcessor::Bc1Mode::Auto       },
+            { "4-color", TextureProcessor::Bc1Mode::FourColor  },
+            { "3-color", TextureProcessor::Bc1Mode::ThreeColor },
+        };
+        int bx = contentX + sectionW - 3*(btnW+btnGap) - 16;
+        int by = sy + (secH - btnH) / 2;
+        for (int k = 0; k < 3; k++) {
+            bool on = (!disabled && gBc1Mode == BC1_OPTS[k].val);
+            SDL_Color bg = disabled ? SDL_Color{30,30,30,255} : (on ? COL_SEL   : COL_BG);
+            SDL_Color br = disabled ? SDL_Color{45,45,45,255} : (on ? COL_ACCENT : COL_BORDER);
+            SDL_Color tc = disabled ? SDL_Color{55,55,55,255} : (on ? COL_ACCENT : COL_DIM);
+            FillRect(bx, by, btnW, btnH, bg);
+            DrawRect(bx, by, btnW, btnH, br);
+            DrawTextC(BC1_OPTS[k].name, bx + btnW/2, by + btnH/2, tc, Font::Md);
+            if (!disabled)
+                HitAdd(bx, by, btnW, btnH, TSetBc1Mode, k);
+            bx += btnW + btnGap;
+        }
+
+        const char* bc1Hint = disabled ? "Enable the Custom encoder to change this setting." :
+            (gBc1Mode == TextureProcessor::Bc1Mode::Auto)       ? "Picks 4-color or 3-color per block. Recommended." :
+            (gBc1Mode == TextureProcessor::Bc1Mode::FourColor)  ? "Forces 4-color interpolation. Sharper, no black transparency." :
+                                                                   "Forces 3-color + transparent. Best for cutout-alpha textures.";
+        DrawText(bc1Hint, contentX + 16, sy + 58, dscCol, Font::Sm);
+    }
+
+    DrawFooter("L/R  switch tab    B/+  back");
+    SDL_RenderPresent(gRen);
+}
+
 static void DrawOnSwitch() {
     HitClear();
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
@@ -1579,7 +1857,7 @@ static void DrawOnSwitch() {
     }
     DrawHeader(subtitle);
 
-    // Tab bar — 4 tabs at 140px each
+    // Tab bar — 4 text tabs
     {
         int tw=140, th=22, gap=4;
         int totalW=tw*4+gap*3, tx=SCREEN_W/2-totalW/2, ty=28;
@@ -1696,10 +1974,12 @@ static void DrawOnSwitch() {
             if (!gEntries.empty()) {
                 int cx   = PREVIEW_X + PREVIEW_W/2;
                 int btnY = imgY + imgH + kBtnGap;
-                const int btnW=155, btnGap=12, bgSep=36;
-                int bx0  = cx - (4*btnW + 3*btnGap + bgSep)/2;
+                const int btnW=148, btnGap=10, bgSep=28, gearW=kBtnH;
+                int totalW = 3*btnW + 2*btnGap + bgSep + btnW + btnGap + gearW;
+                int bx0   = cx - totalW/2;
                 int bxLtd = bx0 + 2*(btnW+btnGap);
                 int bxBg  = bxLtd + btnW + btnGap + bgSep;
+                int bxGear = bxBg + btnW + btnGap;
                 // A: import
                 FillRect(bx0,             btnY, btnW, kBtnH, COL_PANEL);
                 DrawRect(bx0,             btnY, btnW, kBtnH, COL_ACCENT);
@@ -1717,6 +1997,11 @@ static void DrawOnSwitch() {
                 FillRect(bxBg,            btnY, btnW, kBtnH, COL_SEL);
                 DrawRect(bxBg,            btnY, btnW, kBtnH, {90,140,200,255});
                 DrawTextC("X  remove BG", bxBg+btnW/2, btnY+kBtnH/2, {90,140,200,255}, Font::Md);
+                // Gear: open encoding settings tab (touch only, small square)
+                FillRect(bxGear, btnY, gearW, kBtnH, COL_PANEL);
+                DrawRect(bxGear, btnY, gearW, kBtnH, COL_BORDER);
+                DrawGearIcon(bxGear + gearW/2, btnY + kBtnH/2, kBtnH * 30 / 100, COL_DIM);
+                HitAdd(bxGear, btnY, gearW, kBtnH, TSetMode, (int)OnSwitchMode::TexSettings);
             }
         }
         DrawFooter("ZL/ZR  scroll    Up/Down  select    A  import    Y  export pic    export .ltd  (touch)    X  remove BG    -  search    L/R  tab    B/+  back");
@@ -1784,10 +2069,26 @@ static void DrawOnSwitch() {
             DrawText("WiFi : ", sxBase, statusY, COL_DIM);
             DrawText("Active", sxBase+lw, statusY, COL_GREEN);
 
-            // QR code below WiFi status
+            // MTP status below WiFi status
+            {
+                bool mtpOn = MtpServer::IsSessionOpen();
+                const char* mtpVal = mtpOn ? "Active" : "Inactive";
+                SDL_Color mtpCol = mtpOn ? COL_GREEN : COL_DIM;
+                int lineH = (lh > 0) ? lh : 20;
+                int mtpY = statusY + lineH + 8;
+                int mw=0, mw2=0, mh=0;
+                TTF_Font* fss = GetFont(Font::Sm);
+                if(fss) TTF_SizeUTF8(fss, "MTP  : ", &mw, &mh);
+                if(fss) TTF_SizeUTF8(fss, mtpVal, &mw2, &mh);
+                int mxBase = rightX + (rightW - (mw + mw2)) / 2;
+                DrawText("MTP  : ", mxBase, mtpY, COL_DIM, Font::Sm);
+                DrawText(mtpVal, mxBase + mw, mtpY, mtpCol, Font::Sm);
+            }
+            
+            // QR code below MTP status
             QR::Mat mat;
             if (QR::build(url, mat)) {
-                int qrTop = statusY + lh + 14;
+                int qrTop = statusY + lh + 8 + lh + 14;
                 int qrAvailW = rightW;
                 int qrAvailH = contentY + contentH - qrTop;
                 int ms = std::min(qrAvailW, qrAvailH) / (mat.N+4);
@@ -1805,13 +2106,28 @@ static void DrawOnSwitch() {
                 }
             }
         } else {
-            // No wifi — just show status centered
+            // No wifi — show WiFi and MTP status centered
             TTF_Font* fsm=GetFont(Font::Sm); int lw=0,lh=0;
             if(fsm) TTF_SizeUTF8(fsm,"WiFi : ",&lw,&lh);
             int cy2 = contentY+contentH/2-lh;
             DrawText("WiFi : ",  rightX+(rightW-lw)/2-20, cy2, COL_DIM);
             DrawText("Inactive", rightX+(rightW-lw)/2-20+lw, cy2, COL_RED);
-        }
+
+            // MTP status below
+                        {
+                bool mtpOn = MtpServer::IsSessionOpen();
+                const char* mtpVal = mtpOn ? "Active" : "Inactive";
+                SDL_Color mtpCol = mtpOn ? COL_GREEN : COL_DIM;
+                int lineH = (lh > 0) ? lh : 20;
+                int mw=0, mw2=0, mh=0;
+                TTF_Font* fss = GetFont(Font::Sm);
+                if(fss) TTF_SizeUTF8(fss, "MTP  : ", &mw, &mh);
+                if(fss) TTF_SizeUTF8(fss, mtpVal, &mw2, &mh);
+                int mxBase = rightX + (rightW - (mw + mw2)) / 2;
+                DrawText("MTP  : ", mxBase, cy2 + lineH + 8, COL_DIM, Font::Sm);
+                DrawText(mtpVal, mxBase + mw, cy2 + lineH + 8, mtpCol, Font::Sm);
+            }
+                    }
 
         DrawFooter("L/R  tab    X  restart server    B/+  back");
     }
@@ -2197,7 +2513,7 @@ static void BlOpenPicker(int blSel, int miiIdx) {
     gBlPickerSel = 0;
     for (int i = 0; i < (int)gBlFiltered.size(); i++)
         if (gBlPickerHashes[gBlFiltered[i]] == curHash) { gBlPickerSel = i; break; }
-    gBlPickerScroll = gBlPickerSel;
+    gBlPickerScroll = std::max(0, std::min(gBlPickerSel, (int)gBlFiltered.size() - 1));
     gBlPickerOpen = true;
 }
 
@@ -2762,7 +3078,7 @@ static void DrawMiiStats() {
                     SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
                     SDL_RenderDrawLine(gRen, editX+12, sinceY, editX+editW-12, sinceY);
                     uint64_t tst = SaveEditor::GetUInt64At(gMiiSav, H_TST_RP, gMiiRelPairIdx);
-                    char dateBuf[11] = "";
+                    char dateBuf[36] = "";
                     if (tst > 0) {
                         time_t t = (time_t)tst;
                         struct tm* ti = localtime(&t);
@@ -2958,6 +3274,7 @@ static void DrawMiiStats() {
             // ── Habits panel ────────────────────────────────────────────────────
             EnsureHabitHashes();
             TTF_Font* fsm = GetFont(Font::Sm);
+            (void)fsm;
             TTF_Font* fmd = GetFont(Font::Md);
 
             // Category strip (top row)
@@ -3422,7 +3739,7 @@ static void TConfirmBgRemove(int) {
     opts.writeCanvas        = e.hasCanvas();
     opts.writeThumb         = e.hasThumb();
     opts.thumbPath          = e.thumbPath;
-    opts.noSrgb             = false;
+    opts.noSrgb             = gPreviewNoSrgb;
     opts.originalUgctexPath = e.ugctexPath;
     err = TextureProcessor::ImportRgbaImage(img, opts);
     if (!err.empty()) { gOnSwitchMsg = err; gOnSwitchMsgCol = COL_RED; return; }
@@ -3569,7 +3886,7 @@ static void ApplyTouchScroll(float ddx, float ddy) {
         int prev = gEntryScroll;
         s_touch.accumY += ddy;
         while (s_touch.accumY >=  ITEM_H) { s_touch.accumY -= ITEM_H; gEntryScroll = std::max(0, gEntryScroll-1); }
-        while (s_touch.accumY <= -ITEM_H) { s_touch.accumY += ITEM_H; gEntryScroll = std::min(gEntryScroll+1, std::max(0,(int)gEntries.size()-VISIBLE)); }
+        while (s_touch.accumY <= -ITEM_H) { s_touch.accumY += ITEM_H; gEntryScroll = std::min(gEntryScroll+1, std::max(0,(int)gFilteredEntries.size()-VISIBLE)); }
         if (gEntryScroll != prev) s_touch.dragging = true;
     }
 
@@ -3688,10 +4005,11 @@ static void ProcessTouch(int tx, int ty, u64& kDown) {
     if (gOnSwitchMode == OnSwitchMode::UGC) {
         // List items — tap to select, loads preview
         for (int i = 0; i < VISIBLE; i++) {
-            int idx = gEntryScroll + i;
-            if (idx >= (int)gEntries.size()) break;
+            int filtPos = gEntryScroll + i;
+            if (filtPos >= (int)gFilteredEntries.size()) break;
+            int realIdx = gFilteredEntries[filtPos];
             if (hit(LIST_X, LIST_Y+LIST_PAD_TOP+i*ITEM_H, LIST_W, ITEM_H)) {
-                if (gEntrySel != idx) { gEntrySel = idx; LoadPreview(gEntries[idx]); }
+                if (gEntrySel != realIdx) { gEntrySel = realIdx; LoadPreview(gEntries[realIdx]); }
                 break;
             }
         }
@@ -3743,6 +4061,10 @@ int main(int,char**) {
     mkdir("/switch/TomoToolNX/Exports", 0777);
     LoadConfig();
     mkdir(gExportPath.c_str(), 0777);
+    MtpServer::SetLogCallback([](const std::string& msg, bool ok){
+        if (ok) LogOK(msg); else LogERR(msg);
+    });
+    MtpServer::Init();
 
     // Auto-check for updates only if WiFi is active — no prompt
     {
@@ -3952,7 +4274,7 @@ int main(int,char**) {
                 if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))
                     gSettingsSel = std::max(0, gSettingsSel - 1);
                 if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
-                    gSettingsSel = std::min(2, gSettingsSel + 1);
+                    gSettingsSel = std::min(4, gSettingsSel + 1);
                 if (gSettingsSel == 2 && kDown&HidNpadButton_A) {
                     gRestoreList   = BackupService::ListBackups();
                     gRestoreSel    = 0;
@@ -3974,6 +4296,31 @@ int main(int,char**) {
                     }
                     if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) {
                         gMaxBackups = std::min(99, gMaxBackups + 1); SaveConfig();
+                    }
+                }
+                // Encoder row: Left/Right cycles between Custom and rgbcx
+                if (gSettingsSel == 3) {
+                    bool left  = kNav&(HidNpadButton_Left |HidNpadButton_StickLLeft |HidNpadButton_StickRLeft);
+                    bool right = kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight);
+                    if (left || right) {
+                        gEncMode = (gEncMode == TextureProcessor::Bc1Encoder::Custom)
+                                 ? TextureProcessor::Bc1Encoder::Rgbcx
+                                 : TextureProcessor::Bc1Encoder::Custom;
+                    }
+                }
+                // BC1 Mode row: Left/Right cycles Auto -> 4-color -> 3-color (only when encoder == Custom)
+                if (gSettingsSel == 4 && gEncMode == TextureProcessor::Bc1Encoder::Custom) {
+                    bool left  = kNav&(HidNpadButton_Left |HidNpadButton_StickLLeft |HidNpadButton_StickRLeft);
+                    bool right = kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight);
+                    if (right) {
+                        if      (gBc1Mode == TextureProcessor::Bc1Mode::Auto)      gBc1Mode = TextureProcessor::Bc1Mode::FourColor;
+                        else if (gBc1Mode == TextureProcessor::Bc1Mode::FourColor)  gBc1Mode = TextureProcessor::Bc1Mode::ThreeColor;
+                        else                                                         gBc1Mode = TextureProcessor::Bc1Mode::Auto;
+                    }
+                    if (left) {
+                        if      (gBc1Mode == TextureProcessor::Bc1Mode::Auto)       gBc1Mode = TextureProcessor::Bc1Mode::ThreeColor;
+                        else if (gBc1Mode == TextureProcessor::Bc1Mode::ThreeColor) gBc1Mode = TextureProcessor::Bc1Mode::FourColor;
+                        else                                                         gBc1Mode = TextureProcessor::Bc1Mode::Auto;
                     }
                 }
                 if (kDown&HidNpadButton_B) { gScreen = Screen::UserPick; }
@@ -4156,7 +4503,7 @@ int main(int,char**) {
                         } else {
                             std::string lower=entry.name;
                             for(auto& c:lower)c=(char)tolower((unsigned char)c);
-                            bool isLtd = lower.size()>=5 && lower.compare(lower.size()-5,4,".ltd")==0;
+                            bool isLtd = lower.size()>=4 && lower.compare(lower.size()-4,4,".ltd")==0;
                             if(isLtd) DoUgcImportLtd(fullPath);
                             else DoOnSwitchImport(fullPath);
                         }
@@ -4689,7 +5036,7 @@ int main(int,char**) {
                         gRelDateKbdReq = false;
                         static const uint32_t H_TST_KBD = 0x1a892e50u;
                         uint64_t cur = SaveEditor::GetUInt64At(gMiiSav, H_TST_KBD, gRelDatePairIdx);
-                        char initBuf[11] = "";
+                        char initBuf[36] = "";
                         if (cur > 0) {
                             time_t t = (time_t)cur;
                             struct tm* ti = localtime(&t);
@@ -5033,6 +5380,29 @@ int main(int,char**) {
                     }
                 }
 
+            } else if (gOnSwitchMode == OnSwitchMode::TexSettings) {
+                // TexSettings: tab switching only (settings are touch/hit-area driven)
+                if (kDown&HidNpadButton_L) {
+                    gOnSwitchMode=OnSwitchMode::WebUI; gOnSwitchMsg=""; break;
+                }
+                if (kDown&HidNpadButton_R) {
+                    gOnSwitchMode=OnSwitchMode::UGC; gOnSwitchMsg=""; break;
+                }
+                if (kDown&(HidNpadButton_B|HidNpadButton_Plus)) {
+                    bool hasDirty = gPlayerSavDirty || gMiiSavDirty || gUgcDirty || gWebUiDirty;
+                    bool toUserPick = (kDown&HidNpadButton_B) != 0;
+                    if (hasDirty) {
+                        gShowBackPrompt=true;
+                        gBackPromptIsMii=gMiiSavDirty; gBackPromptToUserPick=toUserPick;
+                    } else if (toUserPick) {
+                        FreePreview(); HttpServer::Stop(); gLog.clear();
+                        gEntries.clear(); gMiis.clear();
+                        gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
+                        gPlayerSavDirty=false; gMiiSavDirty=false; gUgcDirty=false;
+                        SaveMount::Unmount(); gScreen=Screen::UserPick;
+                    } else { gQuitApp=true; }
+                }
+
             } else { // WebUI tab
                 // X = restart HTTP server
                 if (kDown&HidNpadButton_X) {
@@ -5089,6 +5459,15 @@ int main(int,char**) {
                 }
                 gPrevOnSwitchMode = gOnSwitchMode;
             }
+            // Poll USB state once per second to detect unclean Windows disconnects
+            {
+                static u64 sMtpPollTick = 0;
+                u64 now = armGetSystemTick();
+                if (now - sMtpPollTick >= armGetSystemTickFreq()) {
+                    sMtpPollTick = now;
+                    MtpServer::PollUsbState();
+                }
+            }
             // Dispatch draw to correct function for current tab
             if (gShowSaveWarning) {
                 DrawSaveWarning();
@@ -5096,9 +5475,10 @@ int main(int,char**) {
                 DrawBackPrompt();
             } else {
                 switch (gOnSwitchMode) {
-                    case OnSwitchMode::Player:   DrawPlayer();   break;
-                    case OnSwitchMode::MiiStats: DrawMiiStats(); break;
-                    default:                     DrawOnSwitch(); break;
+                    case OnSwitchMode::Player:      DrawPlayer();      break;
+                    case OnSwitchMode::MiiStats:    DrawMiiStats();    break;
+                    case OnSwitchMode::TexSettings: DrawTexSettings(); break;
+                    default:                        DrawOnSwitch();    break;
                 }
             }
             break;
@@ -5125,6 +5505,7 @@ int main(int,char**) {
 
     FreePreview();
     HttpServer::Stop();
+    MtpServer::Exit();
     BackupService::Cleanup();
     SaveMount::Unmount();
     Updater::Cleanup();

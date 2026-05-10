@@ -29,8 +29,11 @@ dkp-pacman -S switch-sdl2 switch-sdl2_image switch-sdl2_ttf switch-freetype swit
 Run inside the MSYS2 devkitPro shell:
 
 ```sh
+make setup   # first time only — clones libhaze (MTP support) into libs/libhaze/
 make
 ```
+
+`make setup` only needs to be run once after cloning the repo. Every subsequent build is just `make`.
 
 Output: `TomoToolNX.nro`
 

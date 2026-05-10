@@ -35,6 +35,8 @@ namespace TextureProcessor {
 
     enum class TextureKind { Canvas, Ugctex, Thumb };
     enum class TextureFormat { Bc1, Bc3 };
+    enum class Bc1Encoder { Custom, Rgbcx };
+    enum class Bc1Mode   { Auto, FourColor, ThreeColor };
 
     struct UgctexLayout {
         int Width, Height;
@@ -72,6 +74,8 @@ namespace TextureProcessor {
         bool noSrgb          = false;
         std::string originalUgctexPath;
         std::string thumbPath; // actual thumb file path — write destination when set
+        Bc1Encoder  encoder  = Bc1Encoder::Custom;
+        Bc1Mode     bc1Mode  = Bc1Mode::Auto;
     };
 
     // Returns empty string on success, error message on failure.
@@ -89,7 +93,9 @@ namespace TextureProcessor {
                                              const std::vector<uint8_t>* baseBuffer = nullptr);
 
     std::vector<uint8_t> Bc1Decode(const std::vector<uint8_t>& blocks, int w, int h);
-    std::vector<uint8_t> Bc1Encode(const std::vector<uint8_t>& rgba, int w, int h);
+    std::vector<uint8_t> Bc1Encode(const std::vector<uint8_t>& rgba, int w, int h,
+                                    Bc1Encoder enc  = Bc1Encoder::Custom,
+                                    Bc1Mode    mode = Bc1Mode::Auto);
     std::vector<uint8_t> Bc3Decode(const std::vector<uint8_t>& blocks, int w, int h);
     std::vector<uint8_t> Bc3Encode(const std::vector<uint8_t>& rgba, int w, int h);
 

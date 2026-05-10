@@ -125,7 +125,8 @@ bool Load(const std::string& path, SavFile& out, std::string& err) {
     if (!f) { err = "Cannot open: " + path; return false; }
     fseek(f, 0, SEEK_END); size_t sz = (size_t)ftell(f); fseek(f, 0, SEEK_SET);
     std::vector<uint8_t> b(sz);
-    fread(b.data(), 1, sz, f); fclose(f);
+    size_t nread = fread(b.data(), 1, sz, f); fclose(f);
+    if (nread != sz) { err = "Short read: " + path; return false; }
 
     if (sz < 0x20) { err = "File too small"; return false; }
     if (b[0]!=0x04 || b[1]!=0x03 || b[2]!=0x02 || b[3]!=0x01) { err = "Bad magic"; return false; }

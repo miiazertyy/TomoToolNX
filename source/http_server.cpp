@@ -122,6 +122,32 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .btn-cyan:hover:not(:disabled){border-color:var(--accent2);color:var(--accent2)}
 .btn-blue{border-color:#5a8cc8;color:#5a8cc8}
 .btn-blue:hover:not(:disabled){border-color:#7aaee8;color:#7aaee8}
+.btn-enc{padding:4px 10px;font-size:11px;border-color:var(--border)}
+.btn-enc.enc-on{border-color:var(--accent);color:var(--accent);background:rgba(200,169,110,.08)}
+.enc-row{display:none;padding:8px 14px 10px;border-top:1px solid var(--border);background:var(--surface);flex-direction:column;gap:8px}
+.enc-group{display:flex;flex-direction:column;gap:4px}
+.enc-group-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.enc-label{color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-size:10px;min-width:58px;flex-shrink:0}
+.enc-btns{display:flex;gap:4px;flex-wrap:wrap}
+.enc-hint{margin:0;font-size:11px;color:var(--muted);padding-left:66px}
+/* ── Settings panel ── */
+#settings-panel{display:none;position:fixed;inset:0;z-index:150;background:rgba(0,0,0,.6);align-items:flex-end;justify-content:center}
+#settings-panel.open{display:flex}
+#settings-drawer{background:var(--surface);border:1px solid var(--border);border-radius:8px 8px 0 0;width:100%;max-width:480px;padding:18px 20px 24px;display:flex;flex-direction:column;gap:16px;box-shadow:0 -4px 32px rgba(0,0,0,.5);animation:drawerUp .18s ease-out}
+@keyframes drawerUp{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
+#settings-drawer .s-title{font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);padding-bottom:8px;display:flex;align-items:center;justify-content:space-between}
+#settings-drawer .s-close{background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.1rem;padding:0;line-height:1;transition:color .12s}
+#settings-drawer .s-close:hover{color:var(--text)}
+.s-section{display:flex;flex-direction:column;gap:8px}
+.s-section-label{font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.s-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.s-hint{font-size:.7rem;color:var(--muted);font-style:italic;margin-top:2px}
+/* gear button */
+#btn-settings{padding:6px 10px;display:flex;align-items:center;justify-content:center}
+#btn-settings svg{transition:transform .5s cubic-bezier(.34,1.56,.64,1)}
+#btn-settings:hover svg{transform:rotate(60deg)}
+.s-custom-color2{display:flex;align-items:center;gap:6px}
+.s-custom-color2 label{font-size:.72rem;color:var(--muted)}
 .status{font-size:11px;padding:4px 10px;border-radius:2px;flex:1;min-width:0;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .status.ok{color:var(--ok)}.status.err{color:var(--err)}.status.info{color:var(--muted)}
 #save-warn{display:none;background:#2a1010;border:1px solid var(--err);border-radius:4px;padding:10px 14px;margin:8px 0;font-size:11px;line-height:1.6;color:var(--text)}
@@ -317,7 +343,35 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
     <button class="btn btn-blue" id="btn-removebg" disabled onclick="doRemoveBg()">remove BG</button>
     <button class="btn" onclick="loadList()">refresh</button>
     <div class="status info" id="status"></div>
+    <button class="btn" id="btn-settings" onclick="openSettings()" title="Settings"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
   </div>
+<!-- Settings panel overlay -->
+<div id="settings-panel" onclick="if(event.target===this)closeSettings()">
+  <div id="settings-drawer">
+    <div class="s-title">
+      <span>Settings</span>
+      <button class="s-close" onclick="closeSettings()">&#x2715;</button>
+    </div>
+    <div class="s-section">
+      <div class="s-section-label">Encoder</div>
+      <div class="s-row">
+        <button class="btn btn-enc enc-on" id="enc-custom" onclick="setEnc('custom')">Custom</button>
+        <button class="btn btn-enc" id="enc-rgbcx" onclick="setEnc('rgbcx')">rgbcx</button>
+      </div>
+      <div class="s-hint" id="enc-hint">Bounding-box encoder. Fast, reliable for most textures.</div>
+    </div>
+    <div class="s-section" id="bc1-group">
+      <div class="s-section-label">BC1 mode</div>
+      <div class="s-row">
+        <button class="btn btn-enc enc-on" id="bc1-auto" onclick="setBc1('auto')">Auto</button>
+        <button class="btn btn-enc" id="bc1-fourColor" onclick="setBc1('fourColor')">4-color</button>
+        <button class="btn btn-enc" id="bc1-threeColor" onclick="setBc1('threeColor')">3-color</button>
+      </div>
+      <div class="s-hint" id="bc1-hint">Picks the best mode per block. Recommended.</div>
+    </div>
+
+  </div>
+</div>
   <div class="list-wrap" style="padding-bottom:env(safe-area-inset-bottom,0px)">
     <div class="list-label" style="display:flex;align-items:center;gap:6px">
       <span style="flex:1">textures</span>
@@ -455,10 +509,32 @@ function doExport(){if(!selected)return;const a=document.createElement('a');a.hr
 function doExportLtd(){if(!selected)return;const k=ugcKindFromStem(selected.stem);if(k<0){setStatus('not a UGC item','err');return;}const a=document.createElement('a');a.href='/api/ugc/itemexport?stem='+encodeURIComponent(selected.stem);a.download=selected.stem+UGC_ITEM_EXTS[k];a.click();setStatus('exported .ltd','ok');}
 function doImport(){if(!selected)return;document.getElementById('file-input').click();}
 async function doRemoveBg(){if(!selected)return;showSpinner('removing background... (~30s)');const d=await(await fetch('/api/removebg?stem='+encodeURIComponent(selected.stem),{method:'POST'})).json();modalClose();if(d.ok){setStatus('background removed','ok');await loadList();const fresh=entries.find(e=>e.stem===selected.stem);if(fresh)selectEntry(fresh);}else setStatus('failed: '+d.error,'err');}
+// ── Encoder / BC1 mode ────────────────────────────────────────────────────────
+let encMode='custom', bc1Mode='auto';
+const ENC_HINTS={
+  custom:'Bounding-box encoder. Fast, reliable for most textures.',
+  rgbcx:'PCA-based encoder. Better color accuracy on dark and gradient textures.'
+};
+const BC1_HINTS={
+  auto:'Picks 4-color or 3-color mode per block. Recommended.',
+  fourColor:'Forces 4-color interpolation. Sharper colors, no black transparency.',
+  threeColor:'Forces 3-color + transparent. Best for cutout-alpha textures.'
+};
+function setEnc(v){
+  encMode=v;
+  ['custom','rgbcx'].forEach(k=>document.getElementById('enc-'+k).classList.toggle('enc-on',k===v));
+  document.getElementById('bc1-group').style.display=v==='custom'?'':'none';
+  document.getElementById('enc-hint').textContent=ENC_HINTS[v]||'';
+}
+function setBc1(v){
+  bc1Mode=v;
+  ['auto','fourColor','threeColor'].forEach(k=>document.getElementById('bc1-'+k).classList.toggle('enc-on',k===v));
+  document.getElementById('bc1-hint').textContent=BC1_HINTS[v]||'';
+}
 function fileChosen(){const fi=document.getElementById('file-input');if(!fi.files.length)return;const f=fi.files[0];fi.value='';const ext=f.name.slice(f.name.lastIndexOf('.')).toLowerCase();if(UGC_ITEM_EXTS.includes(ext)){uploadUgcItemFile(f);}else{pendingFile=f;uploadFile();}}
 async function uploadFile(){
   showSpinner('importing...');
-  const fd=new FormData();fd.append('file',pendingFile);fd.append('stem',selected.stem);
+  const fd=new FormData();fd.append('file',pendingFile);fd.append('stem',selected.stem);fd.append('encoder',encMode);fd.append('bc1Mode',bc1Mode);
   const d=await(await fetch('/api/import',{method:'POST',body:fd})).json();
   modalClose();
   if(d.ok){setStatus('imported','ok');await loadList();const fresh=entries.find(e=>e.stem===selected.stem);if(fresh)selectEntry(fresh);}
@@ -466,6 +542,10 @@ async function uploadFile(){
   pendingFile=null;
 }
 function setStatus(msg,cls){const el=document.getElementById('status');el.textContent=msg;el.className='status '+cls;}
+
+// ── Settings panel ────────────────────────────────────────────────────────────
+function openSettings(){document.getElementById('settings-panel').classList.add('open');}
+function closeSettings(){document.getElementById('settings-panel').classList.remove('open');}
 
 // ── UGC item import (.ltdf/.ltdc/etc.) ────────────────────────────────────────
 const UGC_ITEM_PFXS=['Food','Cloth','Goods','Interior','Exterior','MapObject','MapFloor'];
@@ -3568,7 +3648,13 @@ static void HandleExport(int fd,const std::string& query){
 static void HandleImport(int fd,const Request& req){
     auto fields=ParseMultipart(req.body,req.contentType);
     std::string stem;std::vector<uint8_t> fileData;std::string fileExt=".png";
-    for(auto& f:fields){if(f.name=="stem")stem=f.data;else if(f.name=="file"){fileData.assign(f.data.begin(),f.data.end());if(!f.filename.empty()){size_t dot=f.filename.rfind('.');if(dot!=std::string::npos)fileExt=f.filename.substr(dot);}}}
+    std::string encoderStr,bc1ModeStr;
+    for(auto& f:fields){
+        if(f.name=="stem")stem=f.data;
+        else if(f.name=="encoder")encoderStr=f.data;
+        else if(f.name=="bc1Mode")bc1ModeStr=f.data;
+        else if(f.name=="file"){fileData.assign(f.data.begin(),f.data.end());if(!f.filename.empty()){size_t dot=f.filename.rfind('.');if(dot!=std::string::npos)fileExt=f.filename.substr(dot);}}
+    }
     if(stem.empty()||fileData.empty()){SrvLog("Import: missing stem or file",true);Send500(fd,"Missing stem or file");return;}
     SrvLog("Import: received '"+stem+"' ("+std::to_string(fileData.size())+" bytes, ext="+fileExt+")");
 
@@ -3584,6 +3670,9 @@ static void HandleImport(int fd,const Request& req){
     TextureProcessor::ImportOptions opts;
     opts.pngPath=tmpPath;opts.destStem=found->directory()+"/"+found->stem;
     opts.writeCanvas=found->hasCanvas();opts.writeThumb=found->hasThumb();opts.thumbPath=found->thumbPath;opts.noSrgb=false;opts.originalUgctexPath=found->ugctexPath;
+    if(encoderStr=="rgbcx") opts.encoder=TextureProcessor::Bc1Encoder::Rgbcx;
+    if(bc1ModeStr=="fourColor") opts.bc1Mode=TextureProcessor::Bc1Mode::FourColor;
+    else if(bc1ModeStr=="threeColor") opts.bc1Mode=TextureProcessor::Bc1Mode::ThreeColor;
 
     SrvLog("Import: queuing PNG decode on main thread (IMG_Load not thread-safe)");
     {mutexLock(&s_importMutex);s_importJob={opts,tmpPath};s_importState=ImportState::Queued;s_importResult="";mutexUnlock(&s_importMutex);}
