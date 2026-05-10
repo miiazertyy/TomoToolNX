@@ -158,10 +158,10 @@ static void DownloadThreadFunc(void*) {
         return;
     }
 
-    // Replace the running NRO using rename — the OS holds a read lock on the
-    // original path but rename() replaces the directory entry atomically, so
-    // the new file is in place for the next launch without ever opening the
-    // locked path for writing.
+    // Replace the running NRO: remove the original directory entry first
+    // (the OS read-lock prevents writing to it but not unlinking it), then
+    // rename the downloaded tmp into place.
+    remove(UPDATE_NRO_PATH);
     if (rename(tmpPath.c_str(), UPDATE_NRO_PATH) != 0) {
         remove(tmpPath.c_str());
         Lock(); s_state=State::Error; s_error="Failed to install update (rename failed)"; Unlock();
