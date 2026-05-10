@@ -6,7 +6,8 @@
 
 #define APP_VERSION "1.2.5"  // bump this before each release
 #define GITHUB_REPO "miiazertyy/TomoToolNX"
-#define UPDATE_NRO_PATH "sdmc:/switch/TomoToolNX/TomoToolNX.nro"
+#define UPDATE_NRO_PATH     "sdmc:/switch/TomoToolNX/TomoToolNX.nro"
+#define UPDATE_NRO_SWAP     "sdmc:/switch/TomoToolNX/TomoToolNX_new.nro"
 
 namespace Updater {
 

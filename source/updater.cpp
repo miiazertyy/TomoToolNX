@@ -132,8 +132,9 @@ static void DownloadThreadFunc(void*) {
     std::string url = "https://github.com/" GITHUB_REPO "/releases/download/"
                       + latest + "/TomoToolNX.nro";
 
-    // Download to temp file first
-    std::string tmpPath = std::string(UPDATE_NRO_PATH) + ".tmp";
+    // Download directly to swap file (avoids writing over the running NRO,
+    // which is OS-locked on Switch and causes the rename to fail)
+    std::string tmpPath = UPDATE_NRO_SWAP;
     FILE* f = fopen(tmpPath.c_str(), "wb");
     if (!f) {
         Lock(); s_state=State::Error; s_error="Cannot open temp file"; Unlock();
@@ -158,16 +159,10 @@ static void DownloadThreadFunc(void*) {
         return;
     }
 
-    // Replace the running NRO: remove the original directory entry first
-    // (the OS read-lock prevents writing to it but not unlinking it), then
-    // rename the downloaded tmp into place.
-    remove(UPDATE_NRO_PATH);
-    if (rename(tmpPath.c_str(), UPDATE_NRO_PATH) != 0) {
-        remove(tmpPath.c_str());
-        Lock(); s_state=State::Error; s_error="Failed to install update (rename failed)"; Unlock();
-        return;
-    }
-
+    // Download is complete — the new NRO is at UPDATE_NRO_SWAP.
+    // The running NRO is OS-locked and cannot be replaced in-place on Switch.
+    // The user should relaunch TomoToolNX_new.nro from the homebrew menu to
+    // complete the update.
     Lock(); s_state=State::Done; s_progress=1.0f; Unlock();
 }
 
