@@ -158,27 +158,14 @@ static void DownloadThreadFunc(void*) {
         return;
     }
 
-    // Replace the NRO by copying bytes — rename() is unreliable on Switch FAT
-    {
-        FILE* src = fopen(tmpPath.c_str(), "rb");
-        if (!src) {
-            remove(tmpPath.c_str());
-            Lock(); s_state=State::Error; s_error="Cannot read downloaded file"; Unlock();
-            return;
-        }
-        FILE* dst = fopen(UPDATE_NRO_PATH, "wb");
-        if (!dst) {
-            fclose(src); remove(tmpPath.c_str());
-            Lock(); s_state=State::Error; s_error="Cannot open NRO for writing"; Unlock();
-            return;
-        }
-        char chunk[4096];
-        size_t n;
-        while ((n = fread(chunk, 1, sizeof(chunk), src)) > 0)
-            fwrite(chunk, 1, n, dst);
-        fclose(src);
-        fclose(dst);
+    // Replace the running NRO using rename — the OS holds a read lock on the
+    // original path but rename() replaces the directory entry atomically, so
+    // the new file is in place for the next launch without ever opening the
+    // locked path for writing.
+    if (rename(tmpPath.c_str(), UPDATE_NRO_PATH) != 0) {
         remove(tmpPath.c_str());
+        Lock(); s_state=State::Error; s_error="Failed to install update (rename failed)"; Unlock();
+        return;
     }
 
     Lock(); s_state=State::Done; s_progress=1.0f; Unlock();
