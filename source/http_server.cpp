@@ -9,6 +9,7 @@
 #include "mii_manager.h"
 #include "save_editor.h"
 #include "habits_data.h"
+#include "wishes_data.h"
 
 #include <switch.h>
 #include <sys/socket.h>
@@ -29,6 +30,7 @@
 #include <sys/stat.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
+#include <curl/curl.h>
 
 static void MkdirP(const char* path) { mkdir(path, 0777); }
 static bool FileExists(const std::string& p){struct stat st;return stat(p.c_str(),&st)==0;}
@@ -218,7 +220,7 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 #nav-toggle-bar{display:flex;align-items:center;justify-content:center;height:16px;background:var(--surface);border-bottom:1px solid var(--border);cursor:pointer;flex-shrink:0;color:var(--muted);user-select:none}
 #nav-toggle-bar:hover{color:var(--text)}
 #nav-toggle-bar svg{transition:transform .2s}
-body.nav-collapsed header,body.nav-collapsed .tabs,body.nav-collapsed #save-warn,body.nav-collapsed #mii-subtab-bar-global,body.nav-collapsed #save-toolbar-player,body.nav-collapsed #save-toolbar-mii{display:none!important}
+body.nav-collapsed header,body.nav-collapsed .tabs,body.nav-collapsed #save-warn,body.nav-collapsed #mii-subtab-bar-global,body.nav-collapsed #save-toolbar-player,body.nav-collapsed #save-toolbar-mii,body.nav-collapsed #mii-ltd-toolbar{display:none!important}
 body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
 .mii-content{flex:1;overflow-y:auto;min-height:0}.mii-content::-webkit-scrollbar{width:4px}.mii-content::-webkit-scrollbar-thumb{background:var(--border)}
 .mii-words-list{display:flex;flex-direction:column;gap:4px;padding:10px 12px}
@@ -297,6 +299,135 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
 .bl-no-results{padding:12px;color:var(--muted);font-size:.82rem;text-align:center}
 .bl-warn{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.4);border-radius:4px;padding:6px 10px;font-size:.75rem;color:#92400e}
 .bl-coord-pieces{font-size:.7rem;color:var(--muted);margin-top:3px}
+/* ── housing panel (redesigned for touch + joystick) ───────────────────────── */
+body.housing-tab .mii-slot-list{display:none}
+body.housing-tab .mii-right-panel{background:var(--bg)}
+/* Browse online: the share list doesn't operate on a single selected Mii,
+   so the left slot list is dead space — hide it for that sub-tab. */
+body.browse-tab .mii-slot-list{display:none}
+body.browse-tab .mii-right-panel{background:var(--bg)}
+#mii-housing-panel{padding:0;display:flex;flex-direction:column}
+.hou-actionbar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px 16px;background:var(--surface);border-bottom:1px solid var(--border);box-shadow:0 2px 6px rgba(0,0,0,.18)}
+.hou-actionbar-status{flex:1;min-width:200px;font-size:.95rem;color:var(--text);line-height:1.4}
+.hou-actionbar-status b{color:var(--accent);font-weight:600}
+.hou-actionbar-status .hou-sub{display:block;color:var(--muted);font-size:.78rem;margin-top:2px}
+.hou-actionbar .btn{font-size:.92rem;padding:9px 16px;min-height:42px}
+.hou-section-label{font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding:14px 16px 6px;font-weight:600}
+.hou-unhoused-row{display:flex;flex-wrap:wrap;gap:10px;padding:0 16px 4px}
+.hou-empty-inline{color:var(--muted);font-style:italic;font-size:.85rem;padding:8px 4px}
+.hou-mii{display:inline-flex;align-items:center;gap:8px;padding:10px 16px;min-height:44px;background:var(--surface);border:2px solid var(--border);border-radius:8px;color:var(--text);font-size:.92rem;font-family:inherit;font-weight:600;cursor:pointer;transition:border-color .12s,box-shadow .12s,background .12s}
+.hou-mii:hover,.hou-mii:focus-visible{border-color:var(--accent);outline:none}
+.hou-mii.picked{border-color:var(--accent);background:rgba(200,160,50,.18);box-shadow:0 0 0 3px rgba(200,160,50,.35);animation:houPulse 1.4s ease-in-out infinite}
+body.hou-picking .hou-mii:not(.picked){opacity:.7}
+@keyframes houPulse{0%,100%{box-shadow:0 0 0 3px rgba(200,160,50,.25)}50%{box-shadow:0 0 0 6px rgba(200,160,50,.45)}}
+.hou-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;padding:0 16px 24px}
+.hou-card{display:flex;flex-direction:column;background:var(--surface);border:2px solid var(--border);border-radius:10px;overflow:hidden;min-height:200px}
+.hou-card-head{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--surface2);border-bottom:2px solid var(--border)}
+.hou-card-title{flex:1;font-size:1rem;font-weight:700;color:var(--text);display:flex;align-items:baseline;gap:6px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hou-card-title .hou-card-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hou-card-title .hou-id{color:var(--accent);font-family:monospace;font-size:.78rem;font-weight:600;flex-shrink:0}
+.hou-card-meta{font-size:.7rem;color:var(--muted);font-family:monospace}
+.hou-card-vacate{background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:4px;padding:5px 10px;font-size:.74rem;font-family:inherit;cursor:pointer;min-height:30px}
+.hou-card-vacate:hover,.hou-card-vacate:focus-visible{color:var(--err);border-color:var(--err);outline:none}
+.hou-card-body{display:flex;flex-direction:column;gap:8px;padding:12px;flex:1}
+.hou-slot{display:flex;align-items:center;gap:10px;padding:10px 12px;min-height:48px;background:var(--bg);border:2px solid var(--border);border-radius:6px;color:var(--text);font-size:.9rem;font-family:inherit;font-weight:600;text-align:left;cursor:pointer;transition:border-color .12s,box-shadow .12s,background .12s;width:100%}
+.hou-slot:hover,.hou-slot:focus-visible{border-color:var(--accent);outline:none}
+.hou-slot.empty{color:var(--muted);font-style:italic;font-weight:400;border-style:dashed}
+.hou-slot.conflict{border-color:#f59e0b;background:rgba(245,158,11,.1)}
+.hou-slot.picked{border-color:var(--accent);background:rgba(200,160,50,.18);box-shadow:0 0 0 3px rgba(200,160,50,.35);animation:houPulse 1.4s ease-in-out infinite}
+.hou-slot-room{flex-shrink:0;font-size:.7rem;color:var(--muted);font-family:monospace;letter-spacing:.05em;min-width:54px}
+.hou-slot-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.hou-picking .hou-slot:not(.picked){border-color:rgba(200,160,50,.45);border-style:dashed}
+body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.picked):focus-visible{border-color:var(--accent);border-style:solid;background:rgba(200,160,50,.08)}
+.hou-card-add{background:transparent;border:1.5px dashed var(--border);color:var(--muted);border-radius:6px;padding:8px 12px;font-size:.82rem;font-family:inherit;cursor:pointer;min-height:38px;text-align:center}
+.hou-card-add:hover,.hou-card-add:focus-visible{border-color:var(--accent);color:var(--accent);outline:none}
+.hou-newhouse{display:flex;align-items:center;justify-content:center;background:transparent;border:2px dashed var(--border);color:var(--muted);border-radius:10px;font-size:.95rem;font-weight:600;font-family:inherit;cursor:pointer;min-height:200px}
+.hou-newhouse:hover,.hou-newhouse:focus-visible{border-color:var(--accent);color:var(--accent);outline:none}
+.hou-empty{padding:24px 16px;color:var(--muted);font-style:italic;text-align:center;font-size:.95rem}
+.hou-warn{font-size:.78rem;color:#fbbf24;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.4);border-radius:4px;padding:7px 10px;margin-top:2px}
+/* ── wishes editor ────────────────────────────────────────────────────────── */
+.wsh-loading,.wsh-empty{padding:16px 12px;color:var(--muted);font-style:italic;text-align:center;font-size:.82rem}
+.wsh-summary{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline;font-size:.82rem;color:var(--text);margin-bottom:8px}
+.wsh-summary b{color:var(--accent);font-weight:600}
+.wsh-summary .wsh-sep{color:var(--muted)}
+.wsh-bulk{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px}
+.wsh-btn{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:3px;cursor:pointer;font-size:.82rem;font-family:inherit;letter-spacing:.04em;transition:all .12s}
+.wsh-btn:hover{border-color:var(--accent);color:var(--accent)}
+.wsh-btn-go{border-color:var(--accent);color:var(--accent)}
+.wsh-btn-go:hover{background:rgba(200,160,80,.1)}
+.wsh-btn-danger{border-color:#a04848;color:#d97070}
+.wsh-btn-danger:hover{background:rgba(180,60,60,.12);color:#ee9090}
+.wsh-armed{background:#5a2418!important;border-color:#f59e0b!important;color:#ffd590!important;animation:wshPulse 1s ease-in-out infinite}
+@keyframes wshPulse{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,.4)}50%{box-shadow:0 0 0 4px rgba(245,158,11,.08)}}
+.wsh-btn-cancel{background:transparent;border:1px solid var(--border);color:var(--muted);padding:6px 12px;border-radius:3px;cursor:pointer;font-size:.78rem;font-family:inherit}
+.wsh-btn-cancel:hover{color:var(--text);border-color:var(--text)}
+.wsh-filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:6px}
+.wsh-filters .ed-input,.wsh-filters .ed-select{width:auto;flex:0 1 auto}
+.wsh-filters .ed-input{flex:1;min-width:140px}
+.wsh-toggle{font-size:.74rem;color:var(--muted);display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:none}
+.wsh-toggle input{accent-color:var(--accent)}
+.wsh-list{display:flex;flex-direction:column;gap:1px;max-height:360px;overflow-y:auto;border:1px solid var(--border);border-radius:3px;background:var(--bg)}
+.wsh-list::-webkit-scrollbar{width:4px}.wsh-list::-webkit-scrollbar-thumb{background:var(--border)}
+.wsh-row{display:flex;align-items:center;gap:8px;padding:5px 9px;background:var(--surface);cursor:pointer;font-size:.82rem;color:var(--muted);transition:background .08s}
+.wsh-row:hover{background:var(--surface2)}
+.wsh-row.on{color:var(--text);border-left:3px solid var(--accent);padding-left:6px}
+.wsh-row input{accent-color:var(--accent);flex-shrink:0}
+.wsh-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wsh-cat{font-size:.7rem;color:var(--muted);background:var(--surface2);padding:1px 7px;border-radius:8px;flex-shrink:0}
+/* ── browse online (TomodachiShare) ─────────────────────────────────────── */
+.btn-share-icon{border-color:#5a8cc8;color:#5a8cc8;display:inline-flex;align-items:center;justify-content:center;padding:0;width:28px;height:28px;flex-shrink:0}
+.btn-share-icon:hover:not(:disabled){border-color:#7aaee8;color:#7aaee8;background:rgba(122,174,232,.08)}
+#mii-browse-panel{padding:10px 12px;display:flex;flex-direction:column;gap:10px;box-sizing:border-box;min-height:100%}
+.br-toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:8px 10px}
+.br-search{flex:1;min-width:160px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:5px 9px;border-radius:3px;font-size:.85rem;font-family:inherit;outline:none}
+.br-search:focus{border-color:var(--accent)}
+.br-toolbar select{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:3px;font-size:.78rem;font-family:inherit}
+.br-toggle{display:inline-flex;align-items:center;gap:5px;font-size:.74rem;color:var(--muted);cursor:pointer;user-select:none}
+.br-toggle input{accent-color:var(--accent)}
+.br-toolbar .br-spacer{flex:1;min-width:6px}
+.br-pager{display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--muted)}
+.br-pager .btn{padding:3px 9px;font-size:.78rem}
+.br-pager-page{font-family:monospace;color:var(--text);min-width:54px;text-align:center}
+.br-status{padding:3px 12px;font-size:.72rem;color:var(--muted);background:var(--surface);border-radius:3px;border:1px solid var(--border)}
+.br-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;padding-right:2px}
+.br-card{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:5px;overflow:hidden;display:flex;flex-direction:column;cursor:pointer;transition:border-color .12s,transform .1s}
+.br-card:hover{border-color:var(--accent);transform:translateY(-1px)}
+.br-card-img{aspect-ratio:1/1;background:var(--surface2) center/contain no-repeat;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:.7rem;overflow:hidden}
+.br-card-img img{width:100%;height:100%;object-fit:contain;display:block}
+.br-card-body{padding:6px 8px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.br-card-title{font-size:.82rem;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.br-card-meta{font-size:.7rem;color:var(--muted);display:flex;gap:6px;align-items:center}
+.br-card-meta .br-likes{color:#e16f6f}
+.br-card-badge{position:absolute;top:5px;left:5px;font-size:.62rem;font-weight:bold;padding:1px 6px;border-radius:9px;background:rgba(0,0,0,.6);color:var(--accent);border:1px solid rgba(200,160,50,.5)}
+.br-card-tags{font-size:.66rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-style:italic}
+.br-empty{padding:24px 12px;color:var(--muted);font-style:italic;text-align:center;font-size:.85rem}
+.br-loading{padding:24px 12px;color:var(--accent);text-align:center;font-size:.85rem;letter-spacing:.06em}
+.br-detail-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:120;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
+.br-detail-overlay.open{display:flex}
+.br-detail{background:var(--bg);border:1px solid var(--border);border-radius:6px;max-width:980px;width:100%;max-height:92vh;overflow:hidden;display:flex;flex-direction:column}
+.br-detail-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface)}
+.br-detail-title{flex:1;font-size:1rem;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.br-detail-close{background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:1.4rem;padding:2px 8px;line-height:1}
+.br-detail-close:hover{color:var(--text)}
+.br-detail-body{display:flex;flex-wrap:wrap;gap:14px;padding:14px;overflow-y:auto}
+.br-detail-imgs{flex:1;min-width:220px;display:flex;flex-direction:column;gap:6px}
+.br-detail-main-img{aspect-ratio:1/1;background:var(--surface2) center/contain no-repeat;border:1px solid var(--border);border-radius:5px;overflow:hidden;display:flex;align-items:center;justify-content:center}
+.br-detail-main-img img{width:100%;height:100%;object-fit:contain;display:block}
+.br-detail-thumbs{display:flex;flex-wrap:wrap;gap:5px}
+.br-detail-thumb{width:56px;height:56px;border:1px solid var(--border);border-radius:3px;overflow:hidden;cursor:pointer;background:var(--surface2);padding:0;transition:border-color .12s}
+.br-detail-thumb.active{border-color:var(--accent)}
+.br-detail-thumb img{width:100%;height:100%;object-fit:contain}
+.br-detail-info{flex:1.2;min-width:240px;display:flex;flex-direction:column;gap:8px}
+.br-detail-row{font-size:.82rem;color:var(--text);display:flex;gap:8px}
+.br-detail-row b{color:var(--muted);font-weight:600;min-width:80px}
+.br-detail-tags{display:flex;flex-wrap:wrap;gap:4px}
+.br-tag{background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:1px 8px;font-size:.7rem;color:var(--muted)}
+.br-detail-desc{font-size:.8rem;color:var(--text);line-height:1.5;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:7px 10px;white-space:pre-wrap;word-break:break-word}
+.br-import-box{background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:9px 11px;display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.br-import-box .br-import-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.br-import-box .br-import-row label{font-size:.74rem;color:var(--muted)}
+.br-import-box input[type="number"]{width:80px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:3px;font-size:.85rem;font-family:inherit}
+.br-import-hint{font-size:.7rem;color:var(--muted);font-style:italic}
 @media(max-width:600px){.save-mii-layout{flex-direction:column}.mii-slot-list{width:100%;flex-direction:row;flex-wrap:wrap;max-height:90px;border-right:none;border-bottom:1px solid var(--border)}.mii-subtab-bar{flex-wrap:wrap}}
 </style>
 </head>
@@ -306,22 +437,23 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
   <span id="hdr-count"></span>
 </header>
 <div class="tabs">
-  <button class="tab active" onclick="switchTab('ugc',this)">textures</button>
-  <button class="tab" onclick="switchTab('miistats',this)">mii</button>
-  <button class="tab" onclick="switchTab('player',this)">player</button>
+  <button class="tab active" data-i18n="tab.textures" onclick="switchTab('ugc',this)">textures</button>
+  <button class="tab" data-i18n="tab.mii" onclick="switchTab('miistats',this)">mii</button>
+  <button class="tab" data-i18n="tab.player" onclick="switchTab('player',this)">player</button>
 </div>
 
 <!-- one-time tips -->
-<div id="save-warn"><b>Warning</b> — Modifying save data can break your game. Make sure you have a backup before editing.<button class="tip-close" onclick="dismissSaveWarn()">Got it</button></div>
+<div id="save-warn"><b data-i18n="warn.title">Warning</b><span data-i18n="warn.body"> — Modifying save data can break your game. Make sure you have a backup before editing.</span><button class="tip-close" data-i18n="warn.dismiss" onclick="dismissSaveWarn()">Got it</button></div>
 
 <!-- Mii sub-tabs (global, shown only when mii tab is active) -->
 <div class="mii-subtab-bar" id="mii-subtab-bar-global">
-  <button class="mii-subtab active" onclick="switchMiiSubTab('stats',this)">stats</button>
-  <button class="mii-subtab" onclick="switchMiiSubTab('belongings',this)">belongings</button>
-  <button class="mii-subtab" onclick="switchMiiSubTab('habits',this)">habits</button>
-  <button class="mii-subtab" onclick="switchMiiSubTab('words',this)">words</button>
-  <button class="mii-subtab" onclick="switchMiiSubTab('rel',this)">relations</button>
-  <button class="mii-subtab" onclick="switchMiiSubTab('social',this)">social</button>
+  <button class="mii-subtab active" data-i18n="subtab.stats" onclick="switchMiiSubTab('stats',this)">stats</button>
+  <button class="mii-subtab" data-i18n="subtab.belongings" onclick="switchMiiSubTab('belongings',this)">items</button>
+  <button class="mii-subtab" data-i18n="subtab.habits" onclick="switchMiiSubTab('habits',this)">habits</button>
+  <button class="mii-subtab" data-i18n="subtab.words" onclick="switchMiiSubTab('words',this)">words</button>
+  <button class="mii-subtab" data-i18n="subtab.relations" onclick="switchMiiSubTab('rel',this)">relations</button>
+  <button class="mii-subtab" data-i18n="subtab.housing" onclick="switchMiiSubTab('housing',this)">housing</button>
+  <button class="mii-subtab" data-i18n="subtab.social" onclick="switchMiiSubTab('social',this)">social</button>
 </div>
 
 <!-- Nav collapse toggle -->
@@ -349,11 +481,11 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
 <div id="settings-panel" onclick="if(event.target===this)closeSettings()">
   <div id="settings-drawer">
     <div class="s-title">
-      <span>Settings</span>
+      <span data-i18n="settings.title">Settings</span>
       <button class="s-close" onclick="closeSettings()">&#x2715;</button>
     </div>
     <div class="s-section">
-      <div class="s-section-label">Encoder</div>
+      <div class="s-section-label" data-i18n="settings.encoder">Encoder</div>
       <div class="s-row">
         <button class="btn btn-enc enc-on" id="enc-custom" onclick="setEnc('custom')">Custom</button>
         <button class="btn btn-enc" id="enc-rgbcx" onclick="setEnc('rgbcx')">rgbcx</button>
@@ -361,7 +493,7 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
       <div class="s-hint" id="enc-hint">Bounding-box encoder. Fast, reliable for most textures.</div>
     </div>
     <div class="s-section" id="bc1-group">
-      <div class="s-section-label">BC1 mode</div>
+      <div class="s-section-label" data-i18n="settings.bc1">BC1 mode</div>
       <div class="s-row">
         <button class="btn btn-enc enc-on" id="bc1-auto" onclick="setBc1('auto')">Auto</button>
         <button class="btn btn-enc" id="bc1-fourColor" onclick="setBc1('fourColor')">4-color</button>
@@ -388,6 +520,11 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
   <div class="social-close">click outside to close</div>
 </div>
 
+<!-- TomodachiShare detail overlay -->
+<div class="br-detail-overlay" id="br-detail-overlay" onclick="if(event.target===this)closeBrowseDetail()">
+  <div class="br-detail" id="br-detail-card"></div>
+</div>
+
 <!-- Player Panel -->
 <div class="panel" id="panel-player">
   <div class="toolbar" id="save-toolbar-player">
@@ -405,9 +542,12 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
     <button class="btn btn-gold" id="save-apply-mii" disabled onclick="applySave('mii')">apply to Switch</button>
     <div class="status info" id="save-status-mii"></div>
   </div>
-  <div class="toolbar" style="margin-top:4px">
+  <div class="toolbar" id="mii-ltd-toolbar" style="margin-top:4px">
     <button class="btn btn-primary" id="btn-mii-import" disabled onclick="doMiiImport(savMiiSlot+1)">import .ltd</button>
     <button class="btn btn-gold" id="btn-mii-export" disabled onclick="doMiiExport(savMiiSlot+1)">export .ltd</button>
+    <button class="btn btn-share-icon" id="btn-mii-browse" title="Download a Mii from TomodachiShare and overwrite the selected slot" onclick="openBrowseTab()" aria-label="Download from TomodachiShare">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+    </button>
     <div class="status info" id="mii-io-status"></div>
   </div>
   <div class="save-mii-layout">
@@ -419,6 +559,8 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
       <div class="mii-content" id="mii-content-social" style="display:none"><div id="mii-social-panel"></div></div>
       <div class="mii-content" id="mii-content-belongings" style="display:none"><div id="mii-bl-panel" style="padding:10px 12px;display:flex;flex-direction:column;gap:10px"></div></div>
       <div class="mii-content" id="mii-content-habits" style="display:none"><div id="mii-habits-panel"></div></div>
+      <div class="mii-content" id="mii-content-housing" style="display:none"><div id="mii-housing-panel"></div></div>
+      <div class="mii-content" id="mii-content-browse" style="display:none"><div id="mii-browse-panel"></div></div>
     </div>
   </div>
 </div>
@@ -443,6 +585,106 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
 <input type="file" id="mii-file-input" accept=".ltd" style="display:none" onchange="miiFileChosen()">
 
 <script>
+// ── Translations ─────────────────────────────────────────────────────────────
+// HOW TO ADD A NEW LANGUAGE (contributors welcome!):
+//   1. Add an entry to LOCALE_META below with your locale code + display name.
+//      Example: {code:'es', label:'Español'}
+//   2. Copy the entire `en` block in LOCALES, rename the key to your code,
+//      and translate each value. Any key you skip falls back to English, so
+//      partial translations are fine — feel free to submit a PR with whatever
+//      you have time for.
+//   3. Rebuild the app (or just edit the embedded HTML on the SD card).
+//   4. Open a Pull Request on github.com/miiazertyy/TomoToolNX — thanks!
+const LOCALE_META = [
+  {code:'en', label:'English'},
+  {code:'fr', label:'Français'},
+];
+const LOCALES = {
+  en: {
+    'tab.textures':'textures',
+    'tab.mii':'mii',
+    'tab.player':'player',
+    'subtab.stats':'stats',
+    'subtab.belongings':'items',
+    'subtab.habits':'habits',
+    'subtab.words':'words',
+    'subtab.relations':'relations',
+    'subtab.social':'social',
+    'subtab.housing':'housing',
+    'warn.title':'Warning',
+    'warn.body':' — Modifying save data can break your game. Make sure you have a backup before editing.',
+    'warn.dismiss':'Got it',
+    'settings.title':'Settings',
+    'settings.encoder':'Encoder',
+    'settings.bc1':'BC1 mode',
+    'settings.language':'Language',
+    'settings.languageHint':'App display language. Help translate — see the README on GitHub.',
+    'btn.loadMii':'load Mii.sav',
+    'btn.loadPlayer':'load Player.sav',
+    'btn.apply':'apply to Switch',
+    'btn.refresh':'refresh',
+    'btn.import':'import',
+    'btn.exportPic':'export pic',
+    'btn.exportLtd':'export .ltd',
+    'btn.importLtd':'import .ltd',
+    'btn.removebg':'remove BG',
+  },
+  fr: {
+    'tab.textures':'textures',
+    'tab.mii':'mii',
+    'tab.player':'joueur',
+    'subtab.stats':'stats',
+    'subtab.belongings':'objets',
+    'subtab.habits':'habitudes',
+    'subtab.words':'mots',
+    'subtab.relations':'relations',
+    'subtab.social':'social',
+    'subtab.housing':'logement',
+    'warn.title':'Attention',
+    'warn.body':" — Modifier les sauvegardes peut casser votre partie. Faites une copie avant d'éditer.",
+    'warn.dismiss':'Compris',
+    'settings.title':'Paramètres',
+    'settings.encoder':'Encodeur',
+    'settings.bc1':'Mode BC1',
+    'settings.language':'Langue',
+    'settings.languageHint':"Langue d'affichage. Aidez à traduire — voir le README sur GitHub.",
+    'btn.loadMii':'charger Mii.sav',
+    'btn.loadPlayer':'charger Player.sav',
+    'btn.apply':'appliquer',
+    'btn.refresh':'actualiser',
+    'btn.import':'importer',
+    'btn.exportPic':'exporter image',
+    'btn.exportLtd':'exporter .ltd',
+    'btn.importLtd':'importer .ltd',
+    'btn.removebg':'retirer fond',
+  },
+  // Add new languages here — see the comment block above for instructions.
+};
+let CUR_LOCALE='en';
+try{const saved=localStorage.getItem('tomotool.locale');if(saved&&LOCALES[saved])CUR_LOCALE=saved;}catch(_){}
+function t(key){
+  const cur=LOCALES[CUR_LOCALE];
+  if(cur&&cur[key]!==undefined)return cur[key];
+  if(LOCALES.en[key]!==undefined)return LOCALES.en[key];
+  return key;
+}
+function applyTranslations(){
+  document.querySelectorAll('[data-i18n]').forEach(el=>{el.textContent=t(el.getAttribute('data-i18n'));});
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el=>{el.placeholder=t(el.getAttribute('data-i18n-placeholder'));});
+  document.querySelectorAll('[data-i18n-title]').forEach(el=>{el.title=t(el.getAttribute('data-i18n-title'));});
+}
+function populateLocaleSelect(){
+  const sel=document.getElementById('locale-select');
+  if(!sel)return;
+  sel.innerHTML=LOCALE_META.map(l=>`<option value="${l.code}"${l.code===CUR_LOCALE?' selected':''}>${l.label}</option>`).join('');
+}
+function setLocale(code){
+  if(!LOCALES[code])return;
+  CUR_LOCALE=code;
+  try{localStorage.setItem('tomotool.locale',code);}catch(_){}
+  applyTranslations();
+}
+
 // ── Tab switching ──────────────────────────────────────────────────────────────
 function switchTab(name, btn) {
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
@@ -570,13 +812,37 @@ async function loadMiis(){
   const d=await(await fetch('/api/mii/list')).json();
   miiEntries=d.miis||[];
 }
+function sanitizeMiiFilename(s){
+  // Strip the chars that Windows/exFAT would reject in a filename. UTF-8
+  // letters (accents, kana, …) are kept since the Switch handles them fine.
+  let out='';
+  for(const ch of s){
+    const code=ch.codePointAt(0);
+    if(code<0x20)continue;
+    if('\\/:*?"<>|'.indexOf(ch)>=0){ out+='_'; continue; }
+    out+=ch;
+  }
+  // Trim leading/trailing spaces & dots.
+  return out.replace(/^[ .]+|[ .]+$/g,'');
+}
 function doMiiExport(slot){
   if(!slot)return;
+  // Default to the Mii's actual in-game name (e.g. "Alex.ltd") instead of the
+  // slot number. Falls back to "Mii_slotN.ltd" if the save isn't loaded yet
+  // or the slot has no name.
+  let dl='Mii_slot'+slot+'.ltd';
+  if(savMii){
+    try{
+      const raw=getWStr32At(savMii.entries,H('Mii.Name.Name'),slot-1);
+      const clean=sanitizeMiiFilename(raw||'');
+      if(clean)dl=clean+'.ltd';
+    }catch(_){}
+  }
   const a=document.createElement('a');
   a.href='/api/mii/export?slot='+slot;
-  a.download='Mii_slot'+slot+'.ltd';
+  a.download=dl;
   a.click();
-  setMiiStatus('exported slot '+slot,'ok');
+  setMiiStatus('exported as '+dl,'ok');
 }
 function doMiiImport(slot){
   if(!slot)return;
@@ -614,6 +880,8 @@ function showSpinner(msg){
 function modalClose(){document.getElementById('overlay').classList.remove('open');}
 function modalYes(){}
 
+populateLocaleSelect();
+applyTranslations();
 loadList();
 
 // ── Drag & Drop ───────────────────────────────────────────────────────────────
@@ -760,7 +1028,7 @@ const ISLAND_SIZES=[{v:1,l:'50\xd736'},{v:2,l:'70\xd750'},{v:3,l:'90\xd764'},{v:
 const SKIN_COLORS=['#f6d9bd','#ecc19d','#d2a07a','#b07a54','#825533','#5a391c'];
 
 // ── State ────────────────────────────────────────────────────────────────────
-let savPlayer=null, savMii=null, savMiiSlot=0, miiSubTab='stats';
+let savPlayer=null, savMii=null, savMap=null, savMiiSlot=0, miiSubTab='stats';
 const WORD_KIND_OPTS=[
   {v:H('Invalid'),l:'(empty)'},{v:H('TalkStart'),l:'Talk Start'},{v:H('TalkEnd'),l:'Talk End'},
   {v:H('Phrase'),l:'Phrase'},{v:H('Happy'),l:'Happy'},{v:H('Sad'),l:'Sad'},{v:H('Angry'),l:'Angry'},
@@ -796,7 +1064,16 @@ async function loadSave(which){
     const buf=await r.arrayBuffer();
     const sav=parseSav(buf);
     if(which==='player'){savPlayer=sav;renderPlayerFields();}
-    else{savMii=sav;renderMiiSlots();renderMiiSubTab();document.getElementById('btn-mii-import').disabled=false;document.getElementById('btn-mii-export').disabled=false;}
+    else{
+      savMii=sav;renderMiiSlots();renderMiiSubTab();
+      document.getElementById('btn-mii-import').disabled=false;
+      document.getElementById('btn-mii-export').disabled=false;
+      // Best-effort: pull Map.sav too so the housing tab can show house names.
+      // Failures are silent — housing falls back to "House #N".
+      fetch('/api/save/download?file=map').then(r=>r.ok?r.arrayBuffer():null).then(buf=>{
+        if(!buf)return; try{savMap=parseSav(buf);renderMiiSubTab();}catch(_){}
+      }).catch(()=>{});
+    }
     document.getElementById('save-apply-'+which).disabled=false;
     setSaveStatus(which,'loaded','ok');
   }catch(e){setSaveStatus(which,'error: '+e.message,'err');}
@@ -860,7 +1137,14 @@ function renderPlayerFields(){
   const economy=edCard('economy',
     `<div class="ed-grid">${edF('Money',um(hMon,getUInt(e,hMon)))}${edF('Currency',edSel(CURRENCY_OPTS,getEnumS(e,hCur),hCur,'enum','onPlayerChange'))}${edF('Play Count',um(hBoot,getUInt(e,hBoot)))}</div>`);
 
-  document.getElementById('save-fields-player').innerHTML=identity+birthday+settings+island+economy;
+  // The Wishes card body is rendered asynchronously (it fetches /api/wishes/list
+  // on first use). Build a shell here, then trigger an async populate.
+  const wishes=`<div class="ed-card" id="wishes-card">
+    <div class="ed-card-title">wishes</div>
+    <div id="wishes-card-body" class="wsh-loading">loading...</div>
+  </div>`;
+  document.getElementById('save-fields-player').innerHTML=identity+birthday+settings+island+economy+wishes;
+  renderWishesCard();
 }
 function setSkin(val){
   if(!savPlayer)return;
@@ -879,6 +1163,229 @@ function onPlayerChange(ev){
   else if(k==='uint')setUInt(savPlayer.entries,h,parseInt(i.value)>>>0);
   else if(k==='enum')setEnumS(savPlayer.entries,h,parseInt(i.value)>>>0);
   else if(k==='any')setAny(savPlayer.entries,h,parseInt(i.value)>>>0);
+}
+
+// ── Variable-length array helpers (rewrite the entire entry payload) ─────────
+// Used by the Wishes editor — wish arrays grow/shrink as items are added/removed.
+function readUIntArr(entries,hash){
+  const e=findE(entries,hash); if(!e||e.type!==21||!e.payload||e.payload.length<4)return[];
+  const dv=arrDV(e),c=dv.getUint32(0,true),out=new Array(c);
+  for(let i=0;i<c;i++)out[i]=dv.getUint32(4+i*4,true)>>>0;
+  return out;
+}
+function writeUIntArr(entries,hash,values){
+  const e=findE(entries,hash); if(!e||e.type!==21)return false;
+  const n=values.length, buf=new Uint8Array(4+n*4), dv=new DataView(buf.buffer);
+  dv.setUint32(0,n,true);
+  for(let i=0;i<n;i++)dv.setUint32(4+i*4,values[i]>>>0,true);
+  e.payload=buf; return true;
+}
+function readBoolArr(entries,hash){
+  const e=findE(entries,hash); if(!e||e.type!==1||!e.payload||e.payload.length<4)return[];
+  const dv=arrDV(e),c=dv.getUint32(0,true),out=new Array(c);
+  for(let i=0;i<c;i++)out[i]=((e.payload[4+(i>>3)]>>(i&7))&1)!==0;
+  return out;
+}
+function writeBoolArr(entries,hash,values){
+  const e=findE(entries,hash); if(!e||e.type!==1)return false;
+  const n=values.length, byteCount=Math.max(4,Math.ceil(n/8));
+  // 4-byte-aligned bit storage matches the on-disk format
+  const padded=(byteCount+3)&~3;
+  const buf=new Uint8Array(4+padded);
+  new DataView(buf.buffer).setUint32(0,n,true);
+  for(let i=0;i<n;i++){
+    if(values[i]) buf[4+(i>>3)]|=(1<<(i&7));
+  }
+  e.payload=buf; return true;
+}
+
+// ── Wishes editor state ──────────────────────────────────────────────────────
+let WISHES_LIST=null;       // [{h:hash,n:name,c:catIdx}]
+let WISH_CATEGORIES=null;   // ['Facility','Goods', ...]
+let wishFilter={q:'',cat:'all',hideCheck:false};
+let wishConfirmBulk=null;   // 'unlock' or 'reset' once the user is one click away
+let wishConfirmTimer=0;
+async function ensureWishesLoaded(){
+  if(WISHES_LIST)return;
+  try{
+    const r=await fetch('/api/wishes/list');
+    const j=await r.json();
+    WISHES_LIST=j.wishes||[];
+    WISH_CATEGORIES=j.categories||[];
+  }catch(e){WISHES_LIST=[];WISH_CATEGORIES=[];}
+}
+// Reads (hash, liberated) pairs out of the save and returns a Map(hash → liberated).
+function wishLiberatedMap(){
+  if(!savPlayer)return new Map();
+  const ids=readUIntArr(savPlayer.entries,H('Liberation.WishInfo.WishIdValue'));
+  const lib=readBoolArr(savPlayer.entries,H('Liberation.WishInfo.IsLiberated'));
+  const m=new Map();
+  const n=Math.min(ids.length,lib.length);
+  for(let i=0;i<n;i++)m.set(ids[i]>>>0,!!lib[i]);
+  return m;
+}
+function applyWishesBulk(value){
+  if(!savPlayer||!WISHES_LIST)return 0;
+  const hIds=H('Liberation.WishInfo.WishIdValue');
+  const hLib=H('Liberation.WishInfo.IsLiberated');
+  const hNew=H('Liberation.WishInfo.IsNew');
+  const ids=readUIntArr(savPlayer.entries,hIds);
+  const lib=readBoolArr(savPlayer.entries,hLib);
+  const hasNew=!!findE(savPlayer.entries,hNew);
+  const isNew=hasNew?readBoolArr(savPlayer.entries,hNew):null;
+  while(lib.length<ids.length)lib.push(false);
+  if(isNew)while(isNew.length<ids.length)isNew.push(false);
+  const idxByHash=new Map();
+  for(let i=0;i<ids.length;i++)idxByHash.set(ids[i]>>>0,i);
+  let changed=0;
+  for(const w of WISHES_LIST){
+    const target=w.h>>>0;
+    const idx=idxByHash.get(target);
+    if(idx==null){
+      if(value){
+        ids.push(target); lib.push(true);
+        if(isNew)isNew.push(false);
+        idxByHash.set(target,ids.length-1);
+        changed++;
+      }
+    }else if(lib[idx]!==value){
+      lib[idx]=value; changed++;
+    }
+  }
+  if(changed){
+    writeUIntArr(savPlayer.entries,hIds,ids);
+    writeBoolArr(savPlayer.entries,hLib,lib);
+    if(isNew)writeBoolArr(savPlayer.entries,hNew,isNew);
+  }
+  return changed;
+}
+function setWishLiberated(hash,value){
+  if(!savPlayer)return false;
+  const hIds=H('Liberation.WishInfo.WishIdValue');
+  const hLib=H('Liberation.WishInfo.IsLiberated');
+  const hNew=H('Liberation.WishInfo.IsNew');
+  const target=hash>>>0;
+  const ids=readUIntArr(savPlayer.entries,hIds);
+  const lib=readBoolArr(savPlayer.entries,hLib);
+  const hasNew=!!findE(savPlayer.entries,hNew);
+  const isNew=hasNew?readBoolArr(savPlayer.entries,hNew):null;
+  while(lib.length<ids.length)lib.push(false);
+  if(isNew)while(isNew.length<ids.length)isNew.push(false);
+  let idx=-1;
+  for(let i=0;i<ids.length;i++)if((ids[i]>>>0)===target){idx=i;break;}
+  if(idx<0){
+    if(!value)return false;
+    ids.push(target); lib.push(true);
+    if(isNew)isNew.push(false);
+  }else{
+    if(lib[idx]===value)return false;
+    lib[idx]=value;
+  }
+  writeUIntArr(savPlayer.entries,hIds,ids);
+  writeBoolArr(savPlayer.entries,hLib,lib);
+  if(isNew)writeBoolArr(savPlayer.entries,hNew,isNew);
+  return true;
+}
+function wishesAvailable(){
+  if(!savPlayer)return false;
+  return !!(findE(savPlayer.entries,H('Liberation.WishInfo.WishIdValue'))
+         && findE(savPlayer.entries,H('Liberation.WishInfo.IsLiberated')));
+}
+async function renderWishesCard(){
+  const card=document.getElementById('wishes-card-body');
+  if(!card)return;
+  if(!savPlayer){card.innerHTML='<div class="wsh-empty">Load Player.sav to manage wishes.</div>';return;}
+  if(!wishesAvailable()){card.innerHTML='<div class="wsh-empty">This save does not contain wish data.</div>';return;}
+  await ensureWishesLoaded();
+  if(!WISHES_LIST.length){card.innerHTML='<div class="wsh-empty">No wish list available.</div>';return;}
+  const libMap=wishLiberatedMap();
+  let liberated=0; for(const w of WISHES_LIST) if(libMap.get(w.h>>>0))liberated++;
+  const total=WISHES_LIST.length;
+  const q=wishFilter.q.toLowerCase();
+  const filtered=WISHES_LIST.filter(w=>{
+    if(wishFilter.cat!=='all'&&WISH_CATEGORIES[w.c]!==wishFilter.cat)return false;
+    if(wishFilter.hideCheck&&libMap.get(w.h>>>0))return false;
+    if(!q)return true;
+    return w.n.toLowerCase().includes(q)||(WISH_CATEGORIES[w.c]||'').toLowerCase().includes(q);
+  });
+  // Confirmation indicator text
+  const unlockLbl=wishConfirmBulk==='unlock'
+    ? `⚠ Click again to confirm — unlock ${total} wishes`
+    : `Unlock All Wishes (${total})`;
+  const resetLbl=wishConfirmBulk==='reset'
+    ? `⚠ Click again to confirm — reset ${liberated} liberated`
+    : `Reset Liberated Wishes`;
+  const unlockCls='wsh-btn wsh-btn-go'+(wishConfirmBulk==='unlock'?' wsh-armed':'');
+  const resetCls='wsh-btn wsh-btn-danger'+(wishConfirmBulk==='reset'?' wsh-armed':'');
+  let html='';
+  html+=`<div class="wsh-summary">
+    <span><b>${liberated}</b> / ${total} liberated</span>
+    <span class="wsh-sep">·</span>
+    <span>${filtered.length} shown</span>
+  </div>`;
+  html+=`<div class="wsh-bulk">
+    <button class="${unlockCls}" onclick="onWishBulkClick('unlock')">${unlockLbl}</button>
+    <button class="${resetCls}" onclick="onWishBulkClick('reset')">${resetLbl}</button>
+    ${wishConfirmBulk?'<button class="wsh-btn-cancel" onclick="cancelWishBulk()">cancel</button>':''}
+  </div>`;
+  html+=`<div class="wsh-filters">
+    <input class="ed-input" type="search" placeholder="search wishes..." value="${esc(wishFilter.q)}" oninput="onWishSearch(event)">
+    <select class="ed-select" onchange="onWishCatChange(event)">
+      <option value="all">all categories</option>
+      ${WISH_CATEGORIES.map(c=>`<option value="${esc(c)}"${wishFilter.cat===c?' selected':''}>${esc(c)}</option>`).join('')}
+    </select>
+    <label class="wsh-toggle"><input type="checkbox" ${wishFilter.hideCheck?'checked':''} onchange="onWishHideChange(event)"> hide liberated</label>
+  </div>`;
+  if(!filtered.length){
+    html+=`<div class="wsh-empty">No wishes match this filter.</div>`;
+  }else{
+    html+=`<div class="wsh-list">`;
+    for(const w of filtered){
+      const on=!!libMap.get(w.h>>>0);
+      const cat=WISH_CATEGORIES[w.c]||'';
+      html+=`<label class="wsh-row${on?' on':''}">
+        <input type="checkbox" ${on?'checked':''} data-h="${w.h}" onchange="onWishToggle(event)">
+        <span class="wsh-name">${esc(w.n)}</span>
+        <span class="wsh-cat">${esc(cat)}</span>
+      </label>`;
+    }
+    html+=`</div>`;
+  }
+  card.innerHTML=html;
+}
+function onWishSearch(ev){wishFilter.q=ev.target.value;renderWishesCard();}
+function onWishCatChange(ev){wishFilter.cat=ev.target.value;renderWishesCard();}
+function onWishHideChange(ev){wishFilter.hideCheck=ev.target.checked;renderWishesCard();}
+function onWishToggle(ev){
+  if(!savPlayer)return;
+  const h=parseInt(ev.target.dataset.h)>>>0;
+  setWishLiberated(h,ev.target.checked);
+  renderWishesCard();
+}
+function cancelWishBulk(){wishConfirmBulk=null;if(wishConfirmTimer)clearTimeout(wishConfirmTimer);renderWishesCard();}
+function onWishBulkClick(kind){
+  if(!savPlayer)return;
+  // First click — arm the button (indicator state).
+  if(wishConfirmBulk!==kind){
+    wishConfirmBulk=kind;
+    if(wishConfirmTimer)clearTimeout(wishConfirmTimer);
+    // Auto-cancel the confirmation after 4 seconds so a single accidental
+    // first click can't be confirmed by a totally unrelated later click.
+    wishConfirmTimer=setTimeout(()=>{wishConfirmBulk=null;renderWishesCard();},4000);
+    renderWishesCard();
+    return;
+  }
+  // Second click — perform the bulk action.
+  if(wishConfirmTimer){clearTimeout(wishConfirmTimer);wishConfirmTimer=0;}
+  wishConfirmBulk=null;
+  const changed=applyWishesBulk(kind==='unlock');
+  renderWishesCard();
+  // Status hint near the save toolbar
+  const st=document.getElementById('save-status-player');
+  if(st){
+    st.textContent=(kind==='unlock'?'unlocked ':'reset ')+changed+' wish'+(changed===1?'':'es')+' — apply to save';
+    st.className='status ok';
+  }
 }
 
 // ── Mii slot list ─────────────────────────────────────────────────────────────
@@ -3366,18 +3873,368 @@ function clearHabitCategory(){
   markMiiDirty(); renderMiiHabits();
 }
 
+// ── Housing editor (touch + joystick friendly) ──────────────────────────────
+const HASH_HOUSE_MAPID=H('Mii.Location.HouseMapId');
+const HASH_ROOM_INDEX=H('Mii.Location.RoomIndex');
+// Map.sav field hashes (taken from LtdSaveEditorTemplate's generated schema).
+// Used to look up the in-game name of each house. If Map.sav isn't loaded the
+// housing tab falls back to "House #N".
+const HASH_MAP_HOUSE_MAPID = 0x0b5276e9;
+const HASH_MAP_HOUSE_NAME  = 0x0d96409e;
+function housingHouseName(houseId){
+  if(!savMap||houseId<0)return '';
+  const e=savMap.entries;
+  const n=arrSize(e,HASH_MAP_HOUSE_MAPID);
+  for(let i=0;i<n;i++){
+    if(getIntAt(e,HASH_MAP_HOUSE_MAPID,i)===houseId){
+      try{return getWStr32At(e,HASH_MAP_HOUSE_NAME,i)||'';}catch(_){return '';}
+    }
+  }
+  return '';
+}
+function housingDisplayLabel(houseId){
+  const n=housingHouseName(houseId);
+  return n?n:('House #'+houseId);
+}
+// Map.sav's House.MapId array is the source of truth for which house IDs
+// actually have an actor placed on the island. Writing a Mii location to an ID
+// that isn't in this list corrupts the save (the game can't resolve the
+// missing actor). The reference Svelte editor (LtdSaveEditorTemplate) refuses
+// writes to unknown IDs for the same reason.
+function housingIsKnownHouse(houseId){
+  if(!savMap||houseId<0)return false;
+  const e=savMap.entries;
+  const n=arrSize(e,HASH_MAP_HOUSE_MAPID);
+  for(let i=0;i<n;i++){
+    if(getIntAt(e,HASH_MAP_HOUSE_MAPID,i)===houseId)return true;
+  }
+  return false;
+}
+// Without per-actor room-count metadata, we approximate capacity conservatively:
+// max observed roomIndex + 1 (no headroom). The editor can re-shuffle existing
+// rooms but never references rooms the save doesn't already know about — that
+// keeps writes safe even for unknown house types (e.g. HouseOneRoom).
+function housingRoomCap(houseId){
+  let observed=-1;
+  for(const m of housingCollect()){
+    if(m.house!==houseId)continue;
+    if(m.room>observed)observed=m.room;
+  }
+  return Math.min(8,Math.max(observed+1,1));
+}
+function housingShowError(msg){
+  // Status display: surface to the dirty banner / status line if present.
+  if(typeof setMiiStatus==='function'){setMiiStatus(msg,'err');}
+  else{try{alert(msg);}catch(_){}}}
+
+// Picked-mii state: when set, the next slot/mii tap drops the picked mii.
+let housingPicked=null;
+let housingPickedPrev=null;
+
+function housingCollect(){
+  const e=savMii.entries,hName=H('Mii.Name.Name');
+  const cnt=arrSize(e,hName);
+  const out=[];
+  for(let i=0;i<cnt;i++){
+    const name=getWStr32At(e,hName,i);
+    if(!name)continue;
+    out.push({i,name,house:getIntAt(e,HASH_HOUSE_MAPID,i),room:getIntAt(e,HASH_ROOM_INDEX,i)});
+  }
+  return out;
+}
+function housingFindOccupant(houseId,roomIdx,excludeMii){
+  for(const m of housingCollect()){
+    if(m.i===excludeMii)continue;
+    if(m.house===houseId&&m.room===roomIdx)return m;
+  }
+  return null;
+}
+function housingLowestFreeRoom(houseId,excludeMiis){
+  const cap=housingRoomCap(houseId);
+  const ex=new Set(excludeMiis);
+  const used=new Set();
+  for(const m of housingCollect()){
+    if(ex.has(m.i))continue;
+    if(m.house!==houseId)continue;
+    if(m.room>=0&&m.room<cap)used.add(m.room);
+  }
+  for(let r=0;r<cap;r++)if(!used.has(r))return r;
+  return -1; // house full
+}
+function housingWriteLoc(miiIdx,houseId,roomIdx){
+  setIntAt(savMii.entries,HASH_HOUSE_MAPID,miiIdx,houseId|0);
+  setIntAt(savMii.entries,HASH_ROOM_INDEX,miiIdx,roomIdx|0);
+}
+function housingPickedName(){
+  if(housingPicked==null)return '';
+  return getWStr32At(savMii.entries,H('Mii.Name.Name'),housingPicked);
+}
+function housingPick(miiIdx){
+  if(housingPicked===miiIdx){housingCancel();return;}
+  housingPicked=miiIdx;
+  const e=savMii.entries;
+  housingPickedPrev={house:getIntAt(e,HASH_HOUSE_MAPID,miiIdx),room:getIntAt(e,HASH_ROOM_INDEX,miiIdx)};
+  document.body.classList.add('hou-picking');
+  renderMiiHousing();
+}
+function housingCancel(){
+  housingPicked=null;
+  housingPickedPrev=null;
+  document.body.classList.remove('hou-picking');
+  renderMiiHousing();
+}
+function housingDropToRoom(houseId,room){
+  if(housingPicked==null)return;
+  // Safety: refuse to write to a house id that isn't actually placed on the
+  // island. Doing so corrupts the save.
+  if(!housingIsKnownHouse(houseId)){
+    housingShowError("Can't move there: that house isn't on your island.");
+    housingCancel();
+    return;
+  }
+  const cap=housingRoomCap(houseId);
+  if(!(room>=0&&room<cap)){
+    const fallback=housingLowestFreeRoom(houseId,[housingPicked]);
+    if(fallback<0){
+      housingShowError("That house is full.");
+      housingCancel();
+      return;
+    }
+    room=fallback;
+  }
+  const i=housingPicked;
+  const occupant=housingFindOccupant(houseId,room,i);
+  housingWriteLoc(i,houseId,room);
+  if(occupant){
+    // Swap: send the displaced occupant to the picked mii's previous slot if
+    // that's still a valid (known) destination; otherwise push to the lowest
+    // free room in the same house; otherwise unhouse.
+    let placed=false;
+    if(housingPickedPrev&&housingPickedPrev.house>=0&&housingPickedPrev.room>=0&&
+       !(housingPickedPrev.house===houseId&&housingPickedPrev.room===room)&&
+       housingIsKnownHouse(housingPickedPrev.house)&&
+       housingPickedPrev.room<housingRoomCap(housingPickedPrev.house)){
+      housingWriteLoc(occupant.i,housingPickedPrev.house,housingPickedPrev.room);
+      placed=true;
+    }
+    if(!placed){
+      const free=housingLowestFreeRoom(houseId,[i,occupant.i]);
+      if(free<0)housingWriteLoc(occupant.i,-1,-1);
+      else housingWriteLoc(occupant.i,houseId,free);
+    }
+  }
+  markMiiDirty();
+  housingCancel();
+}
+function housingDropEvict(){
+  if(housingPicked==null)return;
+  housingWriteLoc(housingPicked,-1,-1);
+  markMiiDirty();
+  housingCancel();
+}
+// Houses are placed on the island in-game (Map.sav stores the actor entries),
+// not created from the save editor. Trying to write an arbitrary new house id
+// would point the Mii at a non-existent actor and corrupt the save. The
+// "New house" button is therefore removed and this stub just warns the user.
+function housingNewHouse(){
+  alert('Houses can only be placed in-game on your island, not from this editor.');
+}
+function housingAddResident(houseId){
+  // Tapped "add resident" with no picked mii — pick from unhoused, then drop.
+  if(!savMii)return;
+  if(!housingIsKnownHouse(houseId)){
+    housingShowError("That house isn't on your island.");
+    return;
+  }
+  const unhoused=housingCollect().filter(m=>m.house<0);
+  if(unhoused.length===0){
+    alert('No unhoused miis. Tap a housed mii to move them here instead.');
+    return;
+  }
+  const opts=unhoused.map((m,idx)=>`${idx+1}. ${m.name}`).join('\n');
+  const sel=prompt('Add resident to house #'+houseId+' (number):\n\n'+opts,'1');
+  if(sel===null)return;
+  const idx=parseInt(sel)-1;
+  if(!(idx>=0&&idx<unhoused.length)){alert('Invalid choice.');return;}
+  const free=housingLowestFreeRoom(houseId,[unhoused[idx].i]);
+  if(free<0){
+    housingShowError("That house is full.");
+    return;
+  }
+  housingWriteLoc(unhoused[idx].i,houseId,free);
+  markMiiDirty();
+  renderMiiHousing();
+}
+function housingVacate(hid){
+  if(!savMii)return;
+  if(!confirm('Remove every resident from house #'+hid+'?'))return;
+  for(const m of housingCollect()){
+    if(m.house===hid)housingWriteLoc(m.i,-1,-1);
+  }
+  markMiiDirty();
+  renderMiiHousing();
+}
+function housingSelectSlot(i){
+  savMiiSlot=i;
+  renderMiiSlots();
+  miiSubTab='stats';
+  document.querySelectorAll('.mii-subtab').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.mii-subtab').forEach(b=>{if(b.textContent.trim()==='stats')b.classList.add('active');});
+  ['stats','words','rel','social','belongings','habits','housing','browse'].forEach(t=>{
+    const el=document.getElementById('mii-content-'+t);
+    if(el)el.style.display=(t==='stats'?'':'none');
+  });
+  document.body.classList.remove('housing-tab');
+  document.body.classList.remove('hou-picking');
+  housingPicked=null;housingPickedPrev=null;
+  renderMiiSubTab();
+}
+
+function renderMiiHousing(){
+  if(!savMii)return;
+  const panel=document.getElementById('mii-housing-panel');
+  const e=savMii.entries;
+  const houseE=findE(e,HASH_HOUSE_MAPID),roomE=findE(e,HASH_ROOM_INDEX),nameE=findE(e,H('Mii.Name.Name'));
+  if(!houseE||!roomE||!nameE||houseE.type!==3||roomE.type!==3){
+    panel.innerHTML='<div class="hou-empty">Housing data unavailable in this save (Mii.Location.HouseMapId / RoomIndex missing).</div>';
+    return;
+  }
+  const miis=housingCollect();
+  // If a previously-picked mii vanished from the save, clear the pick.
+  if(housingPicked!=null&&!miis.some(m=>m.i===housingPicked)){
+    housingPicked=null;housingPickedPrev=null;
+    document.body.classList.remove('hou-picking');
+  }
+  const houses=new Map();
+  const unhoused=[];
+  for(const m of miis){
+    if(m.house<0){unhoused.push(m);continue;}
+    if(!houses.has(m.house))houses.set(m.house,[]);
+    houses.get(m.house).push(m);
+  }
+  const sortedHouses=[...houses.keys()].sort((a,b)=>a-b);
+
+  let html='';
+  if(housingPicked!=null){
+    const pname=housingPickedName();
+    html+=`<div class="hou-actionbar">
+      <div class="hou-actionbar-status">Moving <b>${esc(pname)||'mii'}</b>
+        <span class="hou-sub">Tap a room to drop. The current occupant (if any) will be swapped.</span>
+      </div>
+      <button class="btn btn-blue" onclick="housingDropEvict()">Make unhoused</button>
+      <button class="btn" onclick="housingCancel()">Cancel</button>
+    </div>`;
+  }else{
+    // Note: there's no "New house" button — houses are placed on the island
+    // in-game (Map.sav holds the actor entries). The editor only reassigns
+    // existing residents; creating arbitrary house ids would corrupt the save.
+    html+=`<div class="hou-actionbar">
+      <div class="hou-actionbar-status">Tap a mii to pick them up, then tap a room to move them.
+        <span class="hou-sub">${miis.length} mii${miis.length===1?'':'s'} · ${sortedHouses.length} house${sortedHouses.length===1?'':'s'} · ${unhoused.length} unhoused</span>
+      </div>
+    </div>`;
+  }
+
+  html+='<div class="hou-section-label">Unhoused</div>';
+  html+='<div class="hou-unhoused-row">';
+  if(unhoused.length===0){
+    html+='<span class="hou-empty-inline">All miis are housed.</span>';
+  }else{
+    for(const m of unhoused){
+      const picked=housingPicked===m.i?' picked':'';
+      html+=`<button class="hou-mii${picked}" onclick="housingPick(${m.i})" title="Tap to move ${esc(m.name)}">${esc(m.name)}</button>`;
+    }
+  }
+  html+='</div>';
+
+  html+='<div class="hou-section-label">Houses</div>';
+  if(sortedHouses.length===0){
+    html+=`<div class="hou-empty">No houses on this island yet — place one in-game first.</div>`;
+  }
+  html+='<div class="hou-grid">';
+  for(const hid of sortedHouses){
+    const residents=houses.get(hid).slice().sort((a,b)=>a.room-b.room||a.i-b.i);
+    const roomCounts={};
+    for(const r of residents)roomCounts[r.room]=(roomCounts[r.room]||0)+1;
+    const conflictRooms=Object.keys(roomCounts).filter(k=>roomCounts[k]>1);
+    const maxRoom=residents.reduce((m,r)=>Math.max(m,r.room),-1);
+    const rowsByRoom=new Map();
+    for(const r of residents){
+      if(!rowsByRoom.has(r.room))rowsByRoom.set(r.room,[]);
+      rowsByRoom.get(r.room).push(r);
+    }
+    const totalRooms=Math.max(maxRoom+1,0);
+    const hLabel = housingHouseName(hid);
+    const titleHtml = hLabel
+      ? `<span class="hou-card-name">${esc(hLabel)}</span><span class="hou-id">#${hid}</span>`
+      : `House <span class="hou-id">#${hid}</span>`;
+    html+=`<div class="hou-card">
+      <div class="hou-card-head">
+        <span class="hou-card-title">${titleHtml}</span>
+        <span class="hou-card-meta">${residents.length}</span>
+        <button class="hou-card-vacate" onclick="housingVacate(${hid})" title="Evict every resident in this house">vacate</button>
+      </div>
+      <div class="hou-card-body">`;
+    for(let r=0;r<totalRooms;r++){
+      const here=rowsByRoom.get(r)||[];
+      if(here.length===0){
+        const isDrop=housingPicked!=null;
+        const action=isDrop?`housingDropToRoom(${hid},${r})`:`housingAddResident(${hid})`;
+        html+=`<button class="hou-slot empty" onclick="${action}">
+          <span class="hou-slot-room">room ${r}</span>
+          <span class="hou-slot-name">${isDrop?'drop here':'(empty)'}</span>
+        </button>`;
+      }else{
+        for(const m of here){
+          const conflict=here.length>1?' conflict':'';
+          const picked=housingPicked===m.i?' picked':'';
+          const action=housingPicked!=null&&housingPicked!==m.i
+            ?`housingDropToRoom(${hid},${r})`
+            :`housingPick(${m.i})`;
+          html+=`<button class="hou-slot${conflict}${picked}" onclick="${action}" title="${housingPicked!=null&&housingPicked!==m.i?`Swap with ${esc(m.name)}`:`Pick up ${esc(m.name)}`}">
+            <span class="hou-slot-room">room ${r}</span>
+            <span class="hou-slot-name">${esc(m.name)}</span>
+          </button>`;
+        }
+      }
+    }
+    const addLabel=housingPicked!=null?`drop in room ${totalRooms}`:`+ add resident`;
+    const addAction=housingPicked!=null?`housingDropToRoom(${hid},${totalRooms})`:`housingAddResident(${hid})`;
+    html+=`<button class="hou-card-add" onclick="${addAction}">${addLabel}</button>`;
+    if(conflictRooms.length){
+      html+=`<div class="hou-warn">⚠ Two miis share room${conflictRooms.length===1?'':'s'} ${conflictRooms.join(', ')}. Tap one and move them to a free room.</div>`;
+    }
+    html+=`</div></div>`;
+  }
+  html+='</div>';
+
+  panel.innerHTML=html;
+}
+
 // ── Mii sub-tabs ──────────────────────────────────────────────────────────────
 function switchMiiSubTab(name,btn){
   miiSubTab=name;
   document.querySelectorAll('.mii-subtab').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
-  ['stats','words','rel','social','belongings','habits'].forEach(t=>{
+  ['stats','words','rel','social','belongings','habits','housing','browse'].forEach(t=>{
     const el=document.getElementById('mii-content-'+t);
     if(el)el.style.display=(t===name?'':'none');
   });
+  document.body.classList.toggle('housing-tab',name==='housing');
+  document.body.classList.toggle('browse-tab', name==='browse');
+  if(name!=='housing'){
+    document.body.classList.remove('hou-picking');
+    housingPicked=null;housingPickedPrev=null;
+  }
+  // Hide the per-slot import/export .ltd toolbar in sub-tabs that don't
+  // operate on a single Mii (housing's a grid; browse is an online list).
+  const ltdBar=document.getElementById('mii-ltd-toolbar');
+  if(ltdBar)ltdBar.style.display=(name==='housing'||name==='browse'?'none':'');
   renderMiiSubTab();
 }
 function renderMiiSubTab(){
+  // Browse-online doesn't need a loaded Mii.sav — it's an online lookup.
+  if(miiSubTab==='browse'){renderMiiBrowse();return;}
   if(!savMii)return;
   if(miiSubTab==='stats')renderMiiFields();
   else if(miiSubTab==='words')renderMiiWords();
@@ -3385,6 +4242,307 @@ function renderMiiSubTab(){
   else if(miiSubTab==='social')renderMiiSocial();
   else if(miiSubTab==='belongings')renderMiiBelongings();
   else if(miiSubTab==='habits')renderMiiHabits();
+  else if(miiSubTab==='housing')renderMiiHousing();
+}
+function openBrowseTab(){
+  // Triggered by the upload-icon button next to "export .ltd". The Browse view
+  // is hidden from the sub-tab pill bar — switching to it just shows the
+  // content panel and uses 'stats' as the visually-active pill so users keep
+  // their orientation when they close Browse.
+  switchTab('miistats',document.querySelector('.tab[onclick*="miistats"]'));
+  miiSubTab='browse';
+  document.querySelectorAll('.mii-subtab').forEach(b=>b.classList.remove('active'));
+  ['stats','words','rel','social','belongings','habits','housing','browse'].forEach(t=>{
+    const el=document.getElementById('mii-content-'+t);
+    if(el)el.style.display=(t==='browse'?'':'none');
+  });
+  document.body.classList.remove('housing-tab');
+  document.body.classList.add('browse-tab');
+  document.body.classList.remove('hou-picking');
+  housingPicked=null;housingPickedPrev=null;
+  // openBrowseTab bypasses switchMiiSubTab, so also hide the .ltd toolbar here.
+  const ltdBar=document.getElementById('mii-ltd-toolbar');
+  if(ltdBar)ltdBar.style.display='none';
+  renderMiiBrowse();
+}
+
+// ── TomodachiShare browse ───────────────────────────────────────────────────
+const browseState={
+  page:1, q:'', sort:'newest', isFromSaveFile:true,
+  gender:'', platform:'', loading:false, error:'',
+  miis:[], totalCount:0, lastPage:1,
+  detail:null, detailImgIdx:0, detailLoading:false,
+  searchDebounce:0, everLoaded:false,
+};
+function browseQS(){
+  const p=new URLSearchParams();
+  p.set('page',browseState.page);
+  p.set('limit',24);
+  p.set('sort',browseState.sort);
+  if(browseState.q)p.set('q',browseState.q);
+  if(browseState.gender)p.set('gender',browseState.gender);
+  if(browseState.platform)p.set('platform',browseState.platform);
+  if(browseState.isFromSaveFile)p.set('isFromSaveFile','true');
+  return p.toString();
+}
+async function loadBrowsePage(){
+  browseState.loading=true; browseState.error='';
+  renderMiiBrowse();
+  try{
+    const r=await fetch('/api/share/list?'+browseQS());
+    if(!r.ok){
+      let msg='HTTP '+r.status;
+      try{const j=await r.json();if(j&&j.error)msg=j.error;}catch(_){}
+      throw new Error(msg);
+    }
+    const j=await r.json();
+    browseState.miis=Array.isArray(j.miis)?j.miis:[];
+    browseState.totalCount=j.totalCount||0;
+    browseState.lastPage=Math.max(1,j.lastPage||1);
+    if(browseState.page>browseState.lastPage)browseState.page=browseState.lastPage;
+  }catch(e){
+    browseState.miis=[];
+    browseState.error=e.message||'failed to load';
+  }
+  browseState.loading=false;
+  renderMiiBrowse();
+}
+function renderMiiBrowse(){
+  const root=document.getElementById('mii-browse-panel');
+  if(!root)return;
+  // First time this tab is opened: kick off the initial fetch.
+  if(!browseState.everLoaded&&!browseState.loading){
+    browseState.everLoaded=true;
+    loadBrowsePage();
+    return;
+  }
+  // Preserve outer scroll position across re-renders (parent .mii-content scrolls).
+  const parent=root.parentElement;
+  const prevScroll=parent?parent.scrollTop:0;
+  const detailOpen=!!browseState.detail;
+  // Default slot suggestion: currently-selected slot in Mii.sav, else 1
+  const slotHint=(savMii&&typeof savMiiSlot==='number')?(savMiiSlot+1):1;
+  const s=browseState;
+  const showFromSave=s.isFromSaveFile?' checked':'';
+  let html='';
+  html+=`<div class="br-toolbar">
+    <input class="br-search" id="br-search" type="search" placeholder="search miis by name, tag, or description…" value="${esc(s.q)}" oninput="onBrowseSearch(event)">
+    <select id="br-sort" onchange="onBrowseFilter()">
+      <option value="newest"${s.sort==='newest'?' selected':''}>newest</option>
+      <option value="oldest"${s.sort==='oldest'?' selected':''}>oldest</option>
+      <option value="likes"${s.sort==='likes'?' selected':''}>most liked</option>
+    </select>
+    <select id="br-gender" onchange="onBrowseFilter()">
+      <option value=""${s.gender===''?' selected':''}>any gender</option>
+      <option value="MALE"${s.gender==='MALE'?' selected':''}>male</option>
+      <option value="FEMALE"${s.gender==='FEMALE'?' selected':''}>female</option>
+    </select>
+    <select id="br-platform" onchange="onBrowseFilter()">
+      <option value=""${s.platform===''?' selected':''}>any platform</option>
+      <option value="THREE_DS"${s.platform==='THREE_DS'?' selected':''}>3DS</option>
+      <option value="SWITCH"${s.platform==='SWITCH'?' selected':''}>Switch</option>
+    </select>
+    <label class="br-toggle"><input type="checkbox" id="br-fromsave"${showFromSave} onchange="onBrowseFilter()"> only importable (.ltd)</label>
+    <span class="br-spacer"></span>
+    <div class="br-pager">
+      <button class="btn" onclick="onBrowsePage(-1)" ${s.page<=1?'disabled':''}>‹ prev</button>
+      <span class="br-pager-page">${s.page} / ${s.lastPage}</span>
+      <button class="btn" onclick="onBrowsePage(1)" ${s.page>=s.lastPage?'disabled':''}>next ›</button>
+    </div>
+  </div>`;
+
+  // Status line / hints
+  if(s.error){
+    html+=`<div class="br-status" style="color:var(--err)">⚠ ${esc(s.error)}</div>`;
+  }else if(s.loading){
+    html+=`<div class="br-status">loading from tomodachishare.com…</div>`;
+  }else{
+    html+=`<div class="br-status">${s.totalCount} mii${s.totalCount===1?'':'s'} found · powered by <b>tomodachishare.com</b>${savMii?'':' · <span style="color:var(--err)">load Mii.sav to enable import</span>'}</div>`;
+  }
+
+  // Grid
+  if(s.loading&&s.miis.length===0){
+    html+=`<div class="br-loading">fetching miis…</div>`;
+  }else if(s.miis.length===0&&!s.error){
+    html+=`<div class="br-empty">No miis match this filter. Try a different search or untick "only importable".</div>`;
+  }else{
+    html+=`<div class="br-grid" id="br-grid">`;
+    for(const m of s.miis){
+      const imgUrl='/api/share/image?id='+encodeURIComponent(m.id)+'&type=mii';
+      const author=m.user&&m.user.name?esc(m.user.name):'?';
+      const tags=Array.isArray(m.tags)?m.tags.slice(0,4).join(', '):'';
+      const platBadge=m.platform?`<div class="br-card-badge">${esc(m.platform.toLowerCase())}</div>`:'';
+      html+=`<div class="br-card" onclick="openBrowseDetail(${m.id})" title="${esc(m.name)} by ${author}">
+        <div class="br-card-img"><img loading="lazy" src="${imgUrl}" alt="${esc(m.name)}" onerror="this.style.display='none';this.parentElement.textContent='no image'"></div>
+        ${platBadge}
+        <div class="br-card-body">
+          <div class="br-card-title">${esc(m.name)}</div>
+          <div class="br-card-meta"><span>by ${author}</span><span class="br-likes">♥ ${m.likeCount||0}</span></div>
+          ${tags?`<div class="br-card-tags">${esc(tags)}</div>`:''}
+        </div>
+      </div>`;
+    }
+    html+=`</div>`;
+  }
+  // Hidden slot hint for the detail import flow
+  html+=`<input type="hidden" id="br-default-slot" value="${slotHint}">`;
+  root.innerHTML=html;
+  if(parent&&prevScroll)parent.scrollTop=prevScroll;
+  // Re-render detail overlay if a mii is currently open (slot hint may have changed)
+  if(detailOpen)renderBrowseDetail();
+}
+function onBrowseSearch(ev){
+  clearTimeout(browseState.searchDebounce);
+  browseState.searchDebounce=setTimeout(()=>{
+    browseState.q=ev.target.value.trim();
+    browseState.page=1;
+    loadBrowsePage();
+  },350);
+}
+function onBrowseFilter(){
+  browseState.sort=document.getElementById('br-sort').value;
+  browseState.gender=document.getElementById('br-gender').value;
+  browseState.platform=document.getElementById('br-platform').value;
+  browseState.isFromSaveFile=document.getElementById('br-fromsave').checked;
+  browseState.page=1;
+  loadBrowsePage();
+}
+function onBrowsePage(delta){
+  const np=browseState.page+delta;
+  if(np<1||np>browseState.lastPage)return;
+  browseState.page=np;
+  loadBrowsePage();
+}
+async function openBrowseDetail(id){
+  browseState.detail={id,info:null};
+  browseState.detailImgIdx=0;
+  browseState.detailLoading=true;
+  document.getElementById('br-detail-overlay').classList.add('open');
+  renderBrowseDetail();
+  try{
+    const r=await fetch('/api/share/info?id='+encodeURIComponent(id));
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const j=await r.json();
+    browseState.detail={id,info:j};
+  }catch(e){
+    browseState.detail={id,info:{__error:e.message||'failed'}};
+  }
+  browseState.detailLoading=false;
+  renderBrowseDetail();
+}
+function closeBrowseDetail(){
+  document.getElementById('br-detail-overlay').classList.remove('open');
+  browseState.detail=null;
+}
+function browseSwitchImg(idx){
+  browseState.detailImgIdx=idx;
+  renderBrowseDetail();
+}
+function renderBrowseDetail(){
+  const card=document.getElementById('br-detail-card');
+  if(!card||!browseState.detail)return;
+  const d=browseState.detail;
+  const info=d.info;
+  let html='';
+  html+=`<div class="br-detail-head">
+    <div class="br-detail-title">${info?esc(info.name||'?'):'loading…'}</div>
+    <button class="br-detail-close" onclick="closeBrowseDetail()" title="close">×</button>
+  </div>`;
+  if(browseState.detailLoading||!info){
+    html+=`<div class="br-detail-body"><div class="br-loading" style="flex:1">loading…</div></div>`;
+    card.innerHTML=html; return;
+  }
+  if(info.__error){
+    html+=`<div class="br-detail-body"><div class="br-empty" style="color:var(--err)">⚠ ${esc(info.__error)}</div></div>`;
+    card.innerHTML=html; return;
+  }
+  // Build image list: mii + image0..image2 (if present)
+  const imgs=[{t:'mii',l:'mii render'}];
+  const n=info.imageCount||0;
+  for(let i=0;i<Math.min(3,n);i++)imgs.push({t:'image'+i,l:'photo '+(i+1)});
+  if(info.makeup&&info.makeup!=='NONE')imgs.push({t:'facepaint',l:'facepaint'});
+  imgs.push({t:'qr-code',l:'QR code'});
+  const selIdx=Math.min(browseState.detailImgIdx,imgs.length-1);
+  const selImgUrl='/api/share/image?id='+encodeURIComponent(d.id)+'&type='+imgs[selIdx].t;
+  const author=info.user&&info.user.name?esc(info.user.name):'?';
+  const tags=Array.isArray(info.tags)?info.tags:[];
+  const allowCopy=info.allowedCopying===true;
+  const isFromSav=info.isFromSaveFile===true;
+  const fmtDate=v=>{try{return new Date(v).toLocaleDateString();}catch(_){return v||''}};
+
+  html+=`<div class="br-detail-body">
+    <div class="br-detail-imgs">
+      <div class="br-detail-main-img"><img src="${selImgUrl}" alt="${esc(imgs[selIdx].l)}" onerror="this.style.display='none'"></div>
+      <div class="br-detail-thumbs">
+        ${imgs.map((im,i)=>`<button class="br-detail-thumb${i===selIdx?' active':''}" title="${esc(im.l)}" onclick="browseSwitchImg(${i})"><img src="/api/share/image?id=${encodeURIComponent(d.id)}&type=${im.t}" onerror="this.parentElement.style.display='none'"></button>`).join('')}
+      </div>
+    </div>
+    <div class="br-detail-info">
+      <div class="br-detail-row"><b>creator</b><span>${author}</span></div>
+      <div class="br-detail-row"><b>platform</b><span>${esc(info.platform||'?')}</span></div>
+      <div class="br-detail-row"><b>gender</b><span>${esc(info.gender||'?')}</span></div>
+      ${info.makeup&&info.makeup!=='NONE'?`<div class="br-detail-row"><b>makeup</b><span>${esc(info.makeup)}</span></div>`:''}
+      <div class="br-detail-row"><b>likes</b><span>♥ ${info._count?info._count.likedBy:0}</span></div>
+      <div class="br-detail-row"><b>added</b><span>${fmtDate(info.createdAt)}</span></div>
+      ${tags.length?`<div class="br-detail-row"><b>tags</b><div class="br-detail-tags">${tags.map(t=>`<span class="br-tag">${esc(t)}</span>`).join('')}</div></div>`:''}
+      ${info.description?`<div class="br-detail-desc">${esc(info.description)}</div>`:''}
+      <div class="br-import-box">
+        ${isFromSav?'':`<div class="br-import-hint" style="color:var(--err)">⚠ This mii was uploaded as a photo/QR only. The .ltd download may not exist.</div>`}
+        ${allowCopy?'':`<div class="br-import-hint">Note: the creator marked this mii as not freely copyable. Please respect their wishes.</div>`}
+        <div class="br-import-hint" style="color:var(--err)"><b>This will overwrite the chosen Mii slot.</b> Pick the slot you want to replace.</div>
+        <div class="br-import-row">
+          <label>overwrite slot</label>
+          <input type="number" id="br-import-slot" min="1" max="70" value="${(savMii&&typeof savMiiSlot==='number')?(savMiiSlot+1):1}" oninput="updateBrowseOverwriteHint()">
+          <span class="br-import-hint" id="br-overwrite-target" style="flex:1"></span>
+        </div>
+        <div class="br-import-row">
+          <button class="btn btn-primary" id="br-import-btn" onclick="doBrowseImport(${d.id})" ${savMii?'':'disabled title="Load Mii.sav first"'}>${savMii?'⬇ overwrite slot with this Mii':'load Mii.sav first'}</button>
+          <span class="status info" id="br-import-status" style="flex:1"></span>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  card.innerHTML=html;
+  updateBrowseOverwriteHint();
+}
+// Shows the existing Mii name in the chosen slot, so the user knows what
+// they're about to replace.
+function updateBrowseOverwriteHint(){
+  const slotInp=document.getElementById('br-import-slot');
+  const tgt=document.getElementById('br-overwrite-target');
+  if(!slotInp||!tgt)return;
+  if(!savMii){tgt.textContent='— load Mii.sav first';tgt.style.color='var(--err)';return;}
+  const slot=parseInt(slotInp.value);
+  if(!isFinite(slot)||slot<1||slot>70){tgt.textContent='— invalid slot';tgt.style.color='var(--err)';return;}
+  const nh=H('Mii.Name.Name');
+  let name='';
+  try{name=getWStr32At(savMii.entries,nh,slot-1);}catch(e){}
+  if(name){tgt.innerHTML='— replacing <b>'+esc(name)+'</b>';tgt.style.color='var(--muted)';}
+  else    {tgt.innerHTML='— slot is empty';tgt.style.color='var(--muted)';}
+}
+async function doBrowseImport(id){
+  const slotInp=document.getElementById('br-import-slot');
+  const status=document.getElementById('br-import-status');
+  const btn=document.getElementById('br-import-btn');
+  if(!slotInp||!status||!btn)return;
+  const slot=parseInt(slotInp.value);
+  if(!isFinite(slot)||slot<1||slot>70){status.textContent='bad slot';status.className='status err';return;}
+  btn.disabled=true; status.textContent='downloading & importing…'; status.className='status info';
+  try{
+    const r=await fetch('/api/share/import?id='+encodeURIComponent(id)+'&slot='+slot,{method:'POST'});
+    const j=await r.json();
+    if(j.ok){
+      status.textContent='✓ imported to slot '+slot+' — reload Mii.sav to see it';
+      status.className='status ok';
+    }else{
+      status.textContent='failed: '+(j.error||'unknown');
+      status.className='status err';
+    }
+  }catch(e){
+    status.textContent='failed: '+e.message;
+    status.className='status err';
+  }
+  btn.disabled=false;
 }
 // ── Words editor ──────────────────────────────────────────────────────────────
 function renderMiiWords(){
@@ -3598,7 +4756,8 @@ static std::vector<FormField> ParseMultipart(const std::string& body,const std::
     size_t pos=0;
     while(true){
         size_t start=body.find(delim,pos);if(start==std::string::npos)break;start+=delim.size();if(start+2>body.size())break;if(body[start]=='-'&&body[start+1]=='-')break;
-        if(body[start]=='\r')start++;if(body[start]=='\n')start++;
+        if(body[start]=='\r')start++;
+        if(body[start]=='\n')start++;
         size_t hEnd=body.find("\r\n\r\n",start);if(hEnd==std::string::npos)break;
         std::string ph=body.substr(start,hEnd-start);size_t ds=hEnd+4;size_t de=body.find("\r\n"+delim,ds);if(de==std::string::npos)break;
         FormField f;f.data=body.substr(ds,de-ds);
@@ -3612,7 +4771,8 @@ static std::vector<FormField> ParseMultipart(const std::string& body,const std::
 static std::vector<uint8_t> EncodePng(const RgbaImage& img){
     std::string tmp="/switch/TomoToolNX/.tmp_preview.png";
     SDL_Surface* s=SDL_CreateRGBSurfaceFrom((void*)img.pixels.data(),img.width,img.height,32,img.width*4,0x000000FF,0x0000FF00,0x00FF0000,0xFF000000);
-    if(!s)return{};IMG_SavePNG(s,tmp.c_str());SDL_FreeSurface(s);
+    if(!s)return{};
+    IMG_SavePNG(s,tmp.c_str());SDL_FreeSurface(s);
     std::vector<uint8_t> out;FILE* f=fopen(tmp.c_str(),"rb");if(f){fseek(f,0,SEEK_END);size_t sz=(size_t)ftell(f);fseek(f,0,SEEK_SET);out.resize(sz);fread(out.data(),1,sz,f);fclose(f);remove(tmp.c_str());}
     return out;
 }
@@ -3740,6 +4900,41 @@ static void HandleHabitsList(int fd){
         j += "\"}";
     }
     j += "]";
+    Send200(fd, "application/json", j);
+}
+
+// GET /api/wishes/list — return [{h:hash, n:englishName, c:catIdx}] + categories
+static void HandleWishesList(int fd){
+    auto jsonEsc = [](const char* p) {
+        std::string out;
+        for (; *p; p++) {
+            char c = *p;
+            if      (c == '"')  out += "\\\"";
+            else if (c == '\\') out += "\\\\";
+            else if (c == '\n') out += "\\n";
+            else if (c == '\r') out += "";
+            else out += c;
+        }
+        return out;
+    };
+    std::string j = "{\"categories\":[";
+    for (int i = 0; i < WishesData::CATEGORY_COUNT; i++) {
+        if (i) j += ",";
+        j += "\""; j += jsonEsc(WishesData::CATEGORIES[i]); j += "\"";
+    }
+    j += "],\"wishes\":[";
+    for (int i = 0; i < WishesData::WISH_COUNT; i++) {
+        if (i) j += ",";
+        const auto& w = WishesData::WISHES[i];
+        j += "{\"h\":";
+        j += std::to_string((unsigned long)w.hash);
+        j += ",\"n\":\"";
+        j += jsonEsc(w.name);
+        j += "\",\"c\":";
+        j += std::to_string((int)w.categoryIdx);
+        j += "}";
+    }
+    j += "]}";
     Send200(fd, "application/json", j);
 }
 
@@ -3951,7 +5146,8 @@ static void HandleMiiSocial(int fd, const std::string& query) {
         uint32_t inT  = SaveEditor::GetEnumAt(sav, H_BASE, selfA ? i*2+1 : i*2);
         int32_t  inM  = SaveEditor::GetIntAt(sav, H_METER, selfA ? i*2+1 : i*2);
         std::string oName = SaveEditor::GetWStr32At(sav, H_NAME, other);
-        if (!first) json += ","; first = false;
+        if (!first) json += ",";
+        first = false;
         json += "{\"slot\":"+std::to_string(other+1)+
                 ",\"name\":"+jsonStr(oName)+
                 ",\"outType\":\""+relName(outT)+"\""+
@@ -3971,6 +5167,7 @@ static void HandleSaveDownload(int fd, const std::string& query) {
     const char* fname = nullptr;
     if      (which=="player") { path=SAVE_PLAYER_SAV; fname="Player.sav"; }
     else if (which=="mii")    { path=SAVE_MII_SAV;    fname="Mii.sav";    }
+    else if (which=="map")    { path=SAVE_MAP_SAV;    fname="Map.sav";    }
     else { Send404(fd); return; }
 
     std::vector<uint8_t> data;
@@ -4018,6 +5215,161 @@ static void HandleConfig(int fd) {
     Send200(fd, "application/json", std::string("{\"saveWarnAcked\":") + (acked ? "true" : "false") + "}");
 }
 
+// ── TomodachiShare proxy ─────────────────────────────────────────────────────
+// The Switch app routes browser requests through here so that:
+//  1. CORS doesn't block them (the browser only ever talks to localhost)
+//  2. Rate limits / TLS quirks live in C++ where libcurl already handles them
+static size_t ShareCurlAppend(void* ptr, size_t sz, size_t n, void* userp) {
+    auto* buf = (std::vector<uint8_t>*)userp;
+    size_t total = sz * n;
+    buf->insert(buf->end(), (uint8_t*)ptr, (uint8_t*)ptr + total);
+    return total;
+}
+static long ShareCurlFetch(const std::string& url, std::vector<uint8_t>& body, std::string& err) {
+    CURL* c = curl_easy_init();
+    if (!c) { err = "curl_easy_init failed"; return 0; }
+    curl_easy_setopt(c, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(c, CURLOPT_USERAGENT, "TomoToolNX/share-proxy");
+    curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L); // Switch has no cert store
+    curl_easy_setopt(c, CURLOPT_TIMEOUT, 20L);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, ShareCurlAppend);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, &body);
+    CURLcode res = curl_easy_perform(c);
+    long status = 0;
+    if (res != CURLE_OK) {
+        err = std::string("curl: ") + curl_easy_strerror(res);
+    } else {
+        curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);
+    }
+    curl_easy_cleanup(c);
+    return status;
+}
+// Validate that a query value is safe to splice into a URL: only [A-Za-z0-9._-]
+// Used for things like ids and tag names; longer free-text params go through curl_easy_escape.
+static bool ShareIsSafeToken(const std::string& s, size_t maxLen) {
+    if (s.empty() || s.size() > maxLen) return false;
+    for (char c : s) {
+        bool ok = (c>='A'&&c<='Z') || (c>='a'&&c<='z') || (c>='0'&&c<='9')
+                  || c=='_' || c=='-' || c=='.';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+// GET /api/share/list?<same params as tomodachishare>
+// Forwards the query string verbatim (curl_easy_escape'd for the search term).
+static void HandleShareList(int fd, const std::string& query) {
+    // Re-encode the whole query string, but allow-list known keys.
+    // Keys we forward as-is (after URL-escaping their values):
+    //   q, sort, tags, exclude, platform, gender, makeup, allowCopying,
+    //   isFromSaveFile, page, limit, timeRange
+    static const char* kAllowed[] = {
+        "q","sort","tags","exclude","platform","gender","makeup",
+        "allowCopying","isFromSaveFile","page","limit","timeRange",
+        nullptr
+    };
+    std::string out;
+    CURL* esc = curl_easy_init();
+    size_t pos = 0;
+    while (pos < query.size()) {
+        size_t amp = query.find('&', pos);
+        std::string kv = query.substr(pos, amp == std::string::npos ? std::string::npos : amp - pos);
+        pos = (amp == std::string::npos) ? query.size() : amp + 1;
+        size_t eq = kv.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = kv.substr(0, eq);
+        std::string v = kv.substr(eq + 1);
+        bool allowed = false;
+        for (int i = 0; kAllowed[i]; i++) if (k == kAllowed[i]) { allowed = true; break; }
+        if (!allowed) continue;
+        char* enc = curl_easy_escape(esc, v.c_str(), (int)v.size());
+        if (!out.empty()) out += "&";
+        out += k;
+        out += "=";
+        out += (enc ? enc : "");
+        if (enc) curl_free(enc);
+    }
+    if (esc) curl_easy_cleanup(esc);
+
+    std::string url = "https://api.tomodachishare.com/api/mii/list";
+    if (!out.empty()) { url += "?"; url += out; }
+
+    std::vector<uint8_t> body;
+    std::string err;
+    long status = ShareCurlFetch(url, body, err);
+    if (status == 0) { Send500(fd, "Network error: " + err); return; }
+    if (status != 200) {
+        Send500(fd, "Upstream returned HTTP " + std::to_string(status));
+        return;
+    }
+    Send200Bin(fd, "application/json", body);
+}
+
+// GET /api/share/info?id=N
+static void HandleShareInfo(int fd, const std::string& query) {
+    std::string id = GetQueryParam(query, "id");
+    if (!ShareIsSafeToken(id, 16)) { Send500(fd, "Bad id"); return; }
+    std::string url = "https://api.tomodachishare.com/api/mii/" + id + "/info";
+    std::vector<uint8_t> body; std::string err;
+    long status = ShareCurlFetch(url, body, err);
+    if (status == 0) { Send500(fd, "Network error: " + err); return; }
+    if (status != 200) { Send500(fd, "Upstream returned HTTP " + std::to_string(status)); return; }
+    Send200Bin(fd, "application/json", body);
+}
+
+// GET /api/share/image?id=N&type=mii|qr-code|features|facepaint|image0|image1|image2
+static void HandleShareImage(int fd, const std::string& query) {
+    std::string id   = GetQueryParam(query, "id");
+    std::string type = GetQueryParam(query, "type");
+    if (type.empty()) type = "mii";
+    if (!ShareIsSafeToken(id, 16))   { Send500(fd, "Bad id"); return; }
+    if (!ShareIsSafeToken(type, 24)) { Send500(fd, "Bad type"); return; }
+    std::string url = "https://api.tomodachishare.com/mii/" + id + "/image?type=" + type;
+    std::vector<uint8_t> body; std::string err;
+    long status = ShareCurlFetch(url, body, err);
+    if (status == 0) { Send500(fd, "Network error: " + err); return; }
+    if (status != 200) { Send500(fd, "Upstream returned HTTP " + std::to_string(status)); return; }
+    // Set a short cache so the grid doesn't re-fetch on every render.
+    std::string h = "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: "
+                    + std::to_string(body.size())
+                    + "\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: public, max-age=300\r\nConnection: close\r\n\r\n";
+    SendStr(fd, h);
+    SendAll(fd, (const char*)body.data(), body.size());
+}
+
+// POST /api/share/import?id=N&slot=M  — download .ltd from tomodachishare and import to a slot
+static void HandleShareImport(int fd, const std::string& query) {
+    std::string id   = GetQueryParam(query, "id");
+    std::string slotStr = GetQueryParam(query, "slot");
+    if (!ShareIsSafeToken(id, 16)) { Send500(fd, "Bad id"); return; }
+    if (slotStr.empty()) { Send500(fd, "Missing slot"); return; }
+    int slot = atoi(slotStr.c_str());
+    if (slot < 1 || slot > 70) { Send500(fd, "Bad slot"); return; }
+
+    std::string url = "https://api.tomodachishare.com/mii/" + id + "/download";
+    std::vector<uint8_t> body; std::string err;
+    long status = ShareCurlFetch(url, body, err);
+    if (status == 0) { Send500(fd, "Network error: " + err); return; }
+    if (status == 404) { Send500(fd, "This Mii has no .ltd download available"); return; }
+    if (status != 200) { Send500(fd, "Upstream returned HTTP " + std::to_string(status)); return; }
+    if (body.empty())   { Send500(fd, "Empty download"); return; }
+
+    MkdirP("/switch/TomoToolNX");
+    std::string tmpPath = "/switch/TomoToolNX/.share_import_tmp.ltd";
+    {
+        FILE* f = fopen(tmpPath.c_str(), "wb");
+        if (!f) { Send500(fd, "Cannot write temp file"); return; }
+        fwrite(body.data(), 1, body.size(), f); fclose(f);
+    }
+    std::string importErr = MiiManager::ImportMii(slot, tmpPath);
+    remove(tmpPath.c_str());
+    if (!importErr.empty()) { SrvLog("Share import failed: " + importErr, true); Send500(fd, importErr); return; }
+    SrvLog("Share import: mii " + id + " → slot " + std::to_string(slot));
+    mutexLock(&s_mutex); s_pendingCommit = true; s_pendingMiiRefresh = true; mutexUnlock(&s_mutex);
+    Send200(fd, "application/json", "{\"ok\":true}");
+}
+
 static void HandleConnection(int fd){
     mutexLock(&s_mutex); s_lastConnectTick = armGetSystemTick(); mutexUnlock(&s_mutex);
     Request req;if(!ReadRequest(fd,req)){close(fd);return;}
@@ -4029,6 +5381,7 @@ static void HandleConnection(int fd){
     else if(req.method=="POST"&&req.path=="/api/import")HandleImport(fd,req);
     else if(req.method=="POST"&&req.path=="/api/removebg")HandleBgRemove(fd,req);
     else if(req.method=="GET"  &&req.path=="/api/habits")           HandleHabitsList(fd);
+    else if(req.method=="GET"  &&req.path=="/api/wishes/list")      HandleWishesList(fd);
     else if(req.method=="GET"  &&req.path=="/api/mii/list")         HandleMiiList(fd);
     else if(req.method=="GET"  &&req.path=="/api/mii/export")       HandleMiiExport(fd,req.query);
     else if(req.method=="POST" &&req.path=="/api/mii/import")       HandleMiiImport(fd,req);
@@ -4037,6 +5390,10 @@ static void HandleConnection(int fd){
     else if(req.method=="POST" &&req.path=="/api/ugc/itemimport")   HandleUgcItemImport(fd,req);
     else if(req.method=="GET"  &&req.path=="/api/save/download")   HandleSaveDownload(fd,req.query);
     else if(req.method=="POST" &&req.path=="/api/save/upload")     HandleSaveUpload(fd,req);
+    else if(req.method=="GET"  &&req.path=="/api/share/list")      HandleShareList(fd,req.query);
+    else if(req.method=="GET"  &&req.path=="/api/share/info")      HandleShareInfo(fd,req.query);
+    else if(req.method=="GET"  &&req.path=="/api/share/image")     HandleShareImage(fd,req.query);
+    else if(req.method=="POST" &&req.path=="/api/share/import")    HandleShareImport(fd,req.query);
     else Send404(fd);
     close(fd);
 }

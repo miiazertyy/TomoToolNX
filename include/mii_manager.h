@@ -9,6 +9,7 @@
 
 #define SAVE_MII_SAV    "tomodata:/Mii.sav"
 #define SAVE_PLAYER_SAV "tomodata:/Player.sav"
+#define SAVE_MAP_SAV    "tomodata:/Map.sav"
 #define SAVE_UGC_DIR    "tomodata:/Ugc"
 #define MII_LTD_VERSION 3
 #define MII_MAX_SLOTS   70

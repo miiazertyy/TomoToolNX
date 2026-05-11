@@ -42,6 +42,11 @@ int CountBackups();
 // Delete the oldest timestamped save backup (by name order).
 void DeleteOldestBackup();
 
+// Delete a specific timestamped save backup by its full path.
+// Returns true if the path was removed (or never existed).
+// Refuses to act on a path that isn't inside BACKUP_ROOT, for safety.
+bool DeleteBackupAt(const std::string& backupPath);
+
 // Delete the entire backup root folder (save backups + imports).
 void DeleteBackup();
 

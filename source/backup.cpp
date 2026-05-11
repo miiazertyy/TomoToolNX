@@ -16,11 +16,11 @@
 
 static void MkdirP(const std::string& path) { mkdir(path.c_str(), 0777); }
 
-static std::string Filename(const std::string& path) {
+[[maybe_unused]] static std::string Filename(const std::string& path) {
     size_t sl = path.find_last_of("/\\");
     return (sl == std::string::npos) ? path : path.substr(sl + 1);
 }
-static bool FileExists(const std::string& p) {
+[[maybe_unused]] static bool FileExists(const std::string& p) {
     struct stat st; return stat(p.c_str(), &st) == 0 && S_ISREG(st.st_mode);
 }
 static bool DirExists(const std::string& p) {
@@ -212,6 +212,19 @@ int CountBackups() { return (int)ListSaveBackups().size(); }
 void DeleteOldestBackup() {
     auto backups = ListSaveBackups();
     if (!backups.empty()) RmRf(backups[0]);
+}
+
+bool DeleteBackupAt(const std::string& backupPath) {
+    if (backupPath.empty()) return false;
+    // Safety: refuse to touch anything outside our own backup root.
+    const std::string root = BACKUP_ROOT;
+    if (backupPath.size() <= root.size() + 1) return false;
+    if (backupPath.compare(0, root.size(), root) != 0) return false;
+    if (backupPath[root.size()] != '/') return false;
+    // Refuse "../" escapes in the trailing path.
+    if (backupPath.find("/..") != std::string::npos) return false;
+    RmRf(backupPath);
+    return true;
 }
 
 void DeleteBackup() { RmRf(BACKUP_ROOT); }

@@ -168,3 +168,58 @@ Textures are zstd-compressed NX block-linear images:
 Mii data is stored in `.ltd` files (v3 format, compatible with ShareMii).
 
 Save data is read from `Player.dat` and `Mii.dat` within the mounted save. Changes are written back and committed when leaving the respective tab or pressing the save shortcut.
+
+---
+
+## Translations / Contributing a language
+
+Both the **WebUI** and the **on-Switch homebrew UI** are translatable, and you don't need to know C++ to contribute. Untranslated keys automatically fall back to English, so partial translations are welcome.
+
+### WebUI
+
+Every translatable string lives in a single JavaScript block at the top of [`source/http_server.cpp`](source/http_server.cpp). Search the file for `── Translations ──` to find it.
+
+1. Find the `LOCALE_META` array and add your locale code + display name:
+
+    ```js
+    const LOCALE_META = [
+      {code:'en', label:'English'},
+      {code:'fr', label:'Français'},
+      {code:'es', label:'Español'},    // ← your new language
+    ];
+    ```
+
+2. Just below, in the `LOCALES` object, copy the whole `en: { ... }` block, rename the key to your locale code, and translate each value:
+
+    ```js
+    es: {
+      'tab.textures':'texturas',
+      'tab.mii':'mii',
+      'tab.player':'jugador',
+      // ...translate as many keys as you want — missing ones fall back to English.
+    },
+    ```
+
+Your language then appears in the WebUI **Settings → Language** dropdown (persisted in `localStorage` per device).
+
+### On-Switch homebrew UI
+
+Translations live as plain `key=value` text files in [`romfs/lang/`](romfs/lang/). To add a language:
+
+1. Copy [`romfs/lang/en.txt`](romfs/lang/en.txt) to `romfs/lang/<your-code>.txt` — for example, `romfs/lang/es.txt`.
+2. Translate every value on the right side of `=`. Leave keys (left side) and comment lines (`# …`) alone.
+3. Open [`source/i18n.cpp`](source/i18n.cpp) and add a one-line entry to the `kAvailable` list with your code and display name:
+
+    ```cpp
+    const std::vector<Lang::Entry> kAvailable = {
+        {"en", "English"},
+        {"fr", "Français"},
+        {"es", "Español"},               // ← your new language
+    };
+    ```
+
+4. Rebuild the `.nro`. Your language now shows up under **Settings → Language** on-device (persisted in `config.ini`).
+
+### Submitting your translation
+
+Open a Pull Request on [github.com/miiazertyy/TomoToolNX](https://github.com/miiazertyy/TomoToolNX) with whichever files you touched. You can translate just the WebUI, just the homebrew, or both — every key counts.
