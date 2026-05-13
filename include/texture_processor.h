@@ -35,8 +35,24 @@ namespace TextureProcessor {
 
     enum class TextureKind { Canvas, Ugctex, Thumb };
     enum class TextureFormat { Bc1, Bc3 };
-    enum class Bc1Encoder { Custom, Rgbcx };
+    // Custom: full port of ltd-save-editor's bc_encode.ts. Generates a
+    //         bounding-box candidate and three PCA-scaled candidates in both
+    //         4-color and 3-color modes, scores each in sRGB space with
+    //         gamma-derivative² perceptual weighting, iteratively refits
+    //         endpoints by weighted least squares (up to 4 rounds), then
+    //         perturbs the RGB565 endpoints ±1 in each 5/6-bit channel until
+    //         no further improvement (up to 4 rounds).
+    // PCA:    single-pass principal-axis fit (8 power-iteration steps), no
+    //         candidate scoring or refinement. Faster fallback.
+    enum class Bc1Encoder { Custom, PCA };
     enum class Bc1Mode   { Auto, FourColor, ThreeColor };
+    // How the source image is scaled to fit the target texture size.
+    // - Cover:   scale up to fill, crop the overflow. Preserves aspect ratio.
+    // - Contain: scale down to fit inside, letterbox the remainder with the matte color.
+    // - Fill:    stretch to the target W/H ignoring aspect ratio.
+    enum class FitMode   { Cover, Contain, Fill };
+
+    struct Matte { uint8_t r = 0, g = 0, b = 0, a = 0; };  // a==0 means transparent letterbox
 
     struct UgctexLayout {
         int Width, Height;
@@ -76,6 +92,8 @@ namespace TextureProcessor {
         std::string thumbPath; // actual thumb file path — write destination when set
         Bc1Encoder  encoder  = Bc1Encoder::Custom;
         Bc1Mode     bc1Mode  = Bc1Mode::Auto;
+        FitMode     fitMode  = FitMode::Cover;   // matches upstream default
+        Matte       matte    = {};               // transparent unless fitMode == Contain
     };
 
     // Returns empty string on success, error message on failure.

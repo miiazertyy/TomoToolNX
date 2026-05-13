@@ -27,8 +27,15 @@ include $(DEVKITPRO)/libnx/switch_rules
 TARGET      := TomoToolNX
 APP_TITLE   := TomoToolNX
 APP_AUTHOR  := Imprimante
-APP_VERSION := 1.3.0
-APP_TITLEID := 0x010000000000D071
+APP_VERSION := 1.3.1
+# Title ID intentionally left blank for emulator compatibility:
+# Ryubing 1.3.279's Discord-integration module reacts to the "active title
+# changed" event during NRO load and dereferences the not-yet-registered
+# process, throwing on anything in the 0x01... (real-Switch-app) range.
+# Plenty of established Switch homebrew (NX-Shell, JKSV, etc.) ship without
+# a title ID for the same reason. The on-device launcher and our app don't
+# need this field — it's only used by emulators / Atmosphère's overlay menu.
+APP_TITLEID :=
 BUILD		:=	build
 SOURCES		:=	source
 DATA		:=	data

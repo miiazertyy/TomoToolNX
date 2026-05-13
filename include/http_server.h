@@ -41,6 +41,8 @@ bool HasPendingPlayerSavReload();
 void ClearPendingPlayerSavReload();
 bool HasPendingMiiSavReload();
 void ClearPendingMiiSavReload();
+bool HasPendingMapSavReload();
+void ClearPendingMapSavReload();
 
 // ── Import job (queued by server thread, executed by main thread) ───────────
 // The server thread must NOT call IMG_Load — it's not thread-safe on Atmosphere.

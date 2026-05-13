@@ -19,6 +19,7 @@
 #include "mtp_server.h"
 
 #include "save_editor.h"
+#include "map_data.h"
 #include "belongings_data.h"
 #include "habits_data.h"
 #include "wishes_data.h"
@@ -30,8 +31,10 @@
 #include <sys/stat.h>
 #include <cstring>
 #include <ctime>
+#include <cstdlib>
 #include <algorithm>
 #include <cmath>
+#include <climits>
 #include <map>
 #include <set>
 #include <curl/curl.h>
@@ -234,9 +237,9 @@ static void DrawGearIcon(int cx, int cy, int r, SDL_Color col) {
 
 // ─── Screens ──────────────────────────────────────────────────────────────────
 
-enum class Screen { AppletWarning, UpdateCheck, UpdateAvailable, Downloading, UserPick, BackupPrompt, BackingUp, Mounting, OnSwitch, SaveFeedback, Error, Settings };
+enum class Screen { AppletWarning, UpdateCheck, UpdateAvailable, UserPick, BackupPrompt, BackingUp, Mounting, OnSwitch, SaveFeedback, Error, Settings };
 
-static Screen      gScreen  = Screen::UpdateCheck;
+static Screen      gScreen  = Screen::UserPick;
 static std::string gError;
 static std::string gIP;
 static std::vector<SaveMount::UserInfo> gUsers;
@@ -259,7 +262,7 @@ static void LogERR(const std::string& m){Log(m,COL_RED);}
 
 // ─── On-Switch editor state ───────────────────────────────────────────────────
 
-enum class OnSwitchMode { UGC, Mii, Player, MiiStats, WebUI, TexSettings };
+enum class OnSwitchMode { UGC, Mii, Player, MiiStats, WebUI, TexSettings, Map };
 static OnSwitchMode gOnSwitchMode = OnSwitchMode::WebUI;
 
 static std::vector<UgcTextureEntry> gEntries;
@@ -274,6 +277,8 @@ static SDL_Color    gOnSwitchMsgCol = COL_TEXT;
 static bool         gPreviewNoSrgb  = false; // color encoding toggle: false=sRGB, true=Linear
 static TextureProcessor::Bc1Encoder gEncMode = TextureProcessor::Bc1Encoder::Custom;
 static TextureProcessor::Bc1Mode    gBc1Mode = TextureProcessor::Bc1Mode::Auto;
+static TextureProcessor::FitMode    gFitMode = TextureProcessor::FitMode::Cover;
+static TextureProcessor::Matte      gMatte;            // transparent by default
 
 // File browser
 struct BrowseEntry { std::string name; bool isDir; };
@@ -305,10 +310,17 @@ static void HitClear() { gHitCount = 0; }
 static void HitAdd(int x,int y,int w,int h, TouchFn fn, int param=0) {
     if (gHitCount < 256) gHits[gHitCount++] = {x,y,w,h,fn,param};
 }
+// Last fired-on touch coords, exposed for callbacks that need pixel-level info
+// (e.g. the Map tab's canvas-wide hit zone uses this to derive tile X/Y).
+static int gLastTouchFireX = 0;
+static int gLastTouchFireY = 0;
 static void HitFire(int tx, int ty) {
     for (int i = 0; i < gHitCount; i++) {
         auto& h = gHits[i];
-        if (tx>=h.x && tx<h.x+h.w && ty>=h.y && ty<h.y+h.h) { h.fn(h.param); break; }
+        if (tx>=h.x && tx<h.x+h.w && ty>=h.y && ty<h.y+h.h) {
+            gLastTouchFireX = tx; gLastTouchFireY = ty;
+            h.fn(h.param); break;
+        }
     }
 }
 
@@ -333,6 +345,7 @@ static void TSelMiiWordsSlot(int idx);
 static void TSelMiiRelation(int idx);
 static void TRelMeterAdj(int delta);
 static void TRelDateKbd(int idx);
+static void TRelBatchKnow(int unused);
 static void TSetSocialView(int v);
 static void TSelHabitCat(int c);
 static void TSelHabitItem(int posInCat);
@@ -862,6 +875,7 @@ struct HousingNavItem {
                        // 3=card "add resident" / drop-here button
                        // 4=card vacate button
                        // 5=action-bar button (abAction tells which one)
+                       // 6=card delete button
     int miiSlotIdx;    // valid for kinds 0, 1
     int houseId;       // valid for kinds 1..4
     int roomIdx;       // valid for kinds 1, 2, 3
@@ -1016,6 +1030,55 @@ static void TRelMeterAdj(int delta) {
     adjM(myDir);
     adjM(otDir);
     gMiiSavDirty = true;
+}
+
+// Batch-convert every Unknown relation for the currently-selected Mii to
+// Know. Meter is set to a natural in-game value (the discrete progress
+// thresholds the game itself stamps for new acquaintances) and the "Since"
+// timestamp is bumped to now so it looks like the friendship just started.
+static void TRelBatchKnow(int /*unused*/) {
+    if (!gMiiSav.loaded || gMiis.empty()) return;
+    if (gMiiStatsMiiSel < 0 || gMiiStatsMiiSel >= (int)gMiis.size()) return;
+    static const uint32_t H_IDA   = 0xf7420afbu;
+    static const uint32_t H_IDB   = 0x4071f71cu;
+    static const uint32_t H_BASE  = 0x8b41897eu;
+    static const uint32_t H_METER = 0x42c2fc2fu;
+    static const uint32_t H_TST   = 0x1a892e50u;
+    static const uint32_t H_UNKNOWN = 0x0784a8dcu;
+    static const uint32_t H_KNOW    = 0x354a0515u;
+    // Natural meter values the game actually stamps for the Know type (0..200
+    // range). Anything else technically works but isn't a value the game
+    // would ever set on its own.
+    static const int NATURAL[] = { 0, 20, 40, 60, 100, 120, 140 };
+    static const int NATURAL_N = (int)(sizeof(NATURAL)/sizeof(NATURAL[0]));
+
+    static bool s_seeded = false;
+    if (!s_seeded) { std::srand((unsigned)std::time(nullptr)); s_seeded = true; }
+
+    int miiSlotIdx = gMiis[gMiiStatsMiiSel].slot - 1;
+    uint64_t nowTs = (uint64_t)std::time(nullptr);
+    int n = SaveEditor::ArraySize(gMiiSav, H_IDA);
+    int changed = 0;
+    for (int pi = 0; pi < n; pi++) {
+        int a = SaveEditor::GetIntAt(gMiiSav, H_IDA, pi);
+        int b = SaveEditor::GetIntAt(gMiiSav, H_IDB, pi);
+        if (a < 0 || b < 0) continue;
+        if (a != miiSlotIdx && b != miiSlotIdx) continue;
+        bool selfA = (a == miiSlotIdx);
+        int myDir = selfA ? pi*2   : pi*2+1;
+        int otDir = selfA ? pi*2+1 : pi*2;
+        uint32_t myType = SaveEditor::GetEnumAt(gMiiSav, H_BASE, myDir, H_UNKNOWN);
+        if (myType != H_UNKNOWN) continue;
+        // Know is a symmetric type — set both directions to the same hash.
+        SaveEditor::SetEnumAt(gMiiSav, H_BASE, myDir, H_KNOW);
+        SaveEditor::SetEnumAt(gMiiSav, H_BASE, otDir, H_KNOW);
+        int meter = NATURAL[std::rand() % NATURAL_N];
+        SaveEditor::SetIntAt(gMiiSav, H_METER, myDir, meter);
+        SaveEditor::SetIntAt(gMiiSav, H_METER, otDir, meter);
+        SaveEditor::SetUInt64At(gMiiSav, H_TST, pi, nowTs);
+        changed++;
+    }
+    if (changed > 0) gMiiSavDirty = true;
 }
 static void TSelHabitCat(int c) {
     if (c >= 0 && c < HABIT_CAT_COUNT) {
@@ -1212,6 +1275,7 @@ static void HousingWriteLoc(int miiSlotIdx, int house, int room) {
 }
 // Rebuild the flat row list used by the housing panel.
 // Groups by house id; appends an "Unhoused" section at the end.
+static std::vector<int> HousingAllHouseIds(); // defined below
 static void HousingRebuild() {
     gHousingRows.clear();
     if (!HousingAvailable() || gMiis.empty()) return;
@@ -1219,6 +1283,10 @@ static void HousingRebuild() {
     struct Resident { int idx; int room; };
     std::map<int, std::vector<Resident>> byHouse;
     std::vector<int> unhoused;
+    // Pre-seed every known house from Map.sav so empty (vacated) houses still
+    // show up in the editor — they're only pruned at save time. Without this
+    // seed the rebuild only enumerates houses that currently have residents.
+    for (int hid : HousingAllHouseIds()) byHouse[hid];
     for (const auto& m : gMiis) {
         int idx = m.slot - 1;
         int h = SaveEditor::GetIntAt(gMiiSav, HASH_HOUSE_MAPID, idx);
@@ -1497,6 +1565,101 @@ static void HousingDoVacate(int houseId) {
     }
     HousingRebuild();
 }
+// Set true whenever we mutate gMapSav so the back-prompt save flow writes it
+// back to disk. Declared here so the Housing helpers below (which clear house
+// actors) can flip it; the Map tab also flips it from its own input handlers.
+static bool gMapDirty = false;
+
+// ── House deletion (Map.sav writes) ──────────────────────────────────────────
+// Mirrors upstream's deleteHouseByMapId in ltd-save-editor exactly so we
+// can't corrupt saves:
+//
+//   * House.MapId is treated as READ-ONLY — upstream never writes to it; the
+//     array is the canonical "this id maps to a real plot" source-of-truth.
+//   * MapObject.ActorKey is the only field we touch on delete: setting it to
+//     0 marks that slot as empty (same convention liveRows uses to filter).
+//     LinkedMapId, position, rotation, etc. stay as-is, matching upstream's
+//     clearSlot(idx) → setActor(idx, 0).
+//   * Only group == ACTOR_HOUSE (HouseDollHouse / HouseOneRoom) counts as a
+//     deletable house. UGC houses (HouseUgcXX_YY, group == ACTOR_UGC) are
+//     decorative buildings, not residences — upstream's isHouseActor excludes
+//     them so we do too.
+//
+// "Auto-cleanup on save" calls the same delete for every house with zero
+// residents at commit time, so a vacated-and-not-repopulated house drops on
+// save even if the user didn't click Delete.
+static int HousingMapObjectSlotForHouse(int houseId) {
+    if (!gMapSav.loaded || houseId < 0) return -1;
+    uint32_t hAct  = SaveEditor::Hash(MapKeys::ActorKey);
+    uint32_t hLink = SaveEditor::Hash(MapKeys::LinkedMapId);
+    int n = SaveEditor::ArraySize(gMapSav, hAct);
+    for (int i = 0; i < n; i++) {
+        uint32_t a = SaveEditor::GetUIntAt(gMapSav, hAct, i, 0);
+        if (!a) continue;
+        const MapData::ActorInfo* info = MapData::ActorLookup(a);
+        if (!info || info->group != MapData::ACTOR_HOUSE) continue;
+        int link = SaveEditor::GetIntAt(gMapSav, hLink, i, -1);
+        if (link == houseId) return i;
+    }
+    return -1;
+}
+// Live list of house mapIds on the island. Mirrors upstream's pattern:
+// enumerate MapObject slots whose ActorKey is a real house actor (ACTOR_HOUSE)
+// and collect their LinkedMapId. Slots with ActorKey == 0 are skipped, so once
+// a house is deleted (its ActorKey cleared) it auto-vanishes from this list.
+// We deliberately don't read House.MapId for this — that array is the static
+// plot registry and may include legacy ids whose actor has already been wiped.
+static std::vector<int> HousingAllHouseIds() {
+    std::vector<int> out;
+    if (!gMapSav.loaded) return out;
+    uint32_t hAct  = SaveEditor::Hash(MapKeys::ActorKey);
+    uint32_t hLink = SaveEditor::Hash(MapKeys::LinkedMapId);
+    int n = SaveEditor::ArraySize(gMapSav, hAct);
+    for (int i = 0; i < n; i++) {
+        uint32_t a = SaveEditor::GetUIntAt(gMapSav, hAct, i, 0);
+        if (!a) continue;
+        const MapData::ActorInfo* info = MapData::ActorLookup(a);
+        if (!info || info->group != MapData::ACTOR_HOUSE) continue;
+        int link = SaveEditor::GetIntAt(gMapSav, hLink, i, -1);
+        if (link >= 0) out.push_back(link);
+    }
+    return out;
+}
+static int HousingResidentCount(int houseId) {
+    if (!gMiiSav.loaded || houseId < 0) return 0;
+    int count = 0;
+    for (auto& m : gMiis) {
+        int idx = m.slot - 1;
+        int h = SaveEditor::GetIntAt(gMiiSav, HASH_HOUSE_MAPID, idx);
+        if (h == houseId) count++;
+    }
+    return count;
+}
+// Wipe the house actor in Map.sav. Caller is responsible for kicking residents
+// first so no Mii is left pointing at a houseId whose actor was just cleared.
+// House.MapId is left untouched — that mirrors upstream and avoids confusing
+// the game's load-time integrity check.
+static bool HousingScrubMapHouse(int houseId) {
+    if (!gMapSav.loaded || houseId < 0) return false;
+    int mapSlot = HousingMapObjectSlotForHouse(houseId);
+    if (mapSlot < 0) return false;
+    uint32_t hAct = SaveEditor::Hash(MapKeys::ActorKey);
+    SaveEditor::SetUIntAt(gMapSav, hAct, mapSlot, 0);
+    gMapDirty = true;
+    return true;
+}
+static void HousingDoDeleteHouse(int houseId) {
+    HousingDoVacate(houseId);     // kick residents (Mii.sav)
+    HousingScrubMapHouse(houseId); // clear MapObject.ActorKey only
+    HousingRebuild();
+}
+// Called from the save flow: every empty house gets removed from Map.sav.
+static void HousingCleanupEmptyHouses() {
+    if (!gMapSav.loaded || !gMiiSav.loaded) return;
+    for (int hid : HousingAllHouseIds()) {
+        if (HousingResidentCount(hid) == 0) HousingScrubMapHouse(hid);
+    }
+}
 // Houses are placed on the island in-game (Map.sav stores the actor entries),
 // not created from the save editor. We can only assign Miis to houses that
 // already exist; trying to write an arbitrary new house id would point the Mii
@@ -1538,8 +1701,11 @@ static void THousingNavAct(int idx) {
                 gMiiStatsMsgFrames = 180;
             }
             break;
-        case 4: // vacate
+        case 4: // vacate — kick all residents but keep the house
             HousingDoVacate(it.houseId);
+            break;
+        case 6: // delete — kick residents AND remove the house from Map.sav
+            HousingDoDeleteHouse(it.houseId);
             break;
         case 5: // action-bar
             if      (it.abAction == 0) HousingDoNewHouse();
@@ -2216,6 +2382,8 @@ static void DoOnSwitchImport(const std::string& pngPath) {
     opts.originalUgctexPath = gEntries[gEntrySel].ugctexPath;
     opts.encoder            = gEncMode;
     opts.bc1Mode            = gBc1Mode;
+    opts.fitMode            = gFitMode;
+    opts.matte              = gMatte;
 
     LogINF("Importing "+stem+"...");
     std::string err = TextureProcessor::ImportPng(opts);
@@ -2261,6 +2429,15 @@ static void DoUgcExportLtd() {
 static void TDoUgcExportLtd(int) { DoUgcExportLtd(); }
 static void TSetEncMode(int v) { gEncMode = (TextureProcessor::Bc1Encoder)v; SaveConfig(); }
 static void TSetBc1Mode(int v) { gBc1Mode = (TextureProcessor::Bc1Mode)v; SaveConfig(); }
+static void TSetFitMode(int v) { gFitMode = (TextureProcessor::FitMode)v; SaveConfig(); }
+// Three matte presets for on-Switch. The WebUI has a full hex picker; on a
+// controller a 3-button stepper covers the typical cases without keyboard.
+static void TSetMatte  (int v) {
+    if      (v == 0) gMatte = TextureProcessor::Matte{};                 // transparent
+    else if (v == 1) gMatte = TextureProcessor::Matte{255, 255, 255, 255}; // white
+    else             gMatte = TextureProcessor::Matte{  0,   0,   0, 255}; // black
+    SaveConfig();
+}
 
 static void DoUgcImportLtd(const std::string& ltdPath) {
     if (gEntries.empty() || gEntrySel < 0 || gEntrySel >= (int)gEntries.size()) return;
@@ -2338,36 +2515,13 @@ static void DrawUpdateAvailable() {
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
     SDL_RenderClear(gRen);
     DrawHeader("");
-    DrawTextC("update available!", SCREEN_W/2, SCREEN_H/2-40, COL_GREEN, Font::Lg);
+    DrawTextC("a new update is available on GitHub!", SCREEN_W/2, SCREEN_H/2-60, COL_GREEN, Font::Lg);
     DrawTextC("v" APP_VERSION + std::string("  ->  v") + Updater::GetLatestVersion(),
-              SCREEN_W/2, SCREEN_H/2+2, COL_TEXT, Font::Md);
-    DrawFooter("A  download and install    B  skip    +  quit");
-    SDL_RenderPresent(gRen);
-}
-
-static void DrawDownloading() {
-    SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
-    SDL_RenderClear(gRen);
-    DrawHeader("");
-    auto state = Updater::GetState();
-    if (state == Updater::State::Done) {
-        DrawTextC("update installed!", SCREEN_W/2, SCREEN_H/2-20, COL_GREEN, Font::Md);
-        DrawTextC("restart the app to apply", SCREEN_W/2, SCREEN_H/2+14, COL_DIM);
-        DrawFooter("B  continue without restarting    +  quit");
-    } else if (state == Updater::State::Error) {
-        DrawTextC("download failed", SCREEN_W/2, SCREEN_H/2-20, COL_RED, Font::Md);
-        DrawTextC(Updater::GetError(), SCREEN_W/2, SCREEN_H/2+14, COL_DIM);
-        DrawFooter("B  continue    +  quit");
-    } else {
-        DrawTextC("downloading update...", SCREEN_W/2, SCREEN_H/2-30, COL_DIM, Font::Md);
-        float prog = Updater::GetProgress();
-        int bw=700, bh=10, bx=SCREEN_W/2-bw/2, by=SCREEN_H/2;
-        FillRect(bx,by,bw,bh,COL_PANEL); DrawRect(bx,by,bw,bh,COL_BORDER);
-        FillRect(bx,by,(int)(bw*prog),bh,COL_ACCENT);
-        char pct[16]; snprintf(pct,sizeof(pct),"%d%%",(int)(prog*100));
-        DrawTextC(pct, SCREEN_W/2, by+bh+18, COL_DIM);
-        DrawTextC("do not turn off the console", SCREEN_W/2, by+bh+42, COL_DIM);
-    }
+              SCREEN_W/2, SCREEN_H/2-18, COL_TEXT, Font::Md);
+    DrawTextC("download the new TomoToolNX.nro from:", SCREEN_W/2, SCREEN_H/2+18, COL_DIM);
+    DrawTextC("github.com/" GITHUB_REPO "/releases/latest",
+              SCREEN_W/2, SCREEN_H/2+42, COL_ACCENT, Font::Md);
+    DrawFooter("A / B  continue    +  quit");
     SDL_RenderPresent(gRen);
 }
 
@@ -2892,12 +3046,25 @@ static void LoadConfig() {
         if (key == "max_backups")    { int v = atoi(val.c_str()); if (v >= 1 && v <= 99) gMaxBackups = v; }
         if (key == "encoder") {
             if      (val == "custom") gEncMode = TextureProcessor::Bc1Encoder::Custom;
-            else if (val == "rgbcx")  gEncMode = TextureProcessor::Bc1Encoder::Rgbcx;
+            else if (val == "pca")         gEncMode = TextureProcessor::Bc1Encoder::PCA;
         }
         if (key == "bc1_mode") {
             if      (val == "auto")     gBc1Mode = TextureProcessor::Bc1Mode::Auto;
             else if (val == "4color")   gBc1Mode = TextureProcessor::Bc1Mode::FourColor;
             else if (val == "3color")   gBc1Mode = TextureProcessor::Bc1Mode::ThreeColor;
+        }
+        if (key == "fit_mode") {
+            if      (val == "cover")    gFitMode = TextureProcessor::FitMode::Cover;
+            else if (val == "contain")  gFitMode = TextureProcessor::FitMode::Contain;
+            else if (val == "fill")     gFitMode = TextureProcessor::FitMode::Fill;
+        }
+        if (key == "matte") {
+            // Format: "transparent" or "rrggbb" hex; empty/invalid → transparent.
+            if (val == "transparent") gMatte = TextureProcessor::Matte{};
+            else if (val.size() == 6) {
+                auto h=[&](int o){int v=0;for(int i=0;i<2;i++){char c=val[o+i];v<<=4;if(c>='0'&&c<='9')v|=c-'0';else if(c>='a'&&c<='f')v|=c-'a'+10;else if(c>='A'&&c<='F')v|=c-'A'+10;}return (uint8_t)v;};
+                gMatte = {h(0),h(2),h(4),255};
+            }
         }
         if (key == "language") {
             Lang::SetCurrent(val);
@@ -2914,10 +3081,18 @@ static void SaveConfig() {
     fprintf(f, "save_warn_acked=%d\n", gSaveWarningAcked ? 1 : 0);
     fprintf(f, "max_backups=%d\n",     gMaxBackups);
     fprintf(f, "encoder=%s\n",
-            gEncMode == TextureProcessor::Bc1Encoder::Custom ? "custom" : "rgbcx");
+            gEncMode == TextureProcessor::Bc1Encoder::Custom ? "custom" : "pca");
     fprintf(f, "bc1_mode=%s\n",
             gBc1Mode == TextureProcessor::Bc1Mode::Auto      ? "auto" :
             gBc1Mode == TextureProcessor::Bc1Mode::FourColor ? "4color" : "3color");
+    fprintf(f, "fit_mode=%s\n",
+            gFitMode == TextureProcessor::FitMode::Cover   ? "cover" :
+            gFitMode == TextureProcessor::FitMode::Contain ? "contain" : "fill");
+    if (gMatte.a == 0) {
+        fprintf(f, "matte=transparent\n");
+    } else {
+        fprintf(f, "matte=%02x%02x%02x\n", gMatte.r, gMatte.g, gMatte.b);
+    }
     fprintf(f, "language=%s\n", Lang::Current().c_str());
     fclose(f);
 }
@@ -2968,13 +3143,14 @@ static void DrawTexSettings() {
 
     // Tab bar (same as DrawOnSwitch, with gear tab selected)
     {
-        int tw=140, th=22, gap=4, gearTw=32;
-        int totalW=tw*4+gap*4+gearTw, tx=SCREEN_W/2-totalW/2, ty=28;
+        int tw=118, th=22, gap=4, gearTw=32;
+        int totalW=tw*5+gap*5+gearTw, tx=SCREEN_W/2-totalW/2, ty=28;
         struct { std::string label; OnSwitchMode mode; } tabs[]={
             {Lang::T("tab.webui"),    OnSwitchMode::WebUI},
             {Lang::T("tab.textures"), OnSwitchMode::UGC},
             {Lang::T("tab.mii"),      OnSwitchMode::MiiStats},
-            {Lang::T("tab.player"),   OnSwitchMode::Player}};
+            {Lang::T("tab.player"),   OnSwitchMode::Player},
+            {Lang::T("tab.map"),      OnSwitchMode::Map}};
         for (auto& t : tabs) {
             bool sel=gOnSwitchMode==t.mode;
             HitAdd(tx,ty,tw,th,TSetMode,(int)t.mode);
@@ -2993,92 +3169,103 @@ static void DrawTexSettings() {
         }
     }
 
-    // Content area
+    // Content area — four compact rows (Encoder, BC1 mode, Fit, Background),
+    // matching the WebUI's pill-button style: legend on the left, pill buttons
+    // on the right, one-line hint below.
     const int contentX = (SCREEN_W - 720) / 2;
     const int contentY = 68;
     const int sectionW = 720;
+    const int rowH     = 62;
+    const int rowGap   = 8;
 
-    // ── Section: Encoder ─────────────────────────────────────────────────────
-    {
-        const int secH = 90, btnW = 110, btnH = 30, btnGap = 8;
-        int sy = contentY;
-        bool selRow = (gTexSettingsSel == 0);
-
-        FillRect(contentX, sy, sectionW, secH, selRow ? COL_SEL : COL_PANEL);
-        DrawRect(contentX, sy, sectionW, secH, selRow ? COL_GOLD : COL_BORDER);
-        HitAdd(contentX, sy, sectionW, secH, TSelTexSettingsItem, 0);
-
-        // Left side: title + description stacked
-        DrawText(Lang::T("settings.encoder"),      contentX + 16, sy + 10, selRow ? COL_TEXT : COL_DIM, Font::Md);
-        DrawText(Lang::T("settings.encoder.desc"), contentX + 16, sy + 34, COL_DIM, Font::Sm);
-
-        // Right side: toggle buttons, vertically centred in the card
-        struct { const char* name; TextureProcessor::Bc1Encoder val; } ENC_OPTS[] = {
-            { "Custom", TextureProcessor::Bc1Encoder::Custom },
-            { "rgbcx",  TextureProcessor::Bc1Encoder::Rgbcx  },
-        };
-        int bx = contentX + sectionW - 2*(btnW+btnGap) - 16;
-        int by = sy + (secH - btnH) / 2;
-        for (int k = 0; k < 2; k++) {
-            bool on = (gEncMode == ENC_OPTS[k].val);
-            FillRect(bx, by, btnW, btnH, on ? COL_SEL : COL_BG);
-            DrawRect(bx, by, btnW, btnH, on ? COL_GOLD : (selRow ? COL_GOLD : COL_BORDER));
-            DrawTextC(ENC_OPTS[k].name, bx + btnW/2, by + btnH/2, on ? COL_GOLD : COL_DIM, Font::Md);
-            HitAdd(bx, by, btnW, btnH, TSetEncMode, k);
-            bx += btnW + btnGap;
-        }
-
-        std::string encHint = (gEncMode == TextureProcessor::Bc1Encoder::Custom)
-            ? Lang::T("settings.encoder.hint.custom")
-            : Lang::T("settings.encoder.hint.rgbcx");
-        DrawText(encHint, contentX + 16, sy + 58, COL_DIM, Font::Sm);
-    }
-
-    // ── Section: BC1 Mode ────────────────────────────────────────────────────
-    {
-        bool disabled = (gEncMode != TextureProcessor::Bc1Encoder::Custom);
-        const int secH = 90, btnW = 96, btnH = 30, btnGap = 8;
-        int sy = contentY + 98;
-        bool selRow = (gTexSettingsSel == 1);
-
-        SDL_Color panelBg  = selRow ? COL_SEL : COL_PANEL;
-        SDL_Color panelBdr = disabled ? SDL_Color{45,45,45,255}
-                                      : (selRow ? COL_GOLD : COL_BORDER);
-        FillRect(contentX, sy, sectionW, secH, panelBg);
-        DrawRect(contentX, sy, sectionW, secH, panelBdr);
-        HitAdd(contentX, sy, sectionW, secH, TSelTexSettingsItem, 1);
-
-        SDL_Color lblCol = disabled ? COL_DIM  : (selRow ? COL_TEXT : COL_DIM);
+    auto drawPillRow = [&](int rowIdx, int sy, const std::string& label,
+                           const std::string& hint, bool disabled) -> void {
+        bool selRow = (gTexSettingsSel == rowIdx);
+        SDL_Color bg = selRow ? COL_SEL : COL_PANEL;
+        SDL_Color br = disabled ? SDL_Color{45,45,45,255}
+                                : (selRow ? COL_GOLD : COL_BORDER);
+        FillRect(contentX, sy, sectionW, rowH, bg);
+        DrawRect(contentX, sy, sectionW, rowH, br);
+        HitAdd(contentX, sy, sectionW, rowH, TSelTexSettingsItem, rowIdx);
+        SDL_Color lblCol = disabled ? COL_DIM : (selRow ? COL_TEXT : COL_DIM);
         SDL_Color dscCol = disabled ? SDL_Color{55,55,55,255} : COL_DIM;
-        DrawText(Lang::T("settings.bc1"),      contentX + 16, sy + 10, lblCol, Font::Md);
-        DrawText(Lang::T("settings.bc1.desc"), contentX + 16, sy + 34, dscCol, Font::Sm);
+        DrawText(label, contentX + 16, sy + 8,  lblCol, Font::Md);
+        DrawText(hint,  contentX + 16, sy + 36, dscCol, Font::Sm);
+    };
 
-        struct { const char* name; TextureProcessor::Bc1Mode val; } BC1_OPTS[] = {
-            { "Auto",    TextureProcessor::Bc1Mode::Auto       },
-            { "4-color", TextureProcessor::Bc1Mode::FourColor  },
-            { "3-color", TextureProcessor::Bc1Mode::ThreeColor },
-        };
-        int bx = contentX + sectionW - 3*(btnW+btnGap) - 16;
-        int by = sy + (secH - btnH) / 2;
-        for (int k = 0; k < 3; k++) {
-            bool on = (!disabled && gBc1Mode == BC1_OPTS[k].val);
-            SDL_Color bg = disabled ? SDL_Color{30,30,30,255} : (on ? COL_SEL   : COL_BG);
+    auto drawPills = [&](int sy, int btnCount, int btnW, int btnH,
+                         int curIdx, bool disabled, int rowIdx,
+                         const char* const* names, TouchFn cb) -> void {
+        const int btnGap = 6;
+        int bx = contentX + sectionW - btnCount*(btnW+btnGap) - 10;
+        int by = sy + (rowH - btnH) / 2;
+        bool selRow = (gTexSettingsSel == rowIdx);
+        for (int k = 0; k < btnCount; k++) {
+            bool on = (!disabled && curIdx == k);
+            SDL_Color bg = disabled ? SDL_Color{30,30,30,255}
+                                    : (on ? COL_GOLD : COL_BG);
             SDL_Color br = disabled ? SDL_Color{45,45,45,255}
                                     : (on ? COL_GOLD : (selRow ? COL_GOLD : COL_BORDER));
-            SDL_Color tc = disabled ? SDL_Color{55,55,55,255} : (on ? COL_GOLD : COL_DIM);
+            SDL_Color tc = disabled ? SDL_Color{55,55,55,255}
+                                    : (on ? COL_BG : COL_DIM);
             FillRect(bx, by, btnW, btnH, bg);
             DrawRect(bx, by, btnW, btnH, br);
-            DrawTextC(BC1_OPTS[k].name, bx + btnW/2, by + btnH/2, tc, Font::Md);
-            if (!disabled)
-                HitAdd(bx, by, btnW, btnH, TSetBc1Mode, k);
+            DrawTextC(names[k], bx + btnW/2, by + btnH/2, tc, Font::Sm);
+            if (!disabled) HitAdd(bx, by, btnW, btnH, cb, k);
             bx += btnW + btnGap;
         }
+    };
 
-        std::string bc1Hint = disabled ? Lang::T("settings.bc1.disabled") :
+    // ── Row 0: Encoder ───────────────────────────────────────────────────────
+    {
+        int sy = contentY;
+        std::string hint = (gEncMode == TextureProcessor::Bc1Encoder::Custom)
+            ? Lang::T("settings.encoder.hint.custom")
+            : Lang::T("settings.encoder.hint.pca");
+        drawPillRow(0, sy, Lang::T("settings.encoder"), hint, false);
+        const char* names[] = { "Gamma-aware", "PCA" };
+        drawPills(sy, 2, 130, 28, (int)gEncMode, false, 0, names, TSetEncMode);
+    }
+
+    // ── Row 1: BC1 Mode ──────────────────────────────────────────────────────
+    {
+        bool disabled = (gEncMode != TextureProcessor::Bc1Encoder::Custom);
+        int sy = contentY + (rowH + rowGap);
+        std::string hint = disabled ? Lang::T("settings.bc1.disabled") :
             (gBc1Mode == TextureProcessor::Bc1Mode::Auto)       ? Lang::T("settings.bc1.hint.auto") :
             (gBc1Mode == TextureProcessor::Bc1Mode::FourColor)  ? Lang::T("settings.bc1.hint.fourColor") :
                                                                    Lang::T("settings.bc1.hint.threeColor");
-        DrawText(bc1Hint, contentX + 16, sy + 58, dscCol, Font::Sm);
+        drawPillRow(1, sy, Lang::T("settings.bc1"), hint, disabled);
+        const char* names[] = { "Auto", "4-color", "3-color" };
+        drawPills(sy, 3, 80, 28, (int)gBc1Mode, disabled, 1, names, TSetBc1Mode);
+    }
+
+    // ── Row 2: Fit mode ──────────────────────────────────────────────────────
+    {
+        int sy = contentY + 2 * (rowH + rowGap);
+        std::string hint =
+            (gFitMode == TextureProcessor::FitMode::Cover)   ? Lang::T("settings.fit.hint.cover")   :
+            (gFitMode == TextureProcessor::FitMode::Contain) ? Lang::T("settings.fit.hint.contain") :
+                                                                Lang::T("settings.fit.hint.fill");
+        drawPillRow(2, sy, Lang::T("settings.fit"), hint, false);
+        const char* names[] = { "Cover", "Contain", "Fill" };
+        drawPills(sy, 3, 80, 28, (int)gFitMode, false, 2, names, TSetFitMode);
+    }
+
+    // ── Row 3: Background (matte) — only relevant when Fit == Contain ───────
+    {
+        bool disabled = (gFitMode != TextureProcessor::FitMode::Contain);
+        int sy = contentY + 3 * (rowH + rowGap);
+        int matteIdx = (gMatte.a == 0)                       ? 0
+                     : (gMatte.r==255 && gMatte.g==255 && gMatte.b==255) ? 1
+                     : (gMatte.r==0   && gMatte.g==0   && gMatte.b==0)   ? 2
+                                                                          : 0;
+        std::string hint = disabled
+            ? Lang::T("settings.matte.disabled")
+            : Lang::T("settings.matte.desc");
+        drawPillRow(3, sy, Lang::T("settings.matte"), hint, disabled);
+        const char* names[] = { "Transparent", "White", "Black" };
+        drawPills(sy, 3, 96, 28, matteIdx, disabled, 3, names, TSetMatte);
     }
 
     DrawFooter(Lang::T("settings.footer"));
@@ -3100,15 +3287,16 @@ static void DrawOnSwitch() {
     }
     DrawHeader(subtitle);
 
-    // Tab bar — 4 text tabs
+    // Tab bar — 5 text tabs
     {
-        int tw=140, th=22, gap=4;
-        int totalW=tw*4+gap*3, tx=SCREEN_W/2-totalW/2, ty=28;
+        int tw=130, th=22, gap=4;
+        int totalW=tw*5+gap*4, tx=SCREEN_W/2-totalW/2, ty=28;
         struct { std::string label; OnSwitchMode mode; } tabs[]={
             {Lang::T("tab.webui"),    OnSwitchMode::WebUI},
             {Lang::T("tab.textures"), OnSwitchMode::UGC},
             {Lang::T("tab.mii"),      OnSwitchMode::MiiStats},
             {Lang::T("tab.player"),   OnSwitchMode::Player},
+            {Lang::T("tab.map"),      OnSwitchMode::Map},
         };
         for (auto& t : tabs) {
             bool sel = gOnSwitchMode==t.mode;
@@ -3532,11 +3720,12 @@ static void DrawPlayer() {
 
     // Tab bar (same as DrawOnSwitch)
     {
-        int tw=140, th=22, gap=4;
-        int totalW=tw*4+gap*3, tx=SCREEN_W/2-totalW/2, ty=28;
+        int tw=130, th=22, gap=4;
+        int totalW=tw*5+gap*4, tx=SCREEN_W/2-totalW/2, ty=28;
         struct { std::string label; OnSwitchMode mode; } tabs[]={
             {Lang::T("tab.webui"),OnSwitchMode::WebUI},{Lang::T("tab.textures"),OnSwitchMode::UGC},
-            {Lang::T("tab.mii"),OnSwitchMode::MiiStats},{Lang::T("tab.player"),OnSwitchMode::Player}};
+            {Lang::T("tab.mii"),OnSwitchMode::MiiStats},{Lang::T("tab.player"),OnSwitchMode::Player},
+            {Lang::T("tab.map"),OnSwitchMode::Map}};
         for (auto& t : tabs) {
             bool sel=gOnSwitchMode==t.mode;
             HitAdd(tx,ty,tw,th,TSetMode,(int)t.mode);
@@ -3548,7 +3737,17 @@ static void DrawPlayer() {
     }
 
     if (!gPlayerSav.loaded) {
-        DrawTextC("loading current player save...", SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
+        // Same fix as the Mii tab — surface the load error so the screen
+        // doesn't sit on "loading..." forever when the parser actually failed.
+        if (!gPlayerMsg.empty()) {
+            DrawTextC(gPlayerMsg, SCREEN_W/2, SCREEN_H/2 - 14, COL_RED, Font::Md);
+            DrawTextC("Player.sav couldn't be parsed — restore from a backup or",
+                      SCREEN_W/2, SCREEN_H/2 + 18, COL_DIM, Font::Sm);
+            DrawTextC("re-open Tomodachi Life once to let the game rewrite it.",
+                      SCREEN_W/2, SCREEN_H/2 + 38, COL_DIM, Font::Sm);
+        } else {
+            DrawTextC("loading current player save...", SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
+        }
         DrawFooter("B  back");
         SDL_RenderPresent(gRen);
         return;
@@ -3963,6 +4162,537 @@ static void BlOpenPicker(int blSel, int miiIdx) {
     gBlPickerOpen = true;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Map tab (on-Switch)
+// Mirrors the WebUI Map tab: a 120×80 island grid rendered into a 720×480
+// region of the screen with an inspector card on the right.
+//   • D-pad / left stick move a single-tile cursor (the right stick pans the
+//     cursor faster, useful since the island is 120 tiles wide).
+//   • A on a tile with an object opens the inspector; A on an empty tile in
+//     Place mode drops the chosen actor there.
+//   • X deletes the inspected object, +/- start the actor picker for place /
+//     reassign, Y commits Map.sav to disk.
+//   • Touch: tap a tile to move the cursor (auto-opens inspector if there's
+//     an object); tap any inspector / picker control via HitAdd zones.
+// All schema reads/writes go through SaveEditor::{Get,Set}{Int,UInt,Float}At
+// on gMapSav so behaviour matches the WebUI exactly.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum class MapMode : uint8_t {
+    Idle    = 0,
+    Inspect = 1,
+    Picker  = 2,
+    Place   = 3,
+};
+
+static int       gMapCursorX     = 60;
+static int       gMapCursorY     = 40;
+static int       gMapSelSlot     = -1;
+static MapMode   gMapMode        = MapMode::Idle;
+// gMapDirty is declared earlier (above the Housing helpers that set it).
+static std::string gMapMsg;
+static SDL_Color gMapMsgCol      = COL_TEXT;
+static int       gMapMsgFrames   = 0;
+static uint32_t  gMapPlaceActor  = 0;
+static int       gMapPickerSel   = 0;
+static int       gMapPickerScroll= 0;
+static std::string gMapPickerFilter;
+static int       gMapInsField    = 0;  // focused inspector field (0..N-1)
+static int       gMapDelConfirm  = 0;  // 0 idle, 1 awaiting Y/A confirm
+static int       gMapStickXAcc   = 0;
+static int       gMapStickYAcc   = 0;
+
+// On-screen geometry (1280×720). Canvas at 7 px/tile fills the height between
+// the tab bar and footer; inspector is sized to the form's actual content.
+static constexpr int MAP_CANVAS_X = 24;
+static constexpr int MAP_CANVAS_Y = 84;
+static constexpr int MAP_CANVAS_W = 840;  // 7 px / tile
+static constexpr int MAP_CANVAS_H = 560;  // 7 px / tile
+static constexpr int MAP_INS_X    = 880;
+static constexpr int MAP_INS_Y    = 84;
+static constexpr int MAP_INS_W    = 376;
+static constexpr int MAP_INS_H    = 560;
+
+// Compile-time list of actor categories to draw an actor in the picker. We
+// reuse the generated group constants from map_data.h.
+static const SDL_Color MAP_GROUP_SDL_COL[] = {
+    {225, 29, 72,  255},   // house    — rose
+    { 37, 99, 235, 255},   // facility — blue
+    { 22,163, 74,  255},   // deco     — green
+    {147, 51, 234, 255},   // room     — purple
+    {202,138,  4,  255},   // step     — amber
+    {167,139,250, 255},    // ugc      — violet
+    {239, 68, 68,  255},   // unknown  — red
+};
+
+static SDL_Color MapHexColor(const MapData::TileInfo* t) {
+    if (!t) return {0x88, 0x00, 0x88, 255};   // visible magenta for unknowns
+    return SDL_Color{t->r, t->g, t->b, 255};
+}
+
+static void MapSetMsg(const std::string& s, SDL_Color col, int frames = 120) {
+    gMapMsg = s; gMapMsgCol = col; gMapMsgFrames = frames;
+}
+
+// Read one object slot's actor (we use this everywhere for "is this slot
+// occupied?"). Returns 0 for empty / unloaded.
+static uint32_t MapActorAt(int slot) {
+    if (!gMapSav.loaded || slot < 0) return 0;
+    return SaveEditor::GetUIntAt(gMapSav, SaveEditor::Hash(MapKeys::ActorKey), slot, 0);
+}
+
+static int MapObjectCount() {
+    if (!gMapSav.loaded) return 0;
+    return SaveEditor::ArraySize(gMapSav, SaveEditor::Hash(MapKeys::ActorKey));
+}
+
+// Footprint rect after applying the actor's quarter-turn Y rotation. Mirrors
+// upstream's rotateActorFootprint (ltd-save-editor src/lib/map/actors/actors.ts).
+// Houses and facilities store negative x0/y0 anchors so their stored grid
+// position is the *goal point*, not the top-left corner; without applying
+// (x + x0, y + y0) the building renders shifted off the terrain plot.
+struct MapFootprint { int x0, y0, w, h; };
+static MapFootprint MapActorRect(const MapData::ActorInfo* info, float rotDeg) {
+    if (!info) return { 0, 0, 1, 1 };
+    int x0 = (int)info->x0, y0 = (int)info->y0;
+    int w  = (int)info->w,  h  = (int)info->h;
+    int t = (((int)std::lround(rotDeg / 90.0f) % 4) + 4) % 4;
+    if (t == 0) return { x0, y0, w, h };
+    int x1 = x0 + w - 1, y1 = y0 + h - 1;
+    int corners[4][2] = {{x0,y0},{x1,y0},{x0,y1},{x1,y1}};
+    int minX = INT_MAX, minY = INT_MAX, maxX = INT_MIN, maxY = INT_MIN;
+    for (auto& c : corners) {
+        int cx = c[0], cy = c[1];
+        for (int i = 0; i < t; i++) { int nx = cy; int ny = -cx; cx = nx; cy = ny; }
+        if (cx < minX) minX = cx;
+        if (cy < minY) minY = cy;
+        if (cx > maxX) maxX = cx;
+        if (cy > maxY) maxY = cy;
+    }
+    return { minX, minY, maxX - minX + 1, maxY - minY + 1 };
+}
+
+// Find the topmost object at (tx, ty) with a 2-tile snap radius.
+static int MapObjectAt(int tx, int ty, int snap = 2) {
+    if (!gMapSav.loaded) return -1;
+    uint32_t hAct = SaveEditor::Hash(MapKeys::ActorKey);
+    uint32_t hX   = SaveEditor::Hash(MapKeys::GridPosX);
+    uint32_t hY   = SaveEditor::Hash(MapKeys::GridPosY);
+    uint32_t hR   = SaveEditor::Hash(MapKeys::RotY);
+    int n = SaveEditor::ArraySize(gMapSav, hAct);
+    int best = -1;
+    int bestDist = INT_MAX;
+    for (int i = 0; i < n; i++) {
+        uint32_t a = SaveEditor::GetUIntAt(gMapSav, hAct, i, 0);
+        if (!a) continue;
+        int x = SaveEditor::GetIntAt(gMapSav, hX, i, -1);
+        int y = SaveEditor::GetIntAt(gMapSav, hY, i, -1);
+        const MapData::ActorInfo* info = MapData::ActorLookup(a);
+        MapFootprint fp = MapActorRect(info, SaveEditor::GetFloatAt(gMapSav, hR, i, 0.0f));
+        int bx = x + fp.x0, by = y + fp.y0;
+        if (tx >= bx && tx < bx + fp.w && ty >= by && ty < by + fp.h) return i;
+        int cx = bx + fp.w / 2;
+        int cy = by + fp.h / 2;
+        int d = std::max(std::abs(tx - cx), std::abs(ty - cy));
+        if (d <= snap && d < bestDist) { bestDist = d; best = i; }
+    }
+    return best;
+}
+
+// Human-readable label for an actor row. For UGC actors we resolve the
+// underlying player-saved UGC name (same source as the Textures tab) so the
+// list reads as e.g. "Tomato Plant · 02" instead of "UGC item 13-02".
+// Key shape from map_data.cpp: "ObjUgcXX_YY" (MapObject UGC) or
+// "HouseUgcXX_YY" (Exterior UGC). XX is the 1-based UGC slot, YY the variant.
+static std::string MapActorDisplayLabel(const MapData::ActorInfo* info) {
+    if (!info || !info->key) return info ? std::string(info->label ? info->label : "?") : "?";
+    if (info->group != MapData::ACTOR_UGC) return info->label ? info->label : "?";
+    std::string key = info->key;
+    const char* stemPrefix = nullptr;
+    size_t numStart = 0;
+    if (key.rfind("Obj", 0) == 0)        { stemPrefix = "UgcMapObject"; numStart = 6; }
+    else if (key.rfind("House", 0) == 0) { stemPrefix = "UgcExterior";  numStart = 8; }
+    else return info->label ? info->label : key;
+    size_t end = key.find('_', numStart);
+    if (end == std::string::npos || end <= numStart) return info->label ? info->label : key;
+    int slot = atoi(key.substr(numStart, end - numStart).c_str());
+    if (slot <= 0) return info->label ? info->label : key;
+    char stem[32];
+    snprintf(stem, sizeof(stem), "%s%03d", stemPrefix, slot);
+    std::string name = MiiManager::GetUgcName(stem);
+    if (name.empty()) name = stem;
+    std::string variant = (end + 1 < key.size()) ? key.substr(end + 1) : std::string();
+    return variant.empty() ? name : (name + " \xC2\xB7 " + variant); // " · "
+}
+
+// Build the list of unique actor hashes for the picker, filtered by current
+// search. Sorted by group then label. Cached when filter doesn't change.
+static std::vector<uint32_t> gMapPickerActors;
+static std::string           gMapPickerFilterCache;
+static void MapRebuildPicker() {
+    if (gMapPickerFilter == gMapPickerFilterCache && !gMapPickerActors.empty()) return;
+    gMapPickerActors.clear();
+    std::string filter = gMapPickerFilter;
+    std::transform(filter.begin(), filter.end(), filter.begin(),
+                   [](char c){ return (char)tolower((unsigned char)c); });
+    for (int i = 0; i < MapData::ACTOR_INFO_COUNT; i++) {
+        const auto& a = MapData::ACTOR_INFO[i];
+        if (!filter.empty()) {
+            // Match against the resolved display label so a search for the
+            // user's UGC name finds the matching actor row.
+            std::string label = MapActorDisplayLabel(&a);
+            std::transform(label.begin(), label.end(), label.begin(),
+                           [](char c){ return (char)tolower((unsigned char)c); });
+            if (label.find(filter) == std::string::npos) continue;
+        }
+        gMapPickerActors.push_back(a.hash);
+    }
+    gMapPickerFilterCache = gMapPickerFilter;
+    if (gMapPickerSel >= (int)gMapPickerActors.size())
+        gMapPickerSel = std::max(0, (int)gMapPickerActors.size() - 1);
+    gMapPickerScroll = std::max(0, std::min(gMapPickerScroll, std::max(0, (int)gMapPickerActors.size() - 1)));
+}
+
+// Touch callbacks (registered via HitAdd). Translate the global last-touch
+// coords into tile coords inside the map canvas region.
+static void TMapTapCanvas(int /*unused*/) {
+    int px = gLastTouchFireX - MAP_CANVAS_X;
+    int py = gLastTouchFireY - MAP_CANVAS_Y;
+    if (px < 0 || py < 0 || px >= MAP_CANVAS_W || py >= MAP_CANVAS_H) return;
+    int tx = px * MAP_WIDTH  / MAP_CANVAS_W;
+    int ty = py * MAP_HEIGHT / MAP_CANVAS_H;
+    if (tx < 0) tx = 0; if (tx >= MAP_WIDTH)  tx = MAP_WIDTH  - 1;
+    if (ty < 0) ty = 0; if (ty >= MAP_HEIGHT) ty = MAP_HEIGHT - 1;
+    gMapCursorX = tx;
+    gMapCursorY = ty;
+    if (gMapMode == MapMode::Place) {
+        // Simulate A so the place-confirm runs in the input loop next frame.
+        gSimKDown |= HidNpadButton_A;
+        return;
+    }
+    int slot = MapObjectAt(tx, ty);
+    if (slot >= 0) {
+        gMapSelSlot = slot;
+        gMapMode = MapMode::Inspect;
+        gMapInsField = 0;
+    } else {
+        gMapSelSlot = -1;
+        if (gMapMode == MapMode::Inspect) gMapMode = MapMode::Idle;
+    }
+}
+
+static void TMapBtn(int code) { gSimKDown |= (u64)code; }
+static void TMapInsField(int idx) { gMapInsField = idx; }
+static void TMapInsNudge(int param) {
+    // param: high byte = field index, low byte = +1/-1 encoded as 1/255
+    int field = param >> 8;
+    int sign  = (param & 0xFF) == 1 ? +1 : -1;
+    gMapInsField = field;
+    if (gMapSelSlot < 0) return;
+    uint32_t hX = SaveEditor::Hash(MapKeys::GridPosX);
+    uint32_t hY = SaveEditor::Hash(MapKeys::GridPosY);
+    uint32_t hR = SaveEditor::Hash(MapKeys::RotY);
+    uint32_t hL = SaveEditor::Hash(MapKeys::LinkedMapId);
+    if (field == 0) {  // x
+        int v = SaveEditor::GetIntAt(gMapSav, hX, gMapSelSlot, 0) + sign;
+        if (v < 0) v = 0; if (v >= MAP_WIDTH)  v = MAP_WIDTH  - 1;
+        SaveEditor::SetIntAt(gMapSav, hX, gMapSelSlot, v);
+        gMapCursorX = v; gMapDirty = true;
+    } else if (field == 1) {  // y
+        int v = SaveEditor::GetIntAt(gMapSav, hY, gMapSelSlot, 0) + sign;
+        if (v < 0) v = 0; if (v >= MAP_HEIGHT) v = MAP_HEIGHT - 1;
+        SaveEditor::SetIntAt(gMapSav, hY, gMapSelSlot, v);
+        gMapCursorY = v; gMapDirty = true;
+    } else if (field == 2) {  // rotation
+        float r = SaveEditor::GetFloatAt(gMapSav, hR, gMapSelSlot, 0.0f);
+        int cur = (int)std::round(r);
+        cur = ((cur + sign * 90) % 360 + 360) % 360;
+        SaveEditor::SetFloatAt(gMapSav, hR, gMapSelSlot, (float)cur);
+        gMapDirty = true;
+    } else if (field == 3) {  // link
+        int v = SaveEditor::GetIntAt(gMapSav, hL, gMapSelSlot, -1) + sign;
+        SaveEditor::SetIntAt(gMapSav, hL, gMapSelSlot, v);
+        gMapDirty = true;
+    }
+}
+static void TMapPickerSelect(int idx) { gMapPickerSel = idx; gSimKDown |= HidNpadButton_A; }
+
+static void DrawMap() {
+    HitClear();
+    SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
+    SDL_RenderClear(gRen);
+
+    if (gMapMsgFrames > 0 && --gMapMsgFrames == 0) gMapMsg.clear();
+
+    DrawHeader("map");
+    // Tab bar
+    {
+        int tw=130, th=22, gap=4;
+        int totalW=tw*5+gap*4, tx=SCREEN_W/2-totalW/2, ty=28;
+        struct { std::string label; OnSwitchMode mode; } tabs[]={
+            {Lang::T("tab.webui"),OnSwitchMode::WebUI},{Lang::T("tab.textures"),OnSwitchMode::UGC},
+            {Lang::T("tab.mii"),OnSwitchMode::MiiStats},{Lang::T("tab.player"),OnSwitchMode::Player},
+            {Lang::T("tab.map"),OnSwitchMode::Map}};
+        for (auto& t : tabs) {
+            bool sel = gOnSwitchMode==t.mode;
+            HitAdd(tx,ty,tw,th,TSetMode,(int)t.mode);
+            FillRect(tx,ty,tw,th,sel?COL_SEL:COL_PANEL);
+            DrawRect(tx,ty,tw,th,sel?COL_GOLD:COL_BORDER);
+            DrawTextC(t.label,tx+tw/2,ty+th/2,sel?COL_GOLD:COL_DIM);
+            tx+=tw+gap;
+        }
+    }
+
+    if (!gMapSav.loaded) {
+        std::string err;
+        SaveEditor::Load(SAVE_MAP_SAV, gMapSav, err);
+        if (!gMapSav.loaded) {
+            DrawTextC(Lang::T("map.loading"), SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
+            DrawFooter("B  back");
+            SDL_RenderPresent(gRen);
+            return;
+        }
+    }
+
+    // Canvas background
+    FillRect(MAP_CANVAS_X - 2, MAP_CANVAS_Y - 2, MAP_CANVAS_W + 4, MAP_CANVAS_H + 4, COL_BORDER);
+    FillRect(MAP_CANVAS_X, MAP_CANVAS_Y, MAP_CANVAS_W, MAP_CANVAS_H, COL_PANEL);
+
+    // Floor pass: read FloorKeyHash UIntArray
+    {
+        uint32_t hFloor = SaveEditor::Hash(MapKeys::FloorKeyHash);
+        int n = SaveEditor::ArraySize(gMapSav, hFloor);
+        if (n >= MAP_TILE_COUNT) {
+            const int tw = MAP_CANVAS_W / MAP_WIDTH;   // = 6
+            const int th = MAP_CANVAS_H / MAP_HEIGHT;  // = 6
+            for (int x = 0; x < MAP_WIDTH; x++) {
+                for (int y = 0; y < MAP_HEIGHT; y++) {
+                    uint32_t k = SaveEditor::GetUIntAt(gMapSav, hFloor, x * MAP_HEIGHT + y, 0);
+                    SDL_Color c = MapHexColor(MapData::TileLookup(k));
+                    FillRect(MAP_CANVAS_X + x * tw, MAP_CANVAS_Y + y * th, tw, th, c);
+                }
+            }
+        }
+    }
+
+    // Objects pass — apply the actor's footprint origin offset (x0/y0). For
+    // houses and facilities x0/y0 are negative, so the saved grid position is
+    // the goal point, not the top-left of the building. Without this the
+    // rendered rect drifts off the actual terrain plot.
+    {
+        uint32_t hAct = SaveEditor::Hash(MapKeys::ActorKey);
+        uint32_t hX   = SaveEditor::Hash(MapKeys::GridPosX);
+        uint32_t hY   = SaveEditor::Hash(MapKeys::GridPosY);
+        uint32_t hR   = SaveEditor::Hash(MapKeys::RotY);
+        int n = SaveEditor::ArraySize(gMapSav, hAct);
+        const int tw = MAP_CANVAS_W / MAP_WIDTH;
+        const int th = MAP_CANVAS_H / MAP_HEIGHT;
+        for (int i = 0; i < n; i++) {
+            uint32_t a = SaveEditor::GetUIntAt(gMapSav, hAct, i, 0);
+            if (!a) continue;
+            int x = SaveEditor::GetIntAt(gMapSav, hX, i, -1);
+            int y = SaveEditor::GetIntAt(gMapSav, hY, i, -1);
+            if (x < 0 || y < 0 || x >= MAP_WIDTH || y >= MAP_HEIGHT) continue;
+            const MapData::ActorInfo* info = MapData::ActorLookup(a);
+            MapFootprint fp = MapActorRect(info, SaveEditor::GetFloatAt(gMapSav, hR, i, 0.0f));
+            int g = info ? info->group : MapData::ACTOR_UNKNOWN;
+            const SDL_Color& col = MAP_GROUP_SDL_COL[g];
+            int rx = MAP_CANVAS_X + (x + fp.x0) * tw;
+            int ry = MAP_CANVAS_Y + (y + fp.y0) * th;
+            int rw = std::max(2, fp.w * tw);
+            int rh = std::max(2, fp.h * th);
+            FillRect(rx, ry, rw, rh, col);
+            if (i == gMapSelSlot) {
+                DrawRect(rx - 1, ry - 1, rw + 2, rh + 2, COL_GOLD);
+                DrawRect(rx,     ry,     rw,     rh,     COL_GOLD);
+            }
+        }
+    }
+
+    // Cursor reticle
+    {
+        const int tw = MAP_CANVAS_W / MAP_WIDTH;
+        const int th = MAP_CANVAS_H / MAP_HEIGHT;
+        int cx = MAP_CANVAS_X + gMapCursorX * tw;
+        int cy = MAP_CANVAS_Y + gMapCursorY * th;
+        DrawRect(cx - 2, cy - 2, tw + 4, th + 4, COL_GOLD);
+        DrawRect(cx - 1, cy - 1, tw + 2, th + 2, {255, 255, 255, 255});
+    }
+
+    // Canvas-wide touch region. The callback reads the raw touch coords from
+    // gLastTouchFireX/Y (set by HitFire) and converts to a tile coord, which
+    // keeps the work to one HitAdd entry instead of 9600.
+    HitAdd(MAP_CANVAS_X, MAP_CANVAS_Y, MAP_CANVAS_W, MAP_CANVAS_H, TMapTapCanvas, 0);
+
+    // Inspector card
+    FillRect(MAP_INS_X, MAP_INS_Y, MAP_INS_W, MAP_INS_H, COL_PANEL);
+    DrawRect(MAP_INS_X, MAP_INS_Y, MAP_INS_W, MAP_INS_H, COL_BORDER);
+
+    int iy = MAP_INS_Y + 8;
+    if (gMapMode == MapMode::Picker) {
+        MapRebuildPicker();
+        DrawText("pick an actor", MAP_INS_X + 12, iy, COL_GOLD, Font::Md); iy += 28;
+        DrawText("filter: " + (gMapPickerFilter.empty() ? std::string("(any)") : gMapPickerFilter),
+                 MAP_INS_X + 12, iy, COL_DIM, Font::Sm); iy += 22;
+
+        const int rowH = 22;
+        int visible = (MAP_INS_Y + MAP_INS_H - 70 - iy) / rowH;
+        if ((int)gMapPickerActors.size() < gMapPickerSel) gMapPickerSel = 0;
+        if (gMapPickerSel < gMapPickerScroll) gMapPickerScroll = gMapPickerSel;
+        if (gMapPickerSel >= gMapPickerScroll + visible)
+            gMapPickerScroll = gMapPickerSel - visible + 1;
+        for (int i = 0; i < visible; i++) {
+            int idx = gMapPickerScroll + i;
+            if (idx >= (int)gMapPickerActors.size()) break;
+            uint32_t a = gMapPickerActors[idx];
+            const MapData::ActorInfo* info = MapData::ActorLookup(a);
+            int ry = iy + i * rowH;
+            bool sel = (idx == gMapPickerSel);
+            FillRect(MAP_INS_X + 6, ry, MAP_INS_W - 12, rowH - 2, sel ? COL_SEL : COL_PANEL);
+            if (sel) DrawRect(MAP_INS_X + 6, ry, MAP_INS_W - 12, rowH - 2, COL_GOLD);
+            FillRect(MAP_INS_X + 12, ry + 5, 10, 10, MAP_GROUP_SDL_COL[info ? info->group : 6]);
+            DrawText(MapActorDisplayLabel(info), MAP_INS_X + 28, ry + 1, sel ? COL_GOLD : COL_TEXT);
+            HitAdd(MAP_INS_X + 6, ry, MAP_INS_W - 12, rowH - 2, TMapPickerSelect, idx);
+        }
+
+        if ((int)gMapPickerActors.size() > visible) {
+            int sbH = (MAP_INS_H - 70 - 60) * visible / std::max(1, (int)gMapPickerActors.size());
+            int sbY = iy + (MAP_INS_H - 70 - 60) * gMapPickerScroll / std::max(1, (int)gMapPickerActors.size());
+            FillRect(MAP_INS_X + MAP_INS_W - 6, sbY, 3, sbH, COL_BORDER);
+        }
+    } else if (gMapSelSlot >= 0 && MapActorAt(gMapSelSlot)) {
+        uint32_t hX = SaveEditor::Hash(MapKeys::GridPosX);
+        uint32_t hY = SaveEditor::Hash(MapKeys::GridPosY);
+        uint32_t hR = SaveEditor::Hash(MapKeys::RotY);
+        uint32_t hL = SaveEditor::Hash(MapKeys::LinkedMapId);
+        uint32_t actor = MapActorAt(gMapSelSlot);
+        const MapData::ActorInfo* info = MapData::ActorLookup(actor);
+
+        // Title
+        FillRect(MAP_INS_X + 12, iy + 2, 12, 12,
+                 MAP_GROUP_SDL_COL[info ? info->group : 6]);
+        DrawText(MapActorDisplayLabel(info), MAP_INS_X + 30, iy, COL_GOLD, Font::Md);
+        iy += 24;
+        DrawText("slot #" + std::to_string(gMapSelSlot), MAP_INS_X + 12, iy, COL_DIM, Font::Sm);
+        iy += 22;
+
+        int xVal = SaveEditor::GetIntAt(gMapSav, hX, gMapSelSlot, 0);
+        int yVal = SaveEditor::GetIntAt(gMapSav, hY, gMapSelSlot, 0);
+        int rVal = (int)std::round(SaveEditor::GetFloatAt(gMapSav, hR, gMapSelSlot, 0.0f));
+        int lVal = SaveEditor::GetIntAt(gMapSav, hL, gMapSelSlot, -1);
+
+        // Field rows with -/+ nudge buttons
+        struct Row { const char* label; int field; std::string value; };
+        Row rows[] = {
+            {"position X", 0, std::to_string(xVal)},
+            {"position Y", 1, std::to_string(yVal)},
+            {"rotation",   2, std::to_string(((rVal % 360) + 360) % 360) + "°"},
+            {"linked map", 3, lVal >= 0 ? std::to_string(lVal) : "(none)"},
+        };
+        int rowsCount = (info && info->group == 0 /* house */) ? 4
+                       : (info && info->group == 1 /* facility */) ? 4
+                       : 3;
+        const int rowH = 32;
+        for (int r = 0; r < rowsCount; r++) {
+            int ry = iy + r * rowH;
+            bool focused = (r == gMapInsField);
+            if (focused) {
+                FillRect(MAP_INS_X + 6, ry - 2, MAP_INS_W - 12, rowH - 4, COL_SEL);
+                DrawRect(MAP_INS_X + 6, ry - 2, MAP_INS_W - 12, rowH - 4, COL_GOLD);
+            }
+            // Vertically center the label and value inside the row using the
+            // font's actual surface height — same pattern other tabs (word
+            // slots, settings rows) use to keep text level with row content.
+            TTF_Font* fsm_r = GetFont(Font::Sm);
+            int fh_r = 0;
+            if (fsm_r) TTF_SizeUTF8(fsm_r, "Tg", nullptr, &fh_r);
+            int textY = ry + (rowH - fh_r) / 2;
+            DrawText(rows[r].label, MAP_INS_X + 14, textY, focused ? COL_GOLD : COL_DIM, Font::Sm);
+            // Anchor the nudge controls to the right side of the inspector so
+            // the layout adapts to any MAP_INS_W. Buttons are big enough for
+            // a finger tap (~40×28) — touch is the primary way to edit non-XY
+            // fields since the D-pad now moves the object on the grid instead.
+            const int btnW = 40, btnH = 28;
+            int plusX  = MAP_INS_X + MAP_INS_W - btnW - 6;
+            int minusX = plusX - btnW - 8;
+            int valX   = MAP_INS_X + 130;
+            int btnY   = ry + (rowH - btnH) / 2 - 1;
+            // Register button hit zones BEFORE the row catch-all below so
+            // HitFire's first-match-wins picks the button when a tap lands
+            // on it.
+            HitAdd(minusX, btnY, btnW, btnH, TMapInsNudge, (r << 8) | 255);
+            HitAdd(plusX,  btnY, btnW, btnH, TMapInsNudge, (r << 8) | 1);
+            HitAdd(MAP_INS_X + 6, ry - 2, MAP_INS_W - 12, rowH - 4, TMapInsField, r);
+            FillRect(minusX, btnY, btnW, btnH, COL_PANEL2);
+            DrawRect(minusX, btnY, btnW, btnH, COL_BORDER);
+            DrawTextC("-", minusX + btnW/2, btnY + btnH/2, COL_TEXT, Font::Md);
+            DrawText(rows[r].value, valX, textY, COL_TEXT);
+            FillRect(plusX, btnY, btnW, btnH, COL_PANEL2);
+            DrawRect(plusX, btnY, btnW, btnH, COL_BORDER);
+            DrawTextC("+", plusX + btnW/2, btnY + btnH/2, COL_TEXT, Font::Md);
+        }
+        iy += rowsCount * rowH + 8;
+
+        // Change-actor button
+        FillRect(MAP_INS_X + 12, iy, MAP_INS_W - 24, 28, COL_PANEL2);
+        DrawRect(MAP_INS_X + 12, iy, MAP_INS_W - 24, 28, COL_BORDER);
+        DrawTextC("add new actor", MAP_INS_X + MAP_INS_W/2, iy + 14, COL_TEXT, Font::Sm);
+        HitAdd(MAP_INS_X + 12, iy, MAP_INS_W - 24, 28, TMapBtn, (int)HidNpadButton_Y);
+        iy += 36;
+
+        // Delete (X) button — confirm-on-second-press model
+        FillRect(MAP_INS_X + 12, iy, MAP_INS_W - 24, 28,
+                 gMapDelConfirm ? COL_RED : COL_PANEL2);
+        DrawRect(MAP_INS_X + 12, iy, MAP_INS_W - 24, 28,
+                 gMapDelConfirm ? COL_RED : COL_BORDER);
+        DrawTextC(gMapDelConfirm ? "tap again to delete" : "delete (X)",
+                  MAP_INS_X + MAP_INS_W/2, iy + 14,
+                  gMapDelConfirm ? COL_BG : COL_RED, Font::Sm);
+        HitAdd(MAP_INS_X + 12, iy, MAP_INS_W - 24, 28, TMapBtn, (int)HidNpadButton_X);
+    } else if (gMapMode == MapMode::Place) {
+        DrawText("place mode", MAP_INS_X + 12, iy, COL_GOLD, Font::Md); iy += 28;
+        DrawText(Lang::T("map.place.prompt"), MAP_INS_X + 12, iy, COL_DIM, Font::Sm); iy += 22;
+        const MapData::ActorInfo* info = MapData::ActorLookup(gMapPlaceActor);
+        if (info) {
+            DrawText(std::string("actor: ") + MapActorDisplayLabel(info), MAP_INS_X + 12, iy, COL_TEXT, Font::Sm);
+            iy += 22;
+        }
+        DrawText("cursor: " + std::to_string(gMapCursorX) + ", " + std::to_string(gMapCursorY),
+                 MAP_INS_X + 12, iy, COL_DIM, Font::Sm);
+    } else {
+        DrawText("Map viewer", MAP_INS_X + 12, iy, COL_GOLD, Font::Md); iy += 28;
+        DrawText("Move the cursor with the D-pad or sticks.",
+                 MAP_INS_X + 12, iy, COL_TEXT, Font::Sm); iy += 20;
+        DrawText("Tap or press A on an object to inspect.",
+                 MAP_INS_X + 12, iy, COL_DIM, Font::Sm); iy += 20;
+        DrawText("Press Y to place a new object.",
+                 MAP_INS_X + 12, iy, COL_DIM, Font::Sm); iy += 20;
+        DrawText("B exits — you'll get a save / discard",
+                 MAP_INS_X + 12, iy, COL_DIM, Font::Sm); iy += 18;
+        DrawText("prompt if needed.",
+                 MAP_INS_X + 12, iy, COL_DIM, Font::Sm); iy += 22;
+        DrawText("objects: " + std::to_string(MapObjectCount()) + " slots",
+                 MAP_INS_X + 12, iy, COL_DIM, Font::Sm); iy += 18;
+        if (gMapDirty) {
+            DrawText(Lang::T("map.dirty"), MAP_INS_X + 12, iy, COL_GOLD, Font::Sm); iy += 18;
+        }
+    }
+
+    // Transient status message (drawn above the footer)
+    if (!gMapMsg.empty()) {
+        DrawTextC(gMapMsg, SCREEN_W/2, SCREEN_H - 56, gMapMsgCol, Font::Sm);
+    }
+
+    // Footer
+    const char* footerKey =
+        gMapMode == MapMode::Inspect ? "map.footer.inspect" :
+        gMapMode == MapMode::Picker  ? "map.footer.picker"  :
+        gMapMode == MapMode::Place   ? "map.footer.place"   :
+                                       "map.footer.idle";
+    DrawFooter(Lang::T(footerKey));
+    SDL_RenderPresent(gRen);
+}
+
 static void DrawMiiStats() {
     HitClear();
     // Auto-fade transient messages (e.g. habit toggle confirmations)
@@ -3976,11 +4706,12 @@ static void DrawMiiStats() {
 
     // Tab bar
     {
-        int tw=140, th=22, gap=4;
-        int totalW=tw*4+gap*3, tx=SCREEN_W/2-totalW/2, ty=28;
+        int tw=130, th=22, gap=4;
+        int totalW=tw*5+gap*4, tx=SCREEN_W/2-totalW/2, ty=28;
         struct { std::string label; OnSwitchMode mode; } tabs[]={
             {Lang::T("tab.webui"),OnSwitchMode::WebUI},{Lang::T("tab.textures"),OnSwitchMode::UGC},
-            {Lang::T("tab.mii"),OnSwitchMode::MiiStats},{Lang::T("tab.player"),OnSwitchMode::Player}};
+            {Lang::T("tab.mii"),OnSwitchMode::MiiStats},{Lang::T("tab.player"),OnSwitchMode::Player},
+            {Lang::T("tab.map"),OnSwitchMode::Map}};
         for (auto& t : tabs) {
             bool sel=gOnSwitchMode==t.mode;
             HitAdd(tx,ty,tw,th,TSetMode,(int)t.mode);
@@ -3992,7 +4723,19 @@ static void DrawMiiStats() {
     }
 
     if (!gMiiSav.loaded) {
-        DrawTextC("loading current mii save...", SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
+        // Surface the actual load error instead of leaving "loading..." on
+        // screen forever. SaveEditor::Load writes the reason into gMiiStatsMsg
+        // ("Cannot open", "Bad magic", "Bad saveDataOffset", etc.) — without
+        // showing it the app looks frozen when the save itself is the problem.
+        if (!gMiiStatsMsg.empty()) {
+            DrawTextC(gMiiStatsMsg, SCREEN_W/2, SCREEN_H/2 - 14, COL_RED, Font::Md);
+            DrawTextC("Mii.sav couldn't be parsed — restore from a backup or",
+                      SCREEN_W/2, SCREEN_H/2 + 18, COL_DIM, Font::Sm);
+            DrawTextC("re-open Tomodachi Life once to let the game rewrite it.",
+                      SCREEN_W/2, SCREEN_H/2 + 38, COL_DIM, Font::Sm);
+        } else {
+            DrawTextC("loading current mii save...", SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
+        }
         DrawFooter("B  back");
         SDL_RenderPresent(gRen);
         return;
@@ -4483,6 +5226,19 @@ static void DrawMiiStats() {
                     HitAdd(bxR,bY,bW,bH,TSimBtn,(int)HidNpadButton_Right);
                     FillRect(bxR,bY,bW,bH,COL_PANEL); DrawRect(bxR,bY,bW,bH,COL_BORDER);
                     DrawTextC("Type >",bxR+bW/2,bY+bH/2,COL_DIM);
+                    // When the current relationship is Unknown, expose a
+                    // "Batch Know" shortcut that flips every Unknown relation
+                    // this Mii has into Know with natural game values.
+                    if (myType == 0x0784a8dcu) {
+                        int bkW = 150;
+                        int bxB = bxR + bW + 10;
+                        if (bxB + bkW <= editX + editW - 8) {
+                            HitAdd(bxB,bY,bkW,bH,TRelBatchKnow,0);
+                            FillRect(bxB,bY,bkW,bH,COL_PANEL);
+                            DrawRect(bxB,bY,bkW,bH,COL_GREEN);
+                            DrawTextC("Batch Know",bxB+bkW/2,bY+bH/2,COL_GREEN);
+                        }
+                    }
                 }
                 // Their type (auto-counterpart, read-only display)
                 SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
@@ -4915,6 +5671,9 @@ static void DrawMiiStats() {
                 };
                 std::map<int, Card> byHouse;
                 std::vector<int> unhoused;
+                // Seed every known house from Map.sav so vacated houses
+                // remain visible in the editor (cleaned up at save time).
+                for (int hid : HousingAllHouseIds()) { byHouse[hid].houseId = hid; }
                 for (auto& m : gMiis) {
                     int idx = m.slot - 1;
                     int h = SaveEditor::GetIntAt(gMiiSav, HASH_HOUSE_MAPID, idx);
@@ -5107,20 +5866,32 @@ static void DrawMiiStats() {
                             else             snprintf(title, sizeof(title), "House #%d", c.houseId);
                             DrawText(title, cxL + 10, yc + (HEAD_H-14)/2 - 2, COL_GOLD, Font::Sm);
 
-                            // Resident count meta + vacate button (right side of head).
+                            // Resident count + delete + vacate buttons (right side of head).
+                            // vacate = kick residents but keep the house;
+                            // delete = also remove the house from Map.sav.
                             char cntBuf[20];
                             snprintf(cntBuf, sizeof(cntBuf), "%d", c.residentCount);
-                            int vacW = 64, vacH = 22;
+                            int btnH2 = 22;
+                            int vacW = 60, delW = 56;
                             int vacX = cxL + cardW - vacW - 6;
-                            int vacY = yc + (HEAD_H - vacH)/2;
+                            int delX = vacX - delW - 4;
+                            int btnY = yc + (HEAD_H - btnH2)/2;
+                            // Delete button
+                            bool delFocused = (gHousingNavSel == (int)gHousingNav.size());
+                            FillRect(delX, btnY, delW, btnH2, {26,26,26,255});
+                            DrawRect(delX, btnY, delW, btnH2, delFocused ? COL_ACCENT : COL_RED);
+                            if (delFocused) DrawRect(delX+1, btnY+1, delW-2, btnH2-2, COL_ACCENT);
+                            DrawTextC("delete", delX + delW/2, btnY + btnH2/2 - 2, COL_RED, Font::Sm);
+                            addNav(6, -1, c.houseId, -1, -1, delX, btnY, delW, btnH2, false);
+                            // Vacate button
                             bool vacFocused = (gHousingNavSel == (int)gHousingNav.size());
-                            FillRect(vacX, vacY, vacW, vacH, {40,16,16,255});
-                            DrawRect(vacX, vacY, vacW, vacH, vacFocused ? COL_ACCENT : COL_RED);
-                            if (vacFocused) DrawRect(vacX+1, vacY+1, vacW-2, vacH-2, COL_ACCENT);
-                            DrawTextC("vacate", vacX + vacW/2, vacY + vacH/2 - 2, COL_RED, Font::Sm);
-                            addNav(4, -1, c.houseId, -1, -1, vacX, vacY, vacW, vacH, false);
+                            FillRect(vacX, btnY, vacW, btnH2, {40,16,16,255});
+                            DrawRect(vacX, btnY, vacW, btnH2, vacFocused ? COL_ACCENT : COL_RED);
+                            if (vacFocused) DrawRect(vacX+1, btnY+1, vacW-2, btnH2-2, COL_ACCENT);
+                            DrawTextC("vacate", vacX + vacW/2, btnY + btnH2/2 - 2, COL_RED, Font::Sm);
+                            addNav(4, -1, c.houseId, -1, -1, vacX, btnY, vacW, btnH2, false);
                             int cw=0, cwh=0; if (fsm) TTF_SizeUTF8(fsm, cntBuf, &cw, &cwh);
-                            DrawText(cntBuf, vacX - cw - 8, yc + (HEAD_H-cwh)/2, COL_DIM, Font::Sm);
+                            DrawText(cntBuf, delX - cw - 8, yc + (HEAD_H-cwh)/2, COL_DIM, Font::Sm);
 
                             // Body: one row per room 0..maxRoom (or one empty row).
                             int by = yc + HEAD_H + CARD_PAD;
@@ -5707,12 +6478,21 @@ static void TAckBackYes(int) {
         std::string err = SaveEditor::Save(SAVE_PLAYER_SAV, gPlayerSav);
         if (err.empty()) { SaveMount::Commit(); gPlayerSavDirty=false; }
     }
+    // Map.sav is independent of which tab triggered the prompt — commit it
+    // whenever it's dirty. Before saving, prune any house that's now empty
+    // (vacated by the user and not re-populated) so the game doesn't keep
+    // residentless house actors around on the island.
+    HousingCleanupEmptyHouses();
+    if (gMapDirty) {
+        std::string err = SaveEditor::Save(SAVE_MAP_SAV, gMapSav);
+        if (err.empty()) { SaveMount::Commit(); gMapDirty=false; }
+    }
     if (gUgcDirty) { SaveMount::Commit(); gUgcDirty=false; }
     if (gWebUiDirty) { SaveMount::Commit(); gWebUiDirty=false; }
     FreePreview(); HttpServer::Stop(); gLog.clear();
     gEntries.clear(); gMiis.clear();
-    gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
-    gPlayerSavDirty=false; gMiiSavDirty=false; gUgcDirty=false; gWebUiDirty=false;
+    gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{}; gMapSav=SaveEditor::SavFile{};
+    gPlayerSavDirty=false; gMiiSavDirty=false; gMapDirty=false; gUgcDirty=false; gWebUiDirty=false;
     memset(gPlayerUndoValid, 0, sizeof(gPlayerUndoValid));
     gNameLangUndoValid=false; gIslandLangUndoValid=false;
     memset(gMiiUndoValid,    0, sizeof(gMiiUndoValid));
@@ -5725,8 +6505,8 @@ static void TAckBackNo(int) {
     gShowBackPrompt = false;
     FreePreview(); HttpServer::Stop(); gLog.clear();
     gEntries.clear(); gMiis.clear();
-    gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
-    gPlayerSavDirty=false; gMiiSavDirty=false; gUgcDirty=false; gWebUiDirty=false;
+    gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{}; gMapSav=SaveEditor::SavFile{};
+    gPlayerSavDirty=false; gMiiSavDirty=false; gMapDirty=false; gUgcDirty=false; gWebUiDirty=false;
     memset(gPlayerUndoValid, 0, sizeof(gPlayerUndoValid));
     gNameLangUndoValid=false; gIslandLangUndoValid=false;
     memset(gMiiUndoValid,    0, sizeof(gMiiUndoValid));
@@ -6217,18 +6997,21 @@ int main(int,char**) {
     MtpServer::SetLogCallback([](const std::string& msg, bool ok){
         if (ok) LogOK(msg); else LogERR(msg);
     });
-    MtpServer::Init();
+    // MTP USB file-sharing disabled at boot: haze's Initialize spins up a
+    // worker thread that registers USB endpoint descriptors via a flurry of
+    // usbDs* IPC calls. Ryujinx tolerates usbDsInitialize but exhausts its
+    // IPC domain pool partway through the descriptor setup and aborts the
+    // process (OutOfDomains → libnx fatal). On real hardware this means the
+    // "plug Switch into PC for file transfer" feature is off until wired to
+    // a Settings toggle; FTP/WebUI transfer paths are unaffected.
+    // MtpServer::Init();
 
-    // Auto-check for updates only if WiFi is active — no prompt
-    {
-        std::string ip = SaveMount::GetLocalIP();
-        if (!ip.empty()) {
-            Updater::StartCheck();
-            gScreen = Screen::UpdateCheck;
-        } else {
-            gScreen = Screen::UserPick;
-        }
-    }
+    // Boot-time auto-update disabled: spinning up curl/SSL/nifm at launch
+    // reliably crashes Ryujinx (OutOfDomains → libnx fatal) regardless of
+    // emulator-detection heuristics, and the check is purely cosmetic
+    // (notifies, doesn't actually update the app). Skip straight to user
+    // selection on every launch.
+    gScreen = Screen::UserPick;
 
     gUsers=SaveMount::GetUsers();
     if (gUsers.empty()){
@@ -6306,29 +7089,14 @@ int main(int,char**) {
                 if (state==Updater::State::UpdateAvailable) gScreen=Screen::UpdateAvailable;
                 else if (state==Updater::State::NoUpdate||state==Updater::State::Error||state==Updater::State::Idle)
                     gScreen=Screen::UserPick;
+                if (kDown&HidNpadButton_B) gScreen=Screen::UserPick;
             }
-            if (kDown&HidNpadButton_B) gScreen=Screen::UserPick;
             DrawUpdateCheck();
             break;
 
         case Screen::UpdateAvailable:
-            if (kDown&HidNpadButton_A) {
-                Updater::StartDownload();
-                gScreen=Screen::Downloading;
-            }
-            if (kDown&HidNpadButton_B) { gScreen=Screen::UserPick; }
+            if (kDown&(HidNpadButton_A|HidNpadButton_B)) gScreen=Screen::UserPick;
             DrawUpdateAvailable();
-            break;
-
-        case Screen::Downloading:
-            {
-                auto state = Updater::GetState();
-                if ((state==Updater::State::Done||state==Updater::State::Error)
-                    && (kDown&HidNpadButton_B)) {
-                    gScreen=Screen::UserPick;
-                }
-            }
-            DrawDownloading();
             break;
 
         case Screen::UserPick:
@@ -6470,7 +7238,8 @@ int main(int,char**) {
                     gSettingsSel = std::max(0, gSettingsSel - 1);
                 if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
                     gSettingsSel = std::min(3, gSettingsSel + 1);
-                // Row mapping: 0 = Language, 1 = Export Path, 2 = Max Backups, 3 = Restore Backup.
+                // Row mapping: 0 = Language, 1 = Export Path, 2 = Max Backups,
+                //              3 = Restore Backup.
                 if (gSettingsSel == 3 && kDown&HidNpadButton_A) {
                     gRestoreList        = BackupService::ListBackups();
                     gRestoreSel         = 0;
@@ -6629,6 +7398,14 @@ int main(int,char**) {
                     memset(gMiiUndoValid, 0, sizeof(gMiiUndoValid));
                     gWordUndo.valid = false;
                     LogOK("Mii save synced from WebUI");
+                }
+            }
+            if (HttpServer::HasPendingMapSavReload()) {
+                HttpServer::ClearPendingMapSavReload();
+                if (gMapSav.loaded) {
+                    std::string lerr;
+                    SaveEditor::Load(SAVE_MAP_SAV, gMapSav, lerr);
+                    LogOK("Map save synced from WebUI");
                 }
             }
             // Thumb tip modal
@@ -6826,7 +7603,8 @@ int main(int,char**) {
                     if (!SaveEditor::Load(SAVE_PLAYER_SAV, gPlayerSav, err))
                         gPlayerMsg = "Load error: " + err;
                 }
-                // Tab switch (changes stay in memory; prompt only on back/quit)
+                // Tab switch (changes stay in memory; prompt only on back/quit).
+                // Visual order: WebUI · Textures · Mii · Player · Map.
                 if (kDown&HidNpadButton_L){
                     gOnSwitchMode=OnSwitchMode::MiiStats;
                     if (!gMiiSav.loaded) {
@@ -6837,7 +7615,7 @@ int main(int,char**) {
                     gOnSwitchMsg=""; break;
                 }
                 if (kDown&HidNpadButton_R){
-                    gOnSwitchMode=OnSwitchMode::WebUI; gOnSwitchMsg=""; break;
+                    gOnSwitchMode=OnSwitchMode::Map; gOnSwitchMsg=""; break;
                 }
                 // Field navigation
                 if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp|HidNpadButton_ZL))
@@ -7801,41 +8579,43 @@ int main(int,char**) {
                 if (kDown&HidNpadButton_R) {
                     gOnSwitchMode=OnSwitchMode::UGC; gOnSwitchMsg=""; break;
                 }
-                // Row navigation (0 = Encoder, 1 = BC1).
-                // This tab is reserved for texture-encoder settings — the
-                // app-wide Language picker lives under user-select → Settings.
+                // Row navigation: 0 = Encoder, 1 = BC1 Mode, 2 = Fit, 3 = Background.
                 if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))
                     gTexSettingsSel = std::max(0, gTexSettingsSel - 1);
                 if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
-                    gTexSettingsSel = std::min(1, gTexSettingsSel + 1);
-                // Row 0: Encoder — Left/Right (and A) cycle Custom <-> rgbcx
-                if (gTexSettingsSel == 0) {
-                    bool left  = kNav&(HidNpadButton_Left |HidNpadButton_StickLLeft |HidNpadButton_StickRLeft);
-                    bool right = kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight);
-                    bool a     = kDown&HidNpadButton_A;
-                    if (left || right || a) {
-                        gEncMode = (gEncMode == TextureProcessor::Bc1Encoder::Custom)
-                                 ? TextureProcessor::Bc1Encoder::Rgbcx
-                                 : TextureProcessor::Bc1Encoder::Custom;
-                        SaveConfig();
-                    }
+                    gTexSettingsSel = std::min(3, gTexSettingsSel + 1);
+                bool left  = (kNav&(HidNpadButton_Left |HidNpadButton_StickLLeft |HidNpadButton_StickRLeft))  != 0;
+                bool right = (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) != 0;
+                bool a     = (kDown&HidNpadButton_A) != 0;
+                // Row 0: Encoder — Left/Right (and A) toggle Custom <-> PCA.
+                if (gTexSettingsSel == 0 && (left || right || a)) {
+                    gEncMode = (gEncMode == TextureProcessor::Bc1Encoder::Custom)
+                             ? TextureProcessor::Bc1Encoder::PCA
+                             : TextureProcessor::Bc1Encoder::Custom;
+                    SaveConfig();
                 }
-                // Row 1: BC1 Mode — only active when encoder is Custom
+                // Row 1: BC1 Mode — active only with Custom encoder.
                 if (gTexSettingsSel == 1 && gEncMode == TextureProcessor::Bc1Encoder::Custom) {
-                    bool left  = kNav&(HidNpadButton_Left |HidNpadButton_StickLLeft |HidNpadButton_StickRLeft);
-                    bool right = kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight);
-                    if (right) {
-                        if      (gBc1Mode == TextureProcessor::Bc1Mode::Auto)      gBc1Mode = TextureProcessor::Bc1Mode::FourColor;
-                        else if (gBc1Mode == TextureProcessor::Bc1Mode::FourColor) gBc1Mode = TextureProcessor::Bc1Mode::ThreeColor;
-                        else                                                       gBc1Mode = TextureProcessor::Bc1Mode::Auto;
-                        SaveConfig();
-                    }
-                    if (left) {
-                        if      (gBc1Mode == TextureProcessor::Bc1Mode::Auto)       gBc1Mode = TextureProcessor::Bc1Mode::ThreeColor;
-                        else if (gBc1Mode == TextureProcessor::Bc1Mode::ThreeColor) gBc1Mode = TextureProcessor::Bc1Mode::FourColor;
-                        else                                                        gBc1Mode = TextureProcessor::Bc1Mode::Auto;
-                        SaveConfig();
-                    }
+                    int cur = (int)gBc1Mode;
+                    if (right) cur = (cur + 1) % 3;
+                    if (left)  cur = (cur + 2) % 3;
+                    if (right || left) { gBc1Mode = (TextureProcessor::Bc1Mode)cur; SaveConfig(); }
+                }
+                // Row 2: Fit mode — cycle Cover -> Contain -> Fill.
+                if (gTexSettingsSel == 2) {
+                    int cur = (int)gFitMode;
+                    if (right) cur = (cur + 1) % 3;
+                    if (left)  cur = (cur + 2) % 3;
+                    if (right || left) { gFitMode = (TextureProcessor::FitMode)cur; SaveConfig(); }
+                }
+                // Row 3: Background — Transparent / White / Black, only with Contain.
+                if (gTexSettingsSel == 3 && gFitMode == TextureProcessor::FitMode::Contain) {
+                    int cur = (gMatte.a == 0) ? 0
+                            : (gMatte.r == 255 && gMatte.g == 255 && gMatte.b == 255) ? 1
+                            : (gMatte.r == 0   && gMatte.g == 0   && gMatte.b == 0)   ? 2 : 0;
+                    if (right) cur = (cur + 1) % 3;
+                    if (left)  cur = (cur + 2) % 3;
+                    if (right || left) TSetMatte(cur);
                 }
                 if (kDown&(HidNpadButton_B|HidNpadButton_Plus)) {
                     bool hasDirty = gPlayerSavDirty || gMiiSavDirty || gUgcDirty || gWebUiDirty;
@@ -7852,6 +8632,177 @@ int main(int,char**) {
                     } else { gQuitApp=true; }
                 }
 
+            } else if (gOnSwitchMode == OnSwitchMode::Map) {
+                // ── Map tab input ──────────────────────────────────────────
+                // Tab L/R cycling (consistent with the other tabs).
+                if (kDown&HidNpadButton_L) { gOnSwitchMode = OnSwitchMode::Player; gOnSwitchMsg=""; break; }
+                if (kDown&HidNpadButton_R) { gOnSwitchMode = OnSwitchMode::WebUI;  gOnSwitchMsg=""; break; }
+
+                // Cursor pan: right stick scales faster (120 tiles is wide),
+                // left stick + D-pad does one tile per repeat. Cursor pan is
+                // only active when we're not focused on the inspector or
+                // picker; otherwise the D-pad navigates fields / rows.
+                HidAnalogStickState rs = padGetStickPos(&gPad, 1);
+                if (gMapMode == MapMode::Idle || gMapMode == MapMode::Place) {
+                    gMapStickXAcc += rs.x / 4096;
+                    gMapStickYAcc -= rs.y / 4096;
+                    int stepX = gMapStickXAcc / 256; gMapStickXAcc -= stepX * 256;
+                    int stepY = gMapStickYAcc / 256; gMapStickYAcc -= stepY * 256;
+                    int nx = gMapCursorX + stepX;
+                    int ny = gMapCursorY + stepY;
+                    if (kNav&(HidNpadButton_Left  | HidNpadButton_StickLLeft))  nx--;
+                    if (kNav&(HidNpadButton_Right | HidNpadButton_StickLRight)) nx++;
+                    if (kNav&(HidNpadButton_Up    | HidNpadButton_StickLUp))    ny--;
+                    if (kNav&(HidNpadButton_Down  | HidNpadButton_StickLDown))  ny++;
+                    if (nx < 0) nx = 0; if (nx >= MAP_WIDTH)  nx = MAP_WIDTH  - 1;
+                    if (ny < 0) ny = 0; if (ny >= MAP_HEIGHT) ny = MAP_HEIGHT - 1;
+                    if (nx != gMapCursorX || ny != gMapCursorY) {
+                        gMapCursorX = nx; gMapCursorY = ny;
+                        gMapDelConfirm = 0;  // any movement cancels the delete-confirm
+                    }
+                }
+
+                if (gMapMode == MapMode::Picker) {
+                    MapRebuildPicker();
+                    int total = (int)gMapPickerActors.size();
+                    if (kNav&(HidNpadButton_Up   |HidNpadButton_StickLUp  |HidNpadButton_StickRUp))   { if (total>0) gMapPickerSel = (gMapPickerSel - 1 + total) % total; }
+                    if (kNav&(HidNpadButton_Down |HidNpadButton_StickLDown|HidNpadButton_StickRDown)) { if (total>0) gMapPickerSel = (gMapPickerSel + 1) % total; }
+                    if (kDown&HidNpadButton_A && total > 0) {
+                        // Always go into Place mode — picker only ever adds a
+                        // new actor; the previously selected slot (if any) is
+                        // left untouched. Once dropped, Place mode auto-
+                        // selects the new slot.
+                        gMapPlaceActor = gMapPickerActors[gMapPickerSel];
+                        gMapMode = MapMode::Place;
+                    }
+                    if (kDown&HidNpadButton_B) {
+                        gMapMode = (gMapSelSlot >= 0 && MapActorAt(gMapSelSlot)) ? MapMode::Inspect : MapMode::Idle;
+                    }
+                } else if (gMapMode == MapMode::Place) {
+                    if (kDown&HidNpadButton_A) {
+                        // Find an empty slot and place at cursor.
+                        uint32_t hAct = SaveEditor::Hash(MapKeys::ActorKey);
+                        int n = SaveEditor::ArraySize(gMapSav, hAct);
+                        int slot = -1;
+                        for (int i = 0; i < n; i++) {
+                            if (SaveEditor::GetUIntAt(gMapSav, hAct, i, 0) == 0) { slot = i; break; }
+                        }
+                        if (slot < 0) {
+                            MapSetMsg(Lang::T("map.no.empty.slot"), COL_RED, 180);
+                        } else {
+                            SaveEditor::SetUIntAt(gMapSav, hAct, slot, gMapPlaceActor);
+                            SaveEditor::SetIntAt (gMapSav, SaveEditor::Hash(MapKeys::GridPosX), slot, gMapCursorX);
+                            SaveEditor::SetIntAt (gMapSav, SaveEditor::Hash(MapKeys::GridPosY), slot, gMapCursorY);
+                            SaveEditor::SetFloatAt(gMapSav, SaveEditor::Hash(MapKeys::RotY),   slot, 0.0f);
+                            SaveEditor::SetIntAt (gMapSav, SaveEditor::Hash(MapKeys::LinkedMapId), slot, -1);
+                            gMapSelSlot = slot;
+                            gMapDirty   = true;
+                            gMapMode    = MapMode::Inspect;
+                            MapSetMsg("placed in slot #" + std::to_string(slot), COL_GREEN, 120);
+                        }
+                    }
+                    if (kDown&HidNpadButton_B) gMapMode = MapMode::Idle;
+                } else if (gMapMode == MapMode::Inspect) {
+                    // Inspector-card navigation:
+                    //   Left/Right → nudge object X on the grid (field 0)
+                    //   Up/Down    → nudge object Y on the grid (field 1)
+                    //   A          → commit edits, back to Idle (changes are
+                    //                live-applied by the nudge handlers, A is
+                    //                just a "done" exit).
+                    //   Y          → open actor picker for the slot
+                    //   X          → delete (two-press confirm)
+                    //   B          → close inspector, back to Idle
+                    // Rotation / linked-map are touch-only (tap the +/- buttons).
+                    int rowsCount = 3;
+                    if (gMapSelSlot >= 0) {
+                        const MapData::ActorInfo* info = MapData::ActorLookup(MapActorAt(gMapSelSlot));
+                        if (info && (info->group == 0 || info->group == 1)) rowsCount = 4;
+                    }
+                    if (kNav&(HidNpadButton_Left | HidNpadButton_StickLLeft))
+                        TMapInsNudge((0 << 8) | 255);
+                    if (kNav&(HidNpadButton_Right| HidNpadButton_StickLRight))
+                        TMapInsNudge((0 << 8) | 1);
+                    if (kNav&(HidNpadButton_Up   | HidNpadButton_StickLUp))
+                        TMapInsNudge((1 << 8) | 255);
+                    if (kNav&(HidNpadButton_Down | HidNpadButton_StickLDown))
+                        TMapInsNudge((1 << 8) | 1);
+                    if (kDown&HidNpadButton_A) {
+                        gMapMode = MapMode::Idle;
+                        gMapDelConfirm = 0;
+                    }
+                    if (kDown&HidNpadButton_Y) {
+                        gMapMode = MapMode::Picker;
+                        gMapPickerFilter.clear();
+                        gMapPickerSel = 0;
+                        gMapPickerScroll = 0;
+                    }
+                    if (kDown&HidNpadButton_X) {
+                        // Two-press confirm: first X arms, second X commits.
+                        if (gMapDelConfirm == 0) {
+                            gMapDelConfirm = 1;
+                            MapSetMsg("press X again to confirm delete", COL_GOLD, 180);
+                        } else {
+                            SaveEditor::SetUIntAt(gMapSav, SaveEditor::Hash(MapKeys::ActorKey),
+                                                   gMapSelSlot, 0);
+                            gMapDirty = true;
+                            gMapDelConfirm = 0;
+                            gMapSelSlot = -1;
+                            gMapMode = MapMode::Idle;
+                            MapSetMsg("deleted", COL_GREEN, 90);
+                        }
+                    }
+                    if (kDown&HidNpadButton_B) {
+                        gMapMode = MapMode::Idle;
+                        gMapDelConfirm = 0;
+                    }
+                    (void)rowsCount;
+                } else { // Idle
+                    if (kDown&HidNpadButton_A) {
+                        int slot = MapObjectAt(gMapCursorX, gMapCursorY);
+                        if (slot >= 0) {
+                            gMapSelSlot = slot;
+                            gMapMode    = MapMode::Inspect;
+                            gMapInsField= 0;
+                        } else {
+                            MapSetMsg("no object here", COL_DIM, 60);
+                        }
+                    }
+                    // Y = enter actor picker so the user can drop a new
+                    // object. (+ stays reserved for the global "close app"
+                    // shortcut, same as every other tab.)
+                    if (kDown&HidNpadButton_Y) {
+                        gMapMode = MapMode::Picker;
+                        gMapPickerFilter.clear();
+                        gMapPickerSel = 0;
+                        gMapPickerScroll = 0;
+                    }
+                    // B exits to user-pick. If any save (Map, Mii, Player,
+                    // textures, etc.) is dirty, defer to the existing
+                    // back-prompt modal so the user can pick save/discard
+                    // with on-screen buttons — same UX as the Mii / Player
+                    // tabs. + lets the global handler take over for quit.
+                    if (kDown&(HidNpadButton_B|HidNpadButton_Plus)) {
+                        bool hasDirty = gMapDirty || gPlayerSavDirty || gMiiSavDirty
+                                      || gUgcDirty || gWebUiDirty;
+                        bool toUserPick = (kDown&HidNpadButton_Plus) == 0;
+                        if (hasDirty) {
+                            gShowBackPrompt       = true;
+                            gBackPromptIsMii      = gMiiSavDirty;
+                            gBackPromptToUserPick = toUserPick;
+                        } else if (toUserPick) {
+                            FreePreview(); HttpServer::Stop(); gLog.clear();
+                            gEntries.clear(); gMiis.clear();
+                            gPlayerSav = SaveEditor::SavFile{};
+                            gMiiSav    = SaveEditor::SavFile{};
+                            gMapSav    = SaveEditor::SavFile{};
+                            gMapDirty  = false;
+                            gPlayerSavDirty = false; gMiiSavDirty = false; gUgcDirty = false;
+                            SaveMount::Unmount();
+                            gScreen = Screen::UserPick;
+                        } else { gQuitApp = true; }
+                    }
+                }
+
             } else { // WebUI tab
                 // X = restart HTTP server
                 if (kDown&HidNpadButton_X) {
@@ -7859,18 +8810,11 @@ int main(int,char**) {
                     HttpServer::Start(HTTP_PORT, SAVE_UGC_PATH);
                     LogOK("WebUI restarted");
                 }
-                // Tab switch
+                // Tab switch. The on-Switch bar wraps WebUI ↔ Map on the
+                // outside; from WebUI, L goes to Map (the last tab) and R
+                // moves into the textures (UGC) tab.
                 if (kDown&HidNpadButton_L){
-                    if (!gSaveWarningAcked) {
-                        gSaveWarningTarget=OnSwitchMode::Player; gShowSaveWarning=true; gSaveWarningCountdown=120; break;
-                    }
-                    gOnSwitchMode=OnSwitchMode::Player; gOnSwitchMsg="";
-                    if (!gPlayerSav.loaded) {
-                        std::string err;
-                        if (!SaveEditor::Load(SAVE_PLAYER_SAV, gPlayerSav, err))
-                            gPlayerMsg="Load error: "+err;
-                    }
-                    break;
+                    gOnSwitchMode=OnSwitchMode::Map; gOnSwitchMsg=""; break;
                 }
                 if (kDown&HidNpadButton_R){
                     gOnSwitchMode=OnSwitchMode::UGC; gOnSwitchMsg=""; break;
@@ -7927,6 +8871,7 @@ int main(int,char**) {
                     case OnSwitchMode::Player:      DrawPlayer();      break;
                     case OnSwitchMode::MiiStats:    DrawMiiStats();    break;
                     case OnSwitchMode::TexSettings: DrawTexSettings(); break;
+                    case OnSwitchMode::Map:         DrawMap();         break;
                     default:                        DrawOnSwitch();    break;
                 }
             }

@@ -41,6 +41,7 @@ static bool        s_pendingCommit          = false;
 static bool        s_pendingMiiRefresh      = false;
 static bool        s_pendingPlayerSavReload = false;
 static bool        s_pendingMiiSavReload    = false;
+static bool        s_pendingMapSavReload    = false;
 static bool        s_saveWarnAcked          = false;
 static int         s_port          = 8080;
 static std::string s_ugcPath;
@@ -140,10 +141,15 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 #settings-drawer .s-title{font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);padding-bottom:8px;display:flex;align-items:center;justify-content:space-between}
 #settings-drawer .s-close{background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.1rem;padding:0;line-height:1;transition:color .12s}
 #settings-drawer .s-close:hover{color:var(--text)}
-.s-section{display:flex;flex-direction:column;gap:8px}
-.s-section-label{font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
-.s-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.s-hint{font-size:.7rem;color:var(--muted);font-style:italic;margin-top:2px}
+.s-section{display:flex;flex-direction:column;gap:6px}
+.s-section-label{font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.s-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:var(--surface2);border-radius:999px;padding:3px;width:fit-content;border:1px solid var(--border)}
+.s-row .btn-enc{border:none;background:transparent;border-radius:999px;padding:5px 12px;font-size:.78rem;color:var(--muted);font-weight:600;letter-spacing:.02em;transition:all .12s}
+.s-row .btn-enc:hover{color:var(--text)}
+.s-row .btn-enc.enc-on{background:var(--accent);color:var(--bg);box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.s-hint{font-size:.72rem;color:var(--muted);line-height:1.4;margin:0;word-break:break-word;max-width:100%}
+.s-matte-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.s-matte-row input[type=color]{width:28px;height:28px;padding:0;border:1px solid var(--border);border-radius:4px;background:transparent;cursor:pointer}
 /* gear button */
 #btn-settings{padding:6px 10px;display:flex;align-items:center;justify-content:center}
 #btn-settings svg{transition:transform .5s cubic-bezier(.34,1.56,.64,1)}
@@ -276,6 +282,10 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
 .bl-worn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
 .bl-worn-slot{background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:7px 10px}
 .bl-worn-slot-lbl{font-size:.7rem;color:var(--muted);margin-bottom:4px}
+.bl-slot-body{display:flex;gap:8px;align-items:flex-start}
+.bl-slot-thumb{width:48px;height:48px;flex-shrink:0;object-fit:contain;background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:2px}
+.bl-slot-thumb.empty{visibility:hidden}
+.bl-slot-controls{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}
 .bl-goods-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
 .bl-goods-slot{background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:7px 10px}
 .bl-goods-hd{font-size:.7rem;color:var(--muted);margin-bottom:4px;display:flex;justify-content:space-between;align-items:center}
@@ -287,8 +297,10 @@ body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
 .bl-filters label{font-size:.7rem;color:var(--muted);display:flex;flex-direction:column;gap:2px}
 .bl-bitmask-list{max-height:340px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;border:1px solid var(--border);border-radius:4px;padding:6px;background:var(--surface2)}
 .bl-bitmask-list::-webkit-scrollbar{width:3px}.bl-bitmask-list::-webkit-scrollbar-thumb{background:var(--border)}
-.bl-item-row{background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px 9px;display:flex;gap:8px;align-items:flex-start}
+.bl-item-row{background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px 9px;display:flex;gap:10px;align-items:flex-start}
 .bl-item-row.owned{border-left:3px solid var(--accent)}
+.bl-item-thumb{width:54px;height:54px;flex-shrink:0;object-fit:contain;background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:2px}
+.bl-item-thumb.empty{visibility:hidden}
 .bl-item-info{flex:1;min-width:0}
 .bl-item-name{font-size:.8rem;font-weight:bold;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bl-item-meta{font-size:.7rem;color:var(--muted);margin-top:1px}
@@ -423,12 +435,93 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
 .br-detail-tags{display:flex;flex-wrap:wrap;gap:4px}
 .br-tag{background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:1px 8px;font-size:.7rem;color:var(--muted)}
 .br-detail-desc{font-size:.8rem;color:var(--text);line-height:1.5;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:7px 10px;white-space:pre-wrap;word-break:break-word}
-.br-import-box{background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:9px 11px;display:flex;flex-direction:column;gap:6px;margin-top:6px}
-.br-import-box .br-import-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.br-import-box .br-import-row label{font-size:.74rem;color:var(--muted)}
-.br-import-box input[type="number"]{width:80px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:3px;font-size:.85rem;font-family:inherit}
+.br-import-box{background:linear-gradient(180deg,var(--surface),var(--surface2));border:1px solid var(--border);border-radius:8px;padding:13px 14px;display:flex;flex-direction:column;gap:10px;margin-top:10px;box-shadow:0 1px 0 rgba(255,255,255,.02) inset}
+.br-import-title{font-size:.78rem;font-weight:700;color:var(--accent);letter-spacing:.05em;text-transform:uppercase;display:flex;align-items:center;gap:8px;margin:0}
+.br-import-title::before{content:"";width:4px;height:14px;background:var(--accent);border-radius:2px;display:inline-block}
+.br-import-warn{font-size:.76rem;color:var(--err);background:rgba(200,106,106,.10);border-left:3px solid var(--err);padding:7px 10px;border-radius:0 4px 4px 0;line-height:1.45}
+.br-import-warn b{color:var(--err)}
+.br-import-note{font-size:.74rem;color:var(--muted);font-style:italic;line-height:1.45}
+.br-import-slot-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.br-import-slot-row label{font-size:.85rem;color:var(--text);font-weight:600}
+.br-import-slot-row .br-import-slot-range{font-size:.74rem;color:var(--muted)}
+.br-import-stepper{display:inline-flex;align-items:stretch;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:var(--bg)}
+.br-import-stepper button{background:var(--surface);border:none;color:var(--text);width:36px;font-size:1.15rem;cursor:pointer;font-family:inherit;padding:0;line-height:1;display:flex;align-items:center;justify-content:center;transition:background .12s,color .12s;-webkit-tap-highlight-color:transparent}
+.br-import-stepper button:hover{background:var(--surface2)}
+.br-import-stepper button:active{background:var(--accent);color:var(--bg)}
+.br-import-stepper input[type="number"]{width:62px;background:transparent;border:none;border-left:1px solid var(--border);border-right:1px solid var(--border);color:var(--text);text-align:center;padding:6px 4px;font-size:.95rem;font-family:inherit;font-weight:600;-moz-appearance:textfield;outline:none}
+.br-import-stepper input[type="number"]::-webkit-outer-spin-button,
+.br-import-stepper input[type="number"]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.br-import-target{background:var(--bg);border:1px dashed var(--border);border-radius:5px;padding:9px 11px;font-size:.82rem;color:var(--text);display:flex;align-items:center;gap:6px;flex-wrap:wrap;line-height:1.4}
+.br-import-target b{color:var(--accent);font-weight:600}
+.br-import-target.empty{color:var(--muted);font-style:italic}
+.br-import-target.bad{color:var(--err);border-color:rgba(200,106,106,.5);background:rgba(200,106,106,.06)}
+.br-import-box .br-import-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.br-import-box .br-import-action{display:flex;flex-direction:column;gap:6px;margin-top:2px}
+.br-import-box .br-import-action .btn-primary{padding:10px 14px;font-size:.92rem;font-weight:600;width:100%}
 .br-import-hint{font-size:.7rem;color:var(--muted);font-style:italic}
-@media(max-width:600px){.save-mii-layout{flex-direction:column}.mii-slot-list{width:100%;flex-direction:row;flex-wrap:wrap;max-height:90px;border-right:none;border-bottom:1px solid var(--border)}.mii-subtab-bar{flex-wrap:wrap}}
+/* ── Map tab ─────────────────────────────────────────────────────────── */
+.map-layout{display:flex;gap:10px;padding:10px 12px;flex:1;min-height:0}
+.map-canvas-wrap{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:6px;align-items:center}
+#map-canvas{width:100%;max-width:960px;height:auto;aspect-ratio:3/2;background:var(--surface2);border:1px solid var(--border);border-radius:5px;image-rendering:pixelated;touch-action:manipulation;cursor:crosshair;display:block}
+#map-canvas.placing{cursor:cell;outline:2px dashed var(--accent);outline-offset:-2px}
+.map-hud{font-size:.78rem;color:var(--muted);font-style:italic;text-align:center}
+.map-inspector{flex:0 0 290px;min-width:240px;max-width:290px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;max-height:calc(100vh - 220px)}
+.map-ins-row{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:.82rem}
+.map-ins-row label{flex:0 0 90px;color:var(--muted);font-size:.78rem}
+.map-ins-row .map-ins-val{flex:1;display:flex;gap:4px;align-items:center}
+.map-ins-row input[type="number"]{flex:1;min-width:50px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:3px;font-size:.85rem;font-family:inherit}
+.map-ins-row select{flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:3px;font-size:.82rem;font-family:inherit;min-width:0}
+.map-ins-row .map-ins-btn{background:var(--surface);border:1px solid var(--border);color:var(--text);width:26px;height:26px;border-radius:3px;cursor:pointer;font-size:.95rem;display:flex;align-items:center;justify-content:center}
+.map-ins-row .map-ins-btn:hover{border-color:var(--accent);color:var(--accent)}
+.map-ins-row .map-ins-btn:active{background:var(--accent);color:var(--bg)}
+.map-ins-group-tag{display:inline-block;font-size:.62rem;text-transform:uppercase;letter-spacing:.05em;padding:1px 6px;border-radius:9px;color:var(--bg);font-weight:bold}
+.map-ins-actions{display:flex;gap:6px;margin-top:10px}
+.map-ins-actions button{flex:1;font-size:.78rem;padding:6px 8px}
+.map-ins-delete{background:transparent;border:1px solid var(--err);color:var(--err)}
+.map-ins-delete:hover{background:rgba(200,106,106,.12)}
+.map-residents-list{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+.map-resident-row{display:flex;align-items:center;gap:8px;font-size:.78rem;padding:3px 6px;background:var(--surface2);border-radius:3px}
+.map-resident-row label{flex:0 0 56px;color:var(--muted);font-size:.7rem}
+.map-resident-row select{flex:1}
+.map-actor-picker{display:flex;flex-direction:column;gap:6px}
+.map-actor-picker input[type="search"]{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:3px;font-size:.85rem;font-family:inherit;outline:none}
+.map-actor-picker .map-actor-results{display:flex;flex-direction:column;gap:2px;max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:3px;padding:3px;background:var(--surface2)}
+.map-actor-row{display:flex;align-items:center;gap:6px;padding:4px 6px;cursor:pointer;border-radius:2px;font-size:.78rem;color:var(--text)}
+.map-actor-row:hover{background:var(--surface)}
+.map-actor-row .swatch{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+.map-actor-row .map-actor-cat{color:var(--muted);font-size:.68rem;flex-shrink:0}
+@media(max-width:600px){
+  header{padding:8px 10px;gap:6px}
+  header h1{font-size:13px}
+  header h1 span{display:none}
+  #hdr-count{font-size:10px}
+  .tabs{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .tab{padding:8px 12px;font-size:11px;letter-spacing:.04em;flex-shrink:0}
+  .preview-area{height:30vh}
+  .info-bar{padding:5px 10px;font-size:10px}
+  .save-mii-layout{flex-direction:column}
+  .mii-slot-list{width:100%;flex-direction:row;flex-wrap:wrap;max-height:90px;border-right:none;border-bottom:1px solid var(--border)}
+  .mii-subtab-bar{flex-wrap:wrap}
+  .br-detail-overlay{padding:0}
+  .br-detail{max-height:100vh;height:100vh;width:100vw;border-radius:0;border:none;border-left:0;border-right:0}
+  .br-detail-body{padding:11px;gap:11px}
+  .br-detail-imgs,.br-detail-info{min-width:0;width:100%;flex:1 1 100%}
+  .br-detail-main-img{max-width:260px;width:100%;align-self:center}
+  .br-detail-thumbs{justify-content:center}
+  .br-detail-row b{min-width:70px}
+  .br-import-box{padding:12px}
+  .br-import-slot-row{justify-content:space-between}
+  .br-import-stepper{flex:1;max-width:200px;justify-content:center}
+  .br-import-stepper button{width:48px;font-size:1.35rem}
+  .br-import-stepper input[type="number"]{flex:1;width:auto;min-width:60px;font-size:1.05rem;padding:10px 4px}
+  .br-import-target{font-size:.85rem;padding:10px 12px}
+  .map-layout{flex-direction:column;padding:8px;gap:8px}
+  .map-canvas-wrap,.map-inspector{flex:1 1 100%;max-width:100%;min-width:0}
+  #map-canvas{max-width:100%}
+  .map-inspector{max-height:none;flex:0 0 auto}
+  .map-ins-row label{flex:0 0 78px;font-size:.75rem}
+  .map-actor-picker .map-actor-results{max-height:220px}
+}
 </style>
 </head>
 <body>
@@ -440,6 +533,7 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
   <button class="tab active" data-i18n="tab.textures" onclick="switchTab('ugc',this)">textures</button>
   <button class="tab" data-i18n="tab.mii" onclick="switchTab('miistats',this)">mii</button>
   <button class="tab" data-i18n="tab.player" onclick="switchTab('player',this)">player</button>
+  <button class="tab" data-i18n="tab.map" onclick="switchTab('map',this)">map</button>
 </div>
 
 <!-- one-time tips -->
@@ -486,22 +580,40 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
     </div>
     <div class="s-section">
       <div class="s-section-label" data-i18n="settings.encoder">Encoder</div>
-      <div class="s-row">
-        <button class="btn btn-enc enc-on" id="enc-custom" onclick="setEnc('custom')">Custom</button>
-        <button class="btn btn-enc" id="enc-rgbcx" onclick="setEnc('rgbcx')">rgbcx</button>
+      <div class="s-row" role="radiogroup">
+        <button class="btn-enc enc-on" id="enc-custom" onclick="setEnc('custom')">Gamma-aware</button>
+        <button class="btn-enc" id="enc-pca" onclick="setEnc('pca')">PCA</button>
       </div>
-      <div class="s-hint" id="enc-hint">Bounding-box encoder. Fast, reliable for most textures.</div>
+      <p class="s-hint" id="enc-hint">Gamma-aware sRGB fitting. Best quality (default).</p>
     </div>
     <div class="s-section" id="bc1-group">
       <div class="s-section-label" data-i18n="settings.bc1">BC1 mode</div>
-      <div class="s-row">
-        <button class="btn btn-enc enc-on" id="bc1-auto" onclick="setBc1('auto')">Auto</button>
-        <button class="btn btn-enc" id="bc1-fourColor" onclick="setBc1('fourColor')">4-color</button>
-        <button class="btn btn-enc" id="bc1-threeColor" onclick="setBc1('threeColor')">3-color</button>
+      <div class="s-row" role="radiogroup">
+        <button class="btn-enc enc-on" id="bc1-auto" onclick="setBc1('auto')">Auto</button>
+        <button class="btn-enc" id="bc1-fourColor" onclick="setBc1('fourColor')">4-color</button>
+        <button class="btn-enc" id="bc1-threeColor" onclick="setBc1('threeColor')">3-color</button>
       </div>
-      <div class="s-hint" id="bc1-hint">Picks the best mode per block. Recommended.</div>
+      <p class="s-hint" id="bc1-hint">Picks the best mode for each block. Recommended.</p>
     </div>
-
+    <div class="s-section">
+      <div class="s-section-label" data-i18n="settings.fit">Fit</div>
+      <div class="s-row" role="radiogroup">
+        <button class="btn-enc enc-on" id="fit-cover" onclick="setFit('cover')">Cover</button>
+        <button class="btn-enc" id="fit-contain" onclick="setFit('contain')">Contain</button>
+        <button class="btn-enc" id="fit-fill" onclick="setFit('fill')">Fill</button>
+      </div>
+      <p class="s-hint" id="fit-hint">Crop to fill the texture, preserving aspect ratio.</p>
+    </div>
+    <div class="s-section" id="matte-group" style="display:none">
+      <div class="s-section-label" data-i18n="settings.matte">Background</div>
+      <div class="s-matte-row" role="radiogroup">
+        <button class="btn-enc enc-on" id="matte-transparent" onclick="setMatte('transparent')">Transparent</button>
+        <button class="btn-enc" id="matte-white" onclick="setMatte('white')">White</button>
+        <button class="btn-enc" id="matte-black" onclick="setMatte('black')">Black</button>
+        <button class="btn-enc" id="matte-custom" onclick="setMatte('custom')">Custom color</button>
+        <input type="color" id="matte-color" value="#888888" oninput="onMatteColorChange()" style="display:none">
+      </div>
+    </div>
   </div>
 </div>
   <div class="list-wrap" style="padding-bottom:env(safe-area-inset-bottom,0px)">
@@ -565,6 +677,32 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
   </div>
 </div>
 
+<!-- Map Panel -->
+<div class="panel" id="panel-map">
+  <div class="toolbar" id="map-toolbar">
+    <button class="btn btn-primary" id="map-load-btn" onclick="loadMap()">load Map.sav</button>
+    <button class="btn btn-gold" id="map-apply-btn" disabled onclick="applyMap()">apply to Switch</button>
+    <button class="btn" id="map-place-btn" disabled onclick="mapStartPlace()" title="Add a new object">+ place object</button>
+    <div class="status info" id="map-status"></div>
+  </div>
+  <div class="map-layout">
+    <div class="map-canvas-wrap">
+      <canvas id="map-canvas" width="720" height="480"></canvas>
+      <div class="map-hud" id="map-hud">— click an object to inspect</div>
+    </div>
+    <aside class="map-inspector" id="map-inspector">
+      <div class="bl-section">
+        <div class="bl-section-head">
+          <span id="map-ins-title" data-i18n="map.inspector.empty">no object selected</span>
+        </div>
+        <div class="bl-section-body" id="map-ins-body">
+          <p style="color:var(--muted);font-size:.85rem;margin:0">Click any object on the map to see and edit its properties. Use <b>+ place object</b> to drop a new one.</p>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
 <!-- Shared modal -->
 <div class="overlay" id="overlay">
   <div class="dialog">
@@ -604,6 +742,7 @@ const LOCALES = {
     'tab.textures':'textures',
     'tab.mii':'mii',
     'tab.player':'player',
+    'tab.map':'map',
     'subtab.stats':'stats',
     'subtab.belongings':'items',
     'subtab.habits':'habits',
@@ -617,6 +756,8 @@ const LOCALES = {
     'settings.title':'Settings',
     'settings.encoder':'Encoder',
     'settings.bc1':'BC1 mode',
+    'settings.fit':'Fit',
+    'settings.matte':'Background',
     'settings.language':'Language',
     'settings.languageHint':'App display language. Help translate — see the README on GitHub.',
     'btn.loadMii':'load Mii.sav',
@@ -628,11 +769,28 @@ const LOCALES = {
     'btn.exportLtd':'export .ltd',
     'btn.importLtd':'import .ltd',
     'btn.removebg':'remove BG',
+    'map.inspector.empty':'no object selected',
+    'map.inspector.title':'object',
+    'map.actor':'actor',
+    'map.position':'position',
+    'map.rotation':'rotation',
+    'map.linkedMap':'linked map id',
+    'map.residents':'residents',
+    'map.delete':'delete',
+    'map.placeHere':'place here',
+    'map.actorPicker.title':'pick an actor',
+    'map.actorPicker.search':'filter by name',
+    'map.empty':'empty slot',
+    'map.unsaved':'unsaved changes',
+    'map.load':'load Map.sav',
+    'map.placeMode':'click an empty tile to place',
+    'map.placeCancel':'cancel placement',
   },
   fr: {
     'tab.textures':'textures',
     'tab.mii':'mii',
     'tab.player':'joueur',
+    'tab.map':'carte',
     'subtab.stats':'stats',
     'subtab.belongings':'objets',
     'subtab.habits':'habitudes',
@@ -646,6 +804,8 @@ const LOCALES = {
     'settings.title':'Paramètres',
     'settings.encoder':'Encodeur',
     'settings.bc1':'Mode BC1',
+    'settings.fit':'Cadrage',
+    'settings.matte':'Arrière-plan',
     'settings.language':'Langue',
     'settings.languageHint':"Langue d'affichage. Aidez à traduire — voir le README sur GitHub.",
     'btn.loadMii':'charger Mii.sav',
@@ -657,6 +817,22 @@ const LOCALES = {
     'btn.exportLtd':'exporter .ltd',
     'btn.importLtd':'importer .ltd',
     'btn.removebg':'retirer fond',
+    'map.inspector.empty':'aucun objet sélectionné',
+    'map.inspector.title':'objet',
+    'map.actor':'type',
+    'map.position':'position',
+    'map.rotation':'rotation',
+    'map.linkedMap':'id maison liée',
+    'map.residents':'résidents',
+    'map.delete':'supprimer',
+    'map.placeHere':'placer ici',
+    'map.actorPicker.title':'choisir un type',
+    'map.actorPicker.search':'filtrer par nom',
+    'map.empty':'emplacement vide',
+    'map.unsaved':'modifications non enregistrées',
+    'map.load':'charger Map.sav',
+    'map.placeMode':'cliquez sur une case vide pour placer',
+    'map.placeCancel':'annuler le placement',
   },
   // Add new languages here — see the comment block above for instructions.
 };
@@ -692,7 +868,572 @@ function switchTab(name, btn) {
   btn.classList.add('active');
   document.getElementById('panel-'+name).classList.add('active');
   document.getElementById('mii-subtab-bar-global').classList.toggle('visible',name==='miistats');
-  if(name==='player'||name==='miistats') initSaveWarn();
+  if(name==='player'||name==='miistats'||name==='map') initSaveWarn();
+}
+
+// ── Map tab ────────────────────────────────────────────────────────────────────
+// Renders the island into a <canvas>, lets you click any object to inspect and
+// edit, drop new ones with "+ place object", or delete them. All editing
+// happens client-side against the parsed savMap; "apply to Switch" uploads
+// the modified bytes back via /api/save/upload?file=map.
+const MAP_W = 120, MAP_H = 80;          // fixed by the game
+const ACTOR_GROUP_COLORS = ['#e11d48','#2563eb','#16a34a','#9333ea','#ca8a04','#a78bfa','#ef4444'];
+
+// Pre-compute every hash once at script init. We call `murmur3(...)` directly
+// rather than the `H` alias because these run at module load — and the alias
+// is a `const H = murmur3` declared further down the file, so referencing `H`
+// here would hit the temporal dead zone and abort the rest of the script
+// (which leaves INLINE_T uninitialized and breaks loadSave('player'/'mii')).
+const MAP_H_FLOOR     = murmur3('MapGrid.GridX.GridZ.FloorKeyHash');
+const MAP_H_GRIDUGC   = murmur3('MapGrid.GridX.GridZ.UgcIndex');
+const MAP_H_ACTOR     = murmur3('MapObject.ActorKey');
+const MAP_H_POSX      = murmur3('MapObject.Location.GridPosX');
+const MAP_H_POSY      = murmur3('MapObject.Location.GridPosY');
+const MAP_H_LINK      = murmur3('MapObject.MapLink.LinkedMapId');
+const MAP_H_ROTY      = murmur3('MapObject.MapObjectMisc.RotY');
+const MAP_H_ADDTIME   = murmur3('MapObject.MapObjectMisc.AddGameTime');
+const MAP_H_UGCID     = murmur3('MapObject.UgcObje.UgcId');
+const MAP_H_UGCEXT    = murmur3('MapObject.UgcObje.UgcExteriorId');
+const MAP_H_HOUSEMAP  = murmur3('House.MapId');
+const MAP_H_HOUSENAME = murmur3('House.RoommateGroupName');
+const MAP_H_MII_HOUSE = murmur3('Mii.Location.HouseMapId');
+const MAP_H_MII_ROOM  = murmur3('Mii.Location.RoomIndex');
+const MAP_H_MII_NAME  = murmur3('Mii.Name.Name');
+
+const mapState = {
+  loaded: false, loading: false, dirty: false,
+  count: 0,            // MapObject.ActorKey array length
+  selSlot: -1,         // selected slot (-1 = none)
+  placing: false,      // active actor picker / placement mode
+  placeActor: 0,       // hash of actor chosen for placement
+  pickerFilter: '',
+};
+
+function mapSetStatus(text, kind) {
+  const s = document.getElementById('map-status');
+  if (!s) return;
+  s.textContent = text;
+  s.className = 'status ' + (kind || 'info');
+}
+
+function mapMarkDirty() {
+  mapState.dirty = true;
+  const btn = document.getElementById('map-apply-btn');
+  if (btn) btn.disabled = false;
+}
+
+// Pull one object slot's fields out of savMap.
+function mapReadObject(i) {
+  if (!savMap) return null;
+  const E = savMap.entries;
+  return {
+    slot: i,
+    actor: getUIntAt(E, MAP_H_ACTOR, i) >>> 0,
+    x:     getIntAt (E, MAP_H_POSX,  i),
+    y:     getIntAt (E, MAP_H_POSY,  i),
+    link:  getIntAt (E, MAP_H_LINK,  i),
+    rot:   getFloatAt(E, MAP_H_ROTY, i),
+    ugcId: getUIntAt(E, MAP_H_UGCID, i) >>> 0,
+    ugcEx: getUIntAt(E, MAP_H_UGCEXT,i) >>> 0,
+  };
+}
+
+function mapWriteObject(i, fields) {
+  if (!savMap) return;
+  const E = savMap.entries;
+  if (fields.actor !== undefined) setUIntAt(E, MAP_H_ACTOR, i, fields.actor >>> 0);
+  if (fields.x     !== undefined) setIntAt (E, MAP_H_POSX,  i, fields.x|0);
+  if (fields.y     !== undefined) setIntAt (E, MAP_H_POSY,  i, fields.y|0);
+  if (fields.link  !== undefined) setIntAt (E, MAP_H_LINK,  i, fields.link|0);
+  if (fields.rot   !== undefined) setFloatAt(E, MAP_H_ROTY, i, +fields.rot);
+}
+
+function mapTileColor(hash) {
+  const t = MAP_TILE_INFO[hash >>> 0];
+  if (t) return t.col;
+  if (hash === 0) return '#1a1a1a';
+  return '#FF00FF';
+}
+
+function mapActorMeta(hash) {
+  const a = MAP_ACTOR_INFO[hash >>> 0];
+  if (a) return a;
+  return { k:'', l:'0x'+(hash>>>0).toString(16).padStart(8,'0'), g:6, x0:0, y0:0, w:1, h:1 };
+}
+
+// Footprint rect after applying the actor's Y rotation. Mirrors upstream's
+// rotateActorFootprint — houses and facilities have negative x0/y0 (their
+// stored grid pos is the goal point, not the top-left corner) so rendering
+// without this offset drifts the building off its terrain plot.
+function mapActorRect(meta, rotDeg) {
+  const x0 = meta.x0|0, y0 = meta.y0|0, w = meta.w|0, h = meta.h|0;
+  const t = (((Math.round((+rotDeg||0) / 90) % 4) + 4) % 4);
+  if (t === 0) return { x0, y0, w, h };
+  const x1 = x0 + w - 1, y1 = y0 + h - 1;
+  const corners = [[x0,y0],[x1,y0],[x0,y1],[x1,y1]];
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let c of corners) {
+    let cx = c[0], cy = c[1];
+    for (let i = 0; i < t; i++) { const nx = cy, ny = -cx; cx = nx; cy = ny; }
+    if (cx < minX) minX = cx;
+    if (cy < minY) minY = cy;
+    if (cx > maxX) maxX = cx;
+    if (cy > maxY) maxY = cy;
+  }
+  return { x0: minX, y0: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+}
+
+// Resolve an actor key to a thumbnail URL. UGC actors point at the user's
+// saved UGC textures (same /api/preview endpoint the Textures tab uses);
+// everything else points at ltdimages (local pack first, GitHub fallback).
+function mapActorImgUrl(key) {
+  if (!key) return null;
+  let m = key.match(/^ObjUgc(\d+)_/);
+  if (m) return '/api/preview?stem=UgcMapObject' + m[1].padStart(3,'0');
+  m = key.match(/^HouseUgc(\d+)_/);
+  if (m) return '/api/preview?stem=UgcExterior' + m[1].padStart(3,'0');
+  // ltdimages stores map actors (Obj*, House*, Facility*) without the _NN
+  // color-variant suffix that Cloth/Coordinate use.
+  return '/img/' + key + '.png';
+}
+
+// Image cache for actor thumbnails. Lazy-loaded; a re-render is scheduled
+// when an image finishes loading so the canvas swaps from the color
+// fallback to the actual picture.
+const mapImgCache = new Map();
+let mapRedrawScheduled = false;
+function mapScheduleRedraw() {
+  if (mapRedrawScheduled) return;
+  mapRedrawScheduled = true;
+  requestAnimationFrame(() => { mapRedrawScheduled = false; mapDrawCanvas(); });
+}
+function mapGetActorImg(key) {
+  if (!key) return null;
+  let e = mapImgCache.get(key);
+  if (e) return e;
+  const url = mapActorImgUrl(key);
+  if (!url) { mapImgCache.set(key, null); return null; }
+  e = { img: new Image(), loaded: false, failed: false };
+  e.img.onload  = () => { e.loaded = true;  mapScheduleRedraw(); };
+  e.img.onerror = () => { e.failed = true; };
+  e.img.src = url;
+  mapImgCache.set(key, e);
+  return e;
+}
+
+// Re-snapshot the object array once into a flat list. Cheap (a few hundred
+// entries) and avoids re-scanning savMap on every hit-test or render.
+function mapSnapshotObjects() {
+  if (!savMap) return [];
+  mapState.count = arrSize(savMap.entries, MAP_H_ACTOR);
+  const out = new Array(mapState.count);
+  for (let i = 0; i < mapState.count; i++) out[i] = mapReadObject(i);
+  return out;
+}
+
+async function loadMap() {
+  if (mapState.loading) return;
+  mapState.loading = true;
+  mapSetStatus('loading Map.sav...', 'info');
+  try {
+    const r = await fetch('/api/save/download?file=map');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const buf = await r.arrayBuffer();
+    savMap = parseSav(buf);
+    mapState.count   = arrSize(savMap.entries, MAP_H_ACTOR);
+    mapState.loaded  = true;
+    mapState.dirty   = false;
+    mapState.selSlot = -1;
+    mapState.placing = false;
+    document.getElementById('map-apply-btn').disabled = true;
+    document.getElementById('map-place-btn').disabled = false;
+    mapDrawCanvas();
+    renderMapInspector();
+    mapSetStatus('loaded ' + mapState.count + ' object slots', 'ok');
+  } catch (e) {
+    mapSetStatus('load failed: ' + e.message, 'err');
+  } finally {
+    mapState.loading = false;
+  }
+}
+
+async function applyMap() {
+  if (!savMap) return;
+  // Prune any house left residentless by the housing editor before committing.
+  housingCleanupEmptyHouses();
+  mapSetStatus('applying...', 'info');
+  try {
+    const bytes = writeSav(savMap);
+    const r = await fetch('/api/save/upload?file=map',
+                          {method:'POST', body: bytes,
+                           headers:{'Content-Type':'application/octet-stream'}});
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'unknown error');
+    mapState.dirty = false;
+    document.getElementById('map-apply-btn').disabled = true;
+    mapSetStatus('saved to Switch', 'ok');
+  } catch (e) {
+    mapSetStatus('apply failed: ' + e.message, 'err');
+  }
+}
+
+function mapDrawCanvas() {
+  const cv = document.getElementById('map-canvas');
+  if (!cv || !savMap) return;
+  const ctx = cv.getContext('2d');
+  if (!ctx) return;
+  const W = cv.width, H = cv.height;
+  const tw = W / MAP_W, th = H / MAP_H;
+
+  // Floor pass — read tile array directly from savMap entry payload.
+  const fe = findE(savMap.entries, MAP_H_FLOOR);
+  if (fe && fe.type === 21 && fe.payload && fe.payload.length >= 4 + MAP_W*MAP_H*4) {
+    const dv = arrDV(fe);
+    for (let x = 0; x < MAP_W; x++) {
+      for (let y = 0; y < MAP_H; y++) {
+        const h = dv.getUint32(4 + (x * MAP_H + y) * 4, true);
+        ctx.fillStyle = mapTileColor(h);
+        ctx.fillRect(Math.floor(x * tw), Math.floor(y * th),
+                     Math.ceil(tw), Math.ceil(th));
+      }
+    }
+  } else {
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // Objects pass — draw the ltdimages thumbnail when available, otherwise
+  // fall back to the group color while the image loads (or for actors with
+  // no asset like unknown UGC slots).
+  ctx.imageSmoothingEnabled = false;
+  for (let i = 0; i < mapState.count; i++) {
+    const actor = getUIntAt(savMap.entries, MAP_H_ACTOR, i) >>> 0;
+    if (!actor) continue;
+    const x = getIntAt(savMap.entries, MAP_H_POSX, i);
+    const y = getIntAt(savMap.entries, MAP_H_POSY, i);
+    if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue;
+    const a = mapActorMeta(actor);
+    const rot = getFloatAt(savMap.entries, MAP_H_ROTY, i);
+    const fp = mapActorRect(a, rot);
+    const fx = Math.floor((x + fp.x0) * tw);
+    const fy = Math.floor((y + fp.y0) * th);
+    const fw = Math.max(2, Math.ceil(fp.w * tw));
+    const fh = Math.max(2, Math.ceil(fp.h * th));
+    const ic = mapGetActorImg(a.k);
+    if (ic && ic.loaded && !ic.failed) {
+      ctx.drawImage(ic.img, fx, fy, fw, fh);
+    } else {
+      ctx.fillStyle = ACTOR_GROUP_COLORS[a.g] || '#ef4444';
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(fx, fy, fw, fh);
+      ctx.globalAlpha = 1.0;
+    }
+    if (i === mapState.selSlot) {
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(fx + 1, fy + 1, fw - 2, fh - 2);
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(fx, fy, fw, fh);
+    }
+  }
+}
+
+function mapCanvasCoords(ev) {
+  const cv = document.getElementById('map-canvas');
+  const rect = cv.getBoundingClientRect();
+  const t = ev.touches && ev.touches.length ? ev.touches[0]
+          : (ev.changedTouches && ev.changedTouches.length ? ev.changedTouches[0] : ev);
+  const cx = t.clientX - rect.left;
+  const cy = t.clientY - rect.top;
+  const x = Math.floor(cx / rect.width * MAP_W);
+  const y = Math.floor(cy / rect.height * MAP_H);
+  return [Math.max(0, Math.min(MAP_W - 1, x)),
+          Math.max(0, Math.min(MAP_H - 1, y))];
+}
+
+// Find topmost object whose footprint covers (tx, ty); falls back to nearest
+// within a 2-tile snap radius for touch forgiveness.
+function mapObjectAt(tx, ty, snap = 2) {
+  if (!savMap) return -1;
+  let best = -1, bestDist = Infinity;
+  for (let i = 0; i < mapState.count; i++) {
+    const actor = getUIntAt(savMap.entries, MAP_H_ACTOR, i) >>> 0;
+    if (!actor) continue;
+    const x = getIntAt(savMap.entries, MAP_H_POSX, i);
+    const y = getIntAt(savMap.entries, MAP_H_POSY, i);
+    const a = mapActorMeta(actor);
+    const fp = mapActorRect(a, getFloatAt(savMap.entries, MAP_H_ROTY, i));
+    const bx = x + fp.x0, by = y + fp.y0;
+    if (tx >= bx && tx < bx + fp.w && ty >= by && ty < by + fp.h) return i;
+    const cx = bx + fp.w / 2, cy = by + fp.h / 2;
+    const d = Math.max(Math.abs(tx - cx), Math.abs(ty - cy));
+    if (d <= snap && d < bestDist) { bestDist = d; best = i; }
+  }
+  return best;
+}
+
+function onMapCanvasTap(ev) {
+  ev.preventDefault();
+  if (!savMap) return;
+  const [tx, ty] = mapCanvasCoords(ev);
+  if (mapState.placing) { mapDoPlace(tx, ty); return; }
+  mapState.selSlot = mapObjectAt(tx, ty);
+  mapDrawCanvas();
+  renderMapInspector();
+}
+
+function mapBindCanvas() {
+  const cv = document.getElementById('map-canvas');
+  if (!cv) return;
+  cv.addEventListener('click', onMapCanvasTap);
+  cv.addEventListener('touchend', onMapCanvasTap, {passive:false});
+}
+document.addEventListener('DOMContentLoaded', mapBindCanvas);
+
+// ── Inspector ─────────────────────────────────────────────────────────────
+function renderMapInspector() {
+  const ttl = document.getElementById('map-ins-title');
+  const body = document.getElementById('map-ins-body');
+  if (!ttl || !body) return;
+  if (mapState.placing) {
+    ttl.textContent = t('map.actorPicker.title');
+    body.innerHTML = renderMapActorPicker();
+    return;
+  }
+  if (mapState.selSlot < 0) {
+    ttl.textContent = t('map.inspector.empty');
+    body.innerHTML = '<p style="color:var(--muted);font-size:.85rem;margin:0">Click any object on the map to see and edit its properties.</p>';
+    return;
+  }
+  const o = mapReadObject(mapState.selSlot);
+  if (!o) { ttl.textContent = '?'; body.innerHTML = ''; return; }
+  if (!o.actor) {
+    ttl.innerHTML = '<span class="map-ins-group-tag" style="background:#444">'+t('map.empty')+'</span> slot #'+o.slot;
+    body.innerHTML = '<p style="color:var(--muted);font-size:.85rem;margin:0">This slot is empty — pick an actor with <b>+ place object</b> to fill it.</p>';
+    return;
+  }
+  const a = mapActorMeta(o.actor);
+  ttl.innerHTML = '<span class="map-ins-group-tag" style="background:' + ACTOR_GROUP_COLORS[a.g] + '">'
+                + MAP_ACTOR_GROUPS[a.g] + '</span> '
+                + esc(a.l) + ' <span style="color:var(--muted);font-size:.7rem;font-weight:normal">slot #'+o.slot+'</span>';
+  const rotDeg = Math.round(((o.rot % 360) + 360) % 360);
+  const linkRow = (a.g === 0 /* house */ || a.g === 1 /* facility */ || o.link >= 0)
+    ? `<div class="map-ins-row"><label>${t('map.linkedMap')}</label><div class="map-ins-val">
+         <input type="number" min="-1" value="${o.link}" onchange="mapEditField('link',this.value|0)">
+       </div></div>`
+    : '';
+  body.innerHTML = `
+    <div class="map-ins-row"><label>${t('map.actor')}</label><div class="map-ins-val">
+      <button class="map-ins-btn" onclick="mapStartPlace(${mapState.selSlot})" title="Change actor type">↻</button>
+      <span style="flex:1;font-size:.78rem;color:var(--text)">${esc(a.l)}</span>
+    </div></div>
+    <div class="map-ins-row"><label>${t('map.position')}</label><div class="map-ins-val">
+      <button class="map-ins-btn" onclick="mapNudge('x',-1)">◀</button>
+      <input type="number" min="0" max="${MAP_W-1}" value="${o.x}" onchange="mapEditField('x',this.value|0)">
+      <button class="map-ins-btn" onclick="mapNudge('x',+1)">▶</button>
+      <button class="map-ins-btn" onclick="mapNudge('y',-1)">▲</button>
+      <input type="number" min="0" max="${MAP_H-1}" value="${o.y}" onchange="mapEditField('y',this.value|0)">
+      <button class="map-ins-btn" onclick="mapNudge('y',+1)">▼</button>
+    </div></div>
+    <div class="map-ins-row"><label>${t('map.rotation')}</label><div class="map-ins-val">
+      <button class="map-ins-btn" onclick="mapRotateBy(-90)">↺</button>
+      <select onchange="mapEditField('rot',+this.value)">
+        ${[0,90,180,270].map(d=>`<option value="${d}"${d===rotDeg?' selected':''}>${d}°</option>`).join('')}
+      </select>
+      <button class="map-ins-btn" onclick="mapRotateBy(+90)">↻</button>
+    </div></div>
+    ${linkRow}
+    ${renderMapResidents(o)}
+    <div class="map-ins-actions">
+      <button class="btn btn-primary" onclick="mapSelectAdjacent(-1)">‹ prev</button>
+      <button class="btn btn-primary" onclick="mapSelectAdjacent(+1)">next ›</button>
+      <button class="map-ins-delete" onclick="mapDeleteSelected()">${t('map.delete')}</button>
+    </div>
+  `;
+}
+
+// ── Field edits ──────────────────────────────────────────────────────────
+function mapEditField(field, value) {
+  if (mapState.selSlot < 0) return;
+  const fields = {};
+  if (field === 'x') fields.x = Math.max(0, Math.min(MAP_W-1, value|0));
+  else if (field === 'y') fields.y = Math.max(0, Math.min(MAP_H-1, value|0));
+  else if (field === 'link') fields.link = value|0;
+  else if (field === 'rot') fields.rot = +value;
+  else return;
+  mapWriteObject(mapState.selSlot, fields);
+  mapMarkDirty();
+  mapDrawCanvas();
+  renderMapInspector();
+}
+
+function mapNudge(axis, delta) {
+  if (mapState.selSlot < 0) return;
+  const o = mapReadObject(mapState.selSlot);
+  if (!o) return;
+  if (axis === 'x') mapEditField('x', o.x + delta);
+  else              mapEditField('y', o.y + delta);
+}
+
+function mapRotateBy(deg) {
+  if (mapState.selSlot < 0) return;
+  const o = mapReadObject(mapState.selSlot);
+  if (!o) return;
+  const cur = Math.round(((o.rot % 360) + 360) % 360);
+  mapEditField('rot', (cur + deg + 360) % 360);
+}
+
+function mapSelectAdjacent(dir) {
+  if (!savMap || mapState.count === 0) return;
+  let i = mapState.selSlot < 0 ? 0 : mapState.selSlot;
+  for (let step = 0; step < mapState.count; step++) {
+    i = (i + dir + mapState.count) % mapState.count;
+    const a = getUIntAt(savMap.entries, MAP_H_ACTOR, i) >>> 0;
+    if (a !== 0) { mapState.selSlot = i; mapDrawCanvas(); renderMapInspector(); return; }
+  }
+}
+
+function mapDeleteSelected() {
+  if (mapState.selSlot < 0) return;
+  if (!confirm('Delete this object?')) return;
+  mapWriteObject(mapState.selSlot, {actor: 0});
+  mapMarkDirty();
+  mapDrawCanvas();
+  renderMapInspector();
+  mapSetStatus('slot #' + mapState.selSlot + ' cleared', 'ok');
+}
+
+// ── Place new object (actor picker) ──────────────────────────────────────
+function mapStartPlace(reassignSlot) {
+  // If reassignSlot is given, we're changing the actor on an existing slot
+  // rather than adding a new one. Tracked via mapState.placing = slot index
+  // (>= 0) or true (free placement). placeActor is set after picker.
+  if (!savMap) return;
+  mapState.placing = (reassignSlot !== undefined) ? reassignSlot : true;
+  mapState.placeActor = 0;
+  mapState.pickerFilter = '';
+  document.getElementById('map-canvas').classList.add('placing');
+  renderMapInspector();
+}
+
+function mapCancelPlace() {
+  mapState.placing = false;
+  document.getElementById('map-canvas').classList.remove('placing');
+  renderMapInspector();
+  mapSetStatus('placement cancelled', 'info');
+}
+
+function renderMapActorPicker() {
+  // Bucket actors by group for visual structure.
+  const groups = [[],[],[],[],[],[],[]];
+  const filter = (mapState.pickerFilter || '').trim().toLowerCase();
+  for (const k in MAP_ACTOR_INFO) {
+    const a = MAP_ACTOR_INFO[k];
+    if (filter && !a.l.toLowerCase().includes(filter) && !a.k.toLowerCase().includes(filter)) continue;
+    groups[a.g].push([+k, a]);
+  }
+  let html = `<div class="map-actor-picker">
+    <input type="search" placeholder="${t('map.actorPicker.search')}" value="${esc(mapState.pickerFilter)}"
+           oninput="mapState.pickerFilter=this.value;renderMapInspector()">
+    <div class="map-actor-results">`;
+  let shown = 0;
+  for (let g = 0; g < groups.length; g++) {
+    const arr = groups[g];
+    if (!arr.length) continue;
+    arr.sort((a,b)=>a[1].l.localeCompare(b[1].l));
+    for (const [h, a] of arr) {
+      if (shown >= 200 && filter === '') { html += `<div class="map-actor-row" style="color:var(--muted);font-style:italic">…and ${groupCountRemaining(groups, g, shown)} more — type to filter</div>`; shown = -1; break; }
+      if (shown < 0) break;
+      html += `<div class="map-actor-row" onclick="mapPickActor(${h})">
+                 <span class="swatch" style="background:${ACTOR_GROUP_COLORS[g]}"></span>
+                 <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.l)}</span>
+                 <span class="map-actor-cat">${MAP_ACTOR_GROUPS[g]}</span>
+               </div>`;
+      shown++;
+    }
+    if (shown < 0) break;
+  }
+  html += `</div>
+    <div class="map-ins-actions">
+      <button class="btn" onclick="mapCancelPlace()">${t('map.placeCancel')}</button>
+    </div>
+    <p style="color:var(--muted);font-size:.72rem;margin:0">${t('map.placeMode')}</p>
+  </div>`;
+  return html;
+}
+
+function groupCountRemaining(groups, fromG, alreadyShown) {
+  let n = 0;
+  for (let g = fromG; g < groups.length; g++) n += groups[g].length;
+  return Math.max(0, n - alreadyShown);
+}
+
+function mapPickActor(hash) {
+  mapState.placeActor = hash >>> 0;
+  // If we're reassigning an existing slot, do it now and exit place mode.
+  if (typeof mapState.placing === 'number' && mapState.placing >= 0) {
+    mapWriteObject(mapState.placing, {actor: mapState.placeActor});
+    mapState.selSlot = mapState.placing;
+    mapState.placing = false;
+    document.getElementById('map-canvas').classList.remove('placing');
+    mapMarkDirty();
+    mapDrawCanvas();
+    renderMapInspector();
+    return;
+  }
+  // Otherwise wait for a canvas click to choose a tile.
+  mapSetStatus(t('map.placeMode'), 'info');
+}
+
+function mapDoPlace(tx, ty) {
+  if (!savMap || !mapState.placeActor) {
+    mapSetStatus('pick an actor first', 'info');
+    return;
+  }
+  // Find an empty slot (actor == 0). Same convention as ltd-save-editor.
+  let slot = -1;
+  for (let i = 0; i < mapState.count; i++) {
+    if ((getUIntAt(savMap.entries, MAP_H_ACTOR, i) >>> 0) === 0) { slot = i; break; }
+  }
+  if (slot < 0) { mapSetStatus('no empty object slots left', 'err'); return; }
+  mapWriteObject(slot, {actor: mapState.placeActor, x: tx, y: ty, rot: 0, link: -1});
+  mapState.selSlot = slot;
+  mapState.placing = false;
+  document.getElementById('map-canvas').classList.remove('placing');
+  mapMarkDirty();
+  mapDrawCanvas();
+  renderMapInspector();
+  mapSetStatus('placed in slot #' + slot, 'ok');
+}
+
+// ── Residents (Mii ↔ house assignment lives in Mii.sav) ──────────────────
+function renderMapResidents(o) {
+  const a = mapActorMeta(o.actor);
+  if (a.g !== 0) return ''; // only houses
+  if (!savMii) return '<p style="color:var(--muted);font-size:.72rem;margin:6px 0 0">load Mii.sav (Mii tab) to manage residents</p>';
+  // Find this house's MapId so we can match Miis whose HouseMapId points here.
+  const houseCount = arrSize(savMap.entries, MAP_H_HOUSEMAP);
+  let houseMapId = -1;
+  for (let i = 0; i < houseCount; i++) {
+    if (getIntAt(savMap.entries, MAP_H_HOUSEMAP, i) === o.link) { houseMapId = o.link; break; }
+  }
+  if (houseMapId < 0) houseMapId = o.link;
+  const miiCount = arrSize(savMii.entries, MAP_H_MII_HOUSE);
+  const residents = [];
+  for (let i = 0; i < miiCount; i++) {
+    const hid = getIntAt(savMii.entries, MAP_H_MII_HOUSE, i);
+    if (hid === houseMapId && hid >= 0) {
+      residents.push({slot:i, room:getIntAt(savMii.entries, MAP_H_MII_ROOM, i),
+                     name: getWStr32At(savMii.entries, MAP_H_MII_NAME, i)});
+    }
+  }
+  if (!residents.length) return '<div class="map-ins-row"><label>'+t('map.residents')+'</label><div class="map-ins-val"><span style="color:var(--muted);font-size:.78rem">(none)</span></div></div>';
+  return '<div class="map-ins-row" style="flex-direction:column;align-items:stretch">'
+       + '<label>'+t('map.residents')+'</label>'
+       + '<div class="map-residents-list">'
+       + residents.map(r=>`<div class="map-resident-row"><label>room ${r.room}</label><span style="flex:1;font-size:.78rem">${esc(r.name||'Mii #'+(r.slot+1))}</span></div>`).join('')
+       + '</div></div>';
 }
 
 // ── UGC ────────────────────────────────────────────────────────────────────────
@@ -751,22 +1492,49 @@ function doExport(){if(!selected)return;const a=document.createElement('a');a.hr
 function doExportLtd(){if(!selected)return;const k=ugcKindFromStem(selected.stem);if(k<0){setStatus('not a UGC item','err');return;}const a=document.createElement('a');a.href='/api/ugc/itemexport?stem='+encodeURIComponent(selected.stem);a.download=selected.stem+UGC_ITEM_EXTS[k];a.click();setStatus('exported .ltd','ok');}
 function doImport(){if(!selected)return;document.getElementById('file-input').click();}
 async function doRemoveBg(){if(!selected)return;showSpinner('removing background... (~30s)');const d=await(await fetch('/api/removebg?stem='+encodeURIComponent(selected.stem),{method:'POST'})).json();modalClose();if(d.ok){setStatus('background removed','ok');await loadList();const fresh=entries.find(e=>e.stem===selected.stem);if(fresh)selectEntry(fresh);}else setStatus('failed: '+d.error,'err');}
-// ── Encoder / BC1 mode ────────────────────────────────────────────────────────
-let encMode='custom', bc1Mode='auto';
+// ── Encoder / BC1 mode / Fit / Matte ──────────────────────────────────────────
+// Labels & hints intentionally short — verbose copy made the drawer overflow.
+let encMode='custom', bc1Mode='auto', fitMode='cover', matteOpt='transparent', matteHex='#888888';
 const ENC_HINTS={
-  custom:'Bounding-box encoder. Fast, reliable for most textures.',
-  rgbcx:'PCA-based encoder. Better color accuracy on dark and gradient textures.'
+  custom:'Gamma-aware sRGB fitting. Best quality (default).',
+  pca:'PCA endpoint fit. Faster but weaker on gradients.'
 };
 const BC1_HINTS={
-  auto:'Picks 4-color or 3-color mode per block. Recommended.',
-  fourColor:'Forces 4-color interpolation. Sharper colors, no black transparency.',
-  threeColor:'Forces 3-color + transparent. Best for cutout-alpha textures.'
+  auto:'Picks the best mode for each block. Recommended.',
+  fourColor:'Sharper colors. Transparent pixels are still preserved.',
+  threeColor:'Optimized for images with transparency. Less color detail.'
+};
+const FIT_HINTS={
+  cover:'Crop to fill the texture, preserving aspect ratio.',
+  contain:'Fit the whole image inside, leaving transparent edges.',
+  fill:'Stretch to fill the texture, ignoring aspect ratio.'
 };
 function setEnc(v){
   encMode=v;
-  ['custom','rgbcx'].forEach(k=>document.getElementById('enc-'+k).classList.toggle('enc-on',k===v));
+  ['custom','pca'].forEach(k=>document.getElementById('enc-'+k).classList.toggle('enc-on',k===v));
   document.getElementById('bc1-group').style.display=v==='custom'?'':'none';
   document.getElementById('enc-hint').textContent=ENC_HINTS[v]||'';
+}
+function setFit(v){
+  fitMode=v;
+  ['cover','contain','fill'].forEach(k=>document.getElementById('fit-'+k).classList.toggle('enc-on',k===v));
+  document.getElementById('fit-hint').textContent=FIT_HINTS[v]||'';
+  document.getElementById('matte-group').style.display=v==='contain'?'':'none';
+}
+function setMatte(v){
+  matteOpt=v;
+  ['transparent','white','black','custom'].forEach(k=>document.getElementById('matte-'+k).classList.toggle('enc-on',k===v));
+  document.getElementById('matte-color').style.display=v==='custom'?'':'none';
+}
+function onMatteColorChange(){
+  matteHex=document.getElementById('matte-color').value;
+}
+// Returns matte color as '#RRGGBB' or '' (transparent letterbox).
+function matteHexForUpload(){
+  if(matteOpt==='transparent')return '';
+  if(matteOpt==='white')return '#ffffff';
+  if(matteOpt==='black')return '#000000';
+  return matteHex;
 }
 function setBc1(v){
   bc1Mode=v;
@@ -776,7 +1544,7 @@ function setBc1(v){
 function fileChosen(){const fi=document.getElementById('file-input');if(!fi.files.length)return;const f=fi.files[0];fi.value='';const ext=f.name.slice(f.name.lastIndexOf('.')).toLowerCase();if(UGC_ITEM_EXTS.includes(ext)){uploadUgcItemFile(f);}else{pendingFile=f;uploadFile();}}
 async function uploadFile(){
   showSpinner('importing...');
-  const fd=new FormData();fd.append('file',pendingFile);fd.append('stem',selected.stem);fd.append('encoder',encMode);fd.append('bc1Mode',bc1Mode);
+  const fd=new FormData();fd.append('file',pendingFile);fd.append('stem',selected.stem);fd.append('encoder',encMode);fd.append('bc1Mode',bc1Mode);fd.append('fitMode',fitMode);fd.append('matte',matteHexForUpload());
   const d=await(await fetch('/api/import',{method:'POST',body:fd})).json();
   modalClose();
   if(d.ok){setStatus('imported','ok');await loadList();const fresh=entries.find(e=>e.stem===selected.stem);if(fresh)selectEntry(fresh);}
@@ -1001,6 +1769,8 @@ function setIntAt(entries,hash,idx,val){const e=findE(entries,hash);if(!e||e.typ
 function getUIntAt(entries,hash,idx){const e=findE(entries,hash);if(!e||e.type!==21||!e.payload||e.payload.length<4)return 0;const dv=arrDV(e),c=dv.getUint32(0,true);return(idx>=0&&idx<c)?dv.getUint32(4+idx*4,true):0;}
 function setUIntAt(entries,hash,idx,val){const e=findE(entries,hash);if(!e||e.type!==21||!e.payload||e.payload.length<4)return;const dv=arrDV(e),c=dv.getUint32(0,true);if(idx>=0&&idx<c)dv.setUint32(4+idx*4,val>>>0,true);}
 function getUInt64At(entries,hash,idx){const e=findE(entries,hash);if(!e||e.type!==25||!e.payload||e.payload.length<4)return null;const dv=arrDV(e),c=dv.getUint32(0,true);if(idx<0||idx>=c)return null;const off=4+idx*8;if(off+8>e.payload.length)return null;return BigInt(dv.getUint32(off,true))+BigInt(dv.getUint32(off+4,true))*0x100000000n;}
+function getFloatAt(entries,hash,idx){const e=findE(entries,hash);if(!e||e.type!==5||!e.payload||e.payload.length<4)return 0;const dv=arrDV(e),c=dv.getUint32(0,true);return(idx>=0&&idx<c)?dv.getFloat32(4+idx*4,true):0;}
+function setFloatAt(entries,hash,idx,val){const e=findE(entries,hash);if(!e||e.type!==5||!e.payload||e.payload.length<4)return;const dv=arrDV(e),c=dv.getUint32(0,true);if(idx>=0&&idx<c)dv.setFloat32(4+idx*4,val,true);}
 function setUInt64At(entries,hash,idx,val){const e=findE(entries,hash);if(!e||e.type!==25||!e.payload||e.payload.length<4)return;const dv=arrDV(e),c=dv.getUint32(0,true);if(idx<0||idx>=c)return;const off=4+idx*8;if(off+8>e.payload.length)return;dv.setUint32(off,Number(val&0xFFFFFFFFn),true);dv.setUint32(off+4,Number((val>>32n)&0xFFFFFFFFn),true);}
 function u64ToDateLocal(secs){if(secs===null||secs<=0n)return'';const n=Number(secs);const d=new Date(n*1000);if(isNaN(d.getTime()))return'';const p=x=>x.toString().padStart(2,'0');return`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;}
 function dateLocalToU64(raw){const t=raw.trim();if(!t)return 0n;const d=new Date(t);if(isNaN(d.getTime()))return null;const s=Math.floor(d.getTime()/1000);if(!isFinite(s)||s<0)return null;return BigInt(s);}
@@ -1083,10 +1853,25 @@ async function applySave(which){
   if(!sav)return;
   setSaveStatus(which,'applying...','info');
   try{
+    // Saving Mii.sav: prune any house with 0 residents from Map.sav so the
+    // game doesn't keep residentless house actors around. If Map.sav was
+    // changed by the cleanup, push it too in the same flow.
+    if(which==='mii'&&savMap){
+      const prevDirty=mapState.dirty;
+      housingCleanupEmptyHouses();
+      if(mapState.dirty&&!prevDirty){/* dirty flag was just set by cleanup */}
+    }
     const bytes=writeSav(sav);
     const r=await fetch('/api/save/upload?file='+which,{method:'POST',body:bytes,headers:{'Content-Type':'application/octet-stream'}});
     const d=await r.json();
     if(d.ok)setSaveStatus(which,'saved to Switch','ok');else setSaveStatus(which,'error: '+d.error,'err');
+    // Piggy-back Map.sav upload if cleanup touched it.
+    if(which==='mii'&&savMap&&mapState.dirty){
+      const mapBytes=writeSav(savMap);
+      const r2=await fetch('/api/save/upload?file=map',{method:'POST',body:mapBytes,headers:{'Content-Type':'application/octet-stream'}});
+      const d2=await r2.json();
+      if(d2.ok){mapState.dirty=false;const btn=document.getElementById('map-apply-btn');if(btn)btn.disabled=true;}
+    }
   }catch(e){setSaveStatus(which,'error: '+e.message,'err');}
 }
 
@@ -1571,6 +2356,19 @@ function drawSocialCanvas(d, cv) {
 }
 
 
+// ── MapData JS (auto-generated by tools/gen_map_data.py) ─────────────────────────────────────
+const MAP_TILE_INFO={1582494942:{c:"Archstone",col:"#e0dfdc",i:0},2447352298:{c:"Archstone_Road",col:"#d6d5d2",i:0},3622167776:{c:"Asphalt",col:"#393c40",i:0},3730278020:{c:"Asphalt_Road",col:"#303236",i:0},3067570786:{c:"Beach",col:"#F2D8A3",i:0},1420721816:{c:"CherryBlossom",col:"#e0c5d3",i:0},3518201673:{c:"CherryBlossom_Road",col:"#c9b1be",i:0},2725462509:{c:"Clover",col:"#7D943C",i:0},2946872747:{c:"Clover_Road",col:"#708535",i:0},2954489849:{c:"Cobblestone",col:"#B7C2C4",i:0},2755827102:{c:"Cobblestone_Road",col:"#A9B6B8",i:0},3481521951:{c:"Concrete",col:"#A1A1A1",i:0},831063256:{c:"Concrete_Road",col:"#4F4F4F",i:0},2321083261:{c:"FallenLeaves",col:"#E07B28",i:0},2453470167:{c:"FallenLeaves_Road",col:"#CC6B1D",i:0},961076275:{c:"Gold",col:"#E8C341",i:0},2258159799:{c:"Gold_Road",col:"#E8AE41",i:0},4283098762:{c:"Grass",col:"#62733B",i:0},787615831:{c:"Grass_Road",col:"#515E2D",i:0},532232093:{c:"Iron",col:"#CACDCF",i:0},2335832274:{c:"Iron_Road",col:"#B8BCBF",i:0},2762987606:{c:"Pebble",col:"#B8A681",i:0},3390169690:{c:"Pebble_Road",col:"#997151",i:0},304774435:{c:"Sand",col:"#C9A05D",i:0},731612546:{c:"Sand_Road",col:"#B58D4C",i:0},1207314365:{c:"Snow",col:"#E6EDEC",i:0},3913757319:{c:"Snow_Road",col:"#D3DEDD",i:0},2576994675:{c:"Soil",col:"#C68B46",i:0},1660486803:{c:"Soil_Road",col:"#B07A3C",i:0},284683861:{c:"Stone",col:"#C97038",i:0},3329899628:{c:"Stone_Road",col:"#B35E2B",i:0},2706712395:{c:"Tile",col:"#25A0C2",i:0},2726419252:{c:"Tile_Road",col:"#1E90B0",i:0},3525010870:{c:"Water",col:"#3A6A85",i:0},3944822072:{c:"Wood",col:"#966120",i:0},1580578399:{c:"Wood_Road",col:"#7A4C14",i:0},3040829245:{c:"Seaside",col:"#6A9B7A",i:1},401476072:{c:"RoomInvalid",col:"#FF00FF",i:1},1778381553:{c:"UGC",col:"#ffffff",i:1}};
+const MAP_ACTOR_INFO={7879774:{k:"ObjFenceIron_07",l:"Fence Iron 07",g:2,x0:0,y0:0,w:1,h:1},16225827:{k:"ObjTreeBroadleaf",l:"Tree Broadleaf",g:2,x0:0,y0:0,w:1,h:1},34467777:{k:"ObjGuardrail_04",l:"Guardrail 04",g:2,x0:0,y0:0,w:2,h:1},41435088:{k:"ObjVendingMachine",l:"Vending Machine",g:2,x0:0,y0:0,w:1,h:1},44347220:{k:"ObjArchAir_01",l:"Arch Air 01",g:2,x0:0,y0:0,w:3,h:1},45456377:{k:"ObjStreetLamp_05",l:"Street Lamp 05",g:2,x0:0,y0:0,w:1,h:1},53850279:{k:"ObjBell_05",l:"Bell 05",g:2,x0:0,y0:0,w:1,h:1},55922480:{k:"ObjBonfire_06",l:"Bonfire 06",g:2,x0:0,y0:0,w:1,h:1},80304629:{k:"ObjThrone_05",l:"Throne 05",g:2,x0:0,y0:0,w:1,h:1},91632957:{k:"ObjStepStone_02",l:"Step Stone 02",g:4,x0:0,y0:0,w:1,h:1},99435062:{k:"ObjUgc13_02",l:"UGC item 13-02",g:5,x0:0,y0:0,w:1,h:1},100769687:{k:"ObjBeachParasol_01",l:"Beach Parasol 01",g:2,x0:0,y0:0,w:1,h:1},122682849:{k:"ObjFenceLattice_01",l:"Fence Lattice 01",g:2,x0:0,y0:0,w:1,h:1},123298002:{k:"ObjDrinkingFountain_05",l:"Drinking Fountain 05",g:2,x0:0,y0:0,w:1,h:1},154744807:{k:"HouseUgc10_00",l:"UGC house 10-00",g:5,x0:0,y0:0,w:1,h:1},160654307:{k:"ObjBonfire_01",l:"Bonfire 01",g:2,x0:0,y0:0,w:1,h:1},170521686:{k:"ObjSignboardTutorial_04",l:"Signboard Tutorial 04",g:2,x0:0,y0:0,w:4,h:5},178207199:{k:"ObjTrashCan_02",l:"Trash Can 02",g:2,x0:0,y0:0,w:1,h:1},181305434:{k:"ObjGrandlight_04",l:"Grandlight 04",g:2,x0:0,y0:0,w:1,h:1},185679838:{k:"ObjGuardrail_01",l:"Guardrail 01",g:2,x0:0,y0:0,w:2,h:1},197373334:{k:"ObjSprinkler_03",l:"Sprinkler 03",g:2,x0:0,y0:0,w:1,h:1},211009588:{k:"ObjUgc15_02",l:"UGC item 15-02",g:5,x0:0,y0:0,w:1,h:1},229241548:{k:"ObjTreeGinkgo",l:"Tree Ginkgo",g:2,x0:0,y0:0,w:1,h:1},229258922:{k:"ObjSignboardTutorial_03",l:"Signboard Tutorial 03",g:2,x0:0,y0:0,w:4,h:5},230809265:{k:"ObjUgc10_00",l:"UGC item 10-00",g:5,x0:0,y0:0,w:1,h:1},241365748:{k:"ObjFenceIron_05",l:"Fence Iron 05",g:2,x0:0,y0:0,w:1,h:1},248589411:{k:"ObjHedge_05",l:"Hedge 05",g:2,x0:0,y0:0,w:2,h:1},251735223:{k:"ObjTreeBroadleaf_01",l:"Tree Broadleaf 01",g:2,x0:0,y0:0,w:1,h:1},260501850:{k:"ObjUgc11_00",l:"UGC item 11-00",g:5,x0:0,y0:0,w:1,h:1},264559334:{k:"ObjHedge_01",l:"Hedge 01",g:2,x0:0,y0:0,w:2,h:1},276354488:{k:"ObjFenceLattice_04",l:"Fence Lattice 04",g:2,x0:0,y0:0,w:1,h:1},278941830:{k:"ObjFenceChain_07",l:"Fence Chain 07",g:2,x0:0,y0:0,w:1,h:1},286717400:{k:"ObjFireworksAerial_01",l:"Fireworks Aerial 01",g:2,x0:0,y0:0,w:1,h:1},294478364:{k:"ObjThrone_01",l:"Throne 01",g:2,x0:0,y0:0,w:1,h:1},295060085:{k:"ObjFenceStake_07",l:"Fence Stake 07",g:2,x0:0,y0:0,w:1,h:1},327473227:{k:"ObjLanternSakura_02",l:"Lantern Sakura 02",g:2,x0:0,y0:0,w:1,h:1},335699182:{k:"HouseUgc01_00",l:"UGC house 01-00",g:5,x0:0,y0:0,w:1,h:1},339686105:{k:"ObjJackOLantern_02",l:"Jack OLantern 02",g:2,x0:0,y0:0,w:2,h:1},374356638:{k:"ObjLanternSakura_03",l:"Lantern Sakura 03",g:2,x0:0,y0:0,w:1,h:1},377545460:{k:"ObjHedge_03",l:"Hedge 03",g:2,x0:0,y0:0,w:2,h:1},378559713:{k:"ObjStepWood",l:"Step Wood",g:4,x0:0,y0:0,w:1,h:1},379655676:{k:"ObjFencePipe_06",l:"Fence Pipe 06",g:2,x0:0,y0:0,w:1,h:1},387136534:{k:"ObjGuardrail_02",l:"Guardrail 02",g:2,x0:0,y0:0,w:2,h:1},395379949:{k:"ObjTrafficLight_04",l:"Traffic Light 04",g:2,x0:0,y0:0,w:1,h:1},406191531:{k:"ObjTableBench_05",l:"Table Bench 05",g:2,x0:0,y0:1,w:2,h:2},414976136:{k:"ObjFenceGuardpipe_07",l:"Fence Guardpipe 07",g:2,x0:0,y0:0,w:2,h:1},415504094:{k:"ObjStreetLamp_04",l:"Street Lamp 04",g:2,x0:0,y0:0,w:1,h:1},430149718:{k:"ObjBonfire_05",l:"Bonfire 05",g:2,x0:0,y0:0,w:1,h:1},432535742:{k:"ObjUgc03_01",l:"UGC item 03-01",g:5,x0:0,y0:0,w:1,h:1},438254638:{k:"ObjSnowman",l:"Snowman",g:2,x0:0,y0:0,w:1,h:1},449950845:{k:"ObjBenchTerrace_05",l:"Bench Terrace 05",g:2,x0:0,y0:0,w:2,h:1},456129007:{k:"ObjJackOLantern_03",l:"Jack OLantern 03",g:2,x0:0,y0:0,w:2,h:1},462879809:{k:"ObjStreetLamp",l:"Street Lamp",g:2,x0:0,y0:0,w:1,h:1},472829619:{k:"ObjShowerOutdoor_06",l:"Shower Outdoor 06",g:2,x0:0,y0:0,w:1,h:1},482603957:{k:"ObjFenceGuardpipe_04",l:"Fence Guardpipe 04",g:2,x0:0,y0:0,w:2,h:1},490944555:{k:"ObjRoadSign",l:"Road Sign",g:2,x0:0,y0:0,w:1,h:1},495452163:{k:"ObjThrone_03",l:"Throne 03",g:2,x0:0,y0:0,w:1,h:1},498578156:{k:"ObjTableBench_03",l:"Table Bench 03",g:2,x0:0,y0:1,w:2,h:2},500778681:{k:"ObjLighthouse_02",l:"Lighthouse 02",g:2,x0:0,y0:0,w:2,h:2},510667490:{k:"ObjDrinkingFountain_02",l:"Drinking Fountain 02",g:2,x0:0,y0:0,w:1,h:1},514916188:{k:"ObjJackOLantern",l:"Jack OLantern",g:2,x0:0,y0:0,w:2,h:1},522105645:{k:"FacilityFamilyRestaurant",l:"Family Restaurant",g:1,x0:-2,y0:-2,w:6,h:5},551975984:{k:"ObjFenceBarbed_02",l:"Fence Barbed 02",g:2,x0:0,y0:0,w:1,h:1},576557503:{k:"ObjStepIron_03",l:"Step Iron 03",g:4,x0:0,y0:0,w:1,h:1},586701481:{k:"FacilityItemShop",l:"Item Shop",g:1,x0:-1,y0:-1,w:4,h:4},605862410:{k:"ObjBeachBed_04",l:"Beach Bed 04",g:2,x0:0,y0:0,w:2,h:1},627763508:{k:"ObjTreeConiferous_01",l:"Tree Coniferous 01",g:2,x0:0,y0:0,w:1,h:1},644151249:{k:"ObjTreePalm",l:"Tree Palm",g:2,x0:0,y0:0,w:1,h:1},649114904:{k:"ObjVendingMachine_04",l:"Vending Machine 04",g:2,x0:0,y0:0,w:1,h:1},656463959:{k:"ObjFlowerTulip_02",l:"Flower Tulip 02",g:2,x0:0,y0:0,w:1,h:1},668446714:{k:"ObjJackOLantern_05",l:"Jack OLantern 05",g:2,x0:0,y0:0,w:2,h:1},680090977:{k:"ObjFlowerPampasGrass",l:"Flower Pampas Grass",g:2,x0:0,y0:0,w:1,h:1},680101376:{k:"ObjFenceBarbed_06",l:"Fence Barbed 06",g:2,x0:0,y0:0,w:1,h:1},684222180:{k:"ObjArchAir_04",l:"Arch Air 04",g:2,x0:0,y0:0,w:3,h:1},686891433:{k:"ObjLighthouse_05",l:"Lighthouse 05",g:2,x0:0,y0:0,w:2,h:2},702818844:{k:"HouseUgc12_00",l:"UGC house 12-00",g:5,x0:0,y0:0,w:1,h:1},737806024:{k:"ObjUgc14_01",l:"UGC item 14-01",g:5,x0:0,y0:0,w:1,h:1},746891274:{k:"ObjStepStone_01",l:"Step Stone 01",g:4,x0:0,y0:0,w:1,h:1},752236994:{k:"ObjBenchTerrace_01",l:"Bench Terrace 01",g:2,x0:0,y0:0,w:2,h:1},762352794:{k:"ObjBenchHome",l:"Bench Home",g:2,x0:0,y0:0,w:2,h:1},771948183:{k:"ObjBell_01",l:"Bell 01",g:2,x0:0,y0:0,w:1,h:1},793742664:{k:"HouseUgc04_00",l:"UGC house 04-00",g:5,x0:0,y0:0,w:1,h:1},820771897:{k:"ObjSafetyCone",l:"Safety Cone",g:2,x0:0,y0:0,w:1,h:1},837342868:{k:"ObjTreeElectric_06",l:"Tree Electric 06",g:2,x0:0,y0:0,w:1,h:1},839374726:{k:"HouseUgc14_02",l:"UGC house 14-02",g:5,x0:0,y0:0,w:1,h:1},889464981:{k:"ObjTreeChristmas",l:"Tree Christmas",g:2,x0:0,y0:0,w:2,h:2},890653887:{k:"HouseUgc13_02",l:"UGC house 13-02",g:5,x0:0,y0:0,w:1,h:1},891795289:{k:"ObjGuardrail_03",l:"Guardrail 03",g:2,x0:0,y0:0,w:2,h:1},901528172:{k:"ObjBonfire_03",l:"Bonfire 03",g:2,x0:0,y0:0,w:1,h:1},904861538:{k:"ObjTreeElectric_05",l:"Tree Electric 05",g:2,x0:0,y0:0,w:1,h:1},907312580:{k:"ObjBeachBed",l:"Beach Bed",g:2,x0:0,y0:0,w:2,h:1},909440081:{k:"ObjGrandlight_02",l:"Grandlight 02",g:2,x0:0,y0:0,w:1,h:1},927299126:{k:"ObjSnowman_01",l:"Snowman 01",g:2,x0:0,y0:0,w:1,h:1},952397824:{k:"ObjFenceGuardpipe_06",l:"Fence Guardpipe 06",g:2,x0:0,y0:0,w:2,h:1},966987892:{k:"ObjFlowerpot_01",l:"Flowerpot 01",g:2,x0:0,y0:0,w:1,h:1},968588598:{k:"ObjFenceGuardpipe",l:"Fence Guardpipe",g:2,x0:0,y0:0,w:2,h:1},974718043:{k:"ObjHedge_02",l:"Hedge 02",g:2,x0:0,y0:0,w:2,h:1},976720944:{k:"ObjBenchPark",l:"Bench Park",g:2,x0:0,y0:0,w:2,h:1},992076942:{k:"ObjBenchTerrace_07",l:"Bench Terrace 07",g:2,x0:0,y0:0,w:2,h:1},1006749559:{k:"ObjStreetLampRetro_02",l:"Street Lamp Retro 02",g:2,x0:0,y0:0,w:1,h:1},1006898933:{k:"ObjStandingTorch",l:"Standing Torch",g:2,x0:0,y0:0,w:1,h:1},1009151870:{k:"ObjClockTower_07",l:"Clock Tower 07",g:2,x0:0,y0:0,w:1,h:1},1016579481:{k:"ObjSwingRider_05",l:"Swing Rider 05",g:2,x0:0,y0:0,w:1,h:1},1017915319:{k:"ObjFlowerpot_03",l:"Flowerpot 03",g:2,x0:0,y0:0,w:1,h:1},1021290374:{k:"ObjSwingRider_07",l:"Swing Rider 07",g:2,x0:0,y0:0,w:1,h:1},1038377354:{k:"ObjStepIron_04",l:"Step Iron 04",g:4,x0:0,y0:0,w:1,h:1},1038622197:{k:"ObjBeachParasol_07",l:"Beach Parasol 07",g:2,x0:0,y0:0,w:1,h:1},1039946859:{k:"ObjPinwheel_07",l:"Pinwheel 07",g:2,x0:0,y0:0,w:1,h:1},1042998232:{k:"ObjTableBench_04",l:"Table Bench 04",g:2,x0:0,y0:1,w:2,h:2},1048430329:{k:"ObjBell_04",l:"Bell 04",g:2,x0:0,y0:0,w:1,h:1},1060507024:{k:"ObjGuardrail_05",l:"Guardrail 05",g:2,x0:0,y0:0,w:2,h:1},1063333188:{k:"ObjArchAir_07",l:"Arch Air 07",g:2,x0:0,y0:0,w:3,h:1},1083098476:{k:"ObjSeesaw_04",l:"Seesaw 04",g:2,x0:0,y0:0,w:2,h:1},1094937786:{k:"ObjFireworksErupting",l:"Fireworks Erupting",g:2,x0:0,y0:0,w:1,h:1},1100296708:{k:"ObjFencePipe_01",l:"Fence Pipe 01",g:2,x0:0,y0:0,w:1,h:1},1107929879:{k:"ObjAerogenerator_05",l:"Aerogenerator 05",g:2,x0:0,y0:0,w:1,h:1},1121167428:{k:"HouseUgc03_00",l:"UGC house 03-00",g:5,x0:0,y0:0,w:1,h:1},1128608712:{k:"ObjLanternSakura_01",l:"Lantern Sakura 01",g:2,x0:0,y0:0,w:1,h:1},1140287104:{k:"ObjFenceGuardpipe_03",l:"Fence Guardpipe 03",g:2,x0:0,y0:0,w:2,h:1},1150930060:{k:"FacilityPhotoStudio",l:"Photo Studio",g:1,x0:-1,y0:-1,w:4,h:4},1165101820:{k:"ObjFenceStake_01",l:"Fence Stake 01",g:2,x0:0,y0:0,w:1,h:1},1183955423:{k:"ObjFenceWood_03",l:"Fence Wood 03",g:2,x0:0,y0:0,w:1,h:1},1188784463:{k:"HouseUgc15_02",l:"UGC house 15-02",g:5,x0:0,y0:0,w:1,h:1},1216809586:{k:"ObjSeesaw_02",l:"Seesaw 02",g:2,x0:0,y0:0,w:2,h:1},1222763025:{k:"ObjHedge",l:"Hedge",g:2,x0:0,y0:0,w:2,h:1},1233730683:{k:"ObjArchAir_03",l:"Arch Air 03",g:2,x0:0,y0:0,w:3,h:1},1234817615:{k:"ObjBell_07",l:"Bell 07",g:2,x0:0,y0:0,w:1,h:1},1255473305:{k:"ObjFlowerpot_05",l:"Flowerpot 05",g:2,x0:0,y0:0,w:1,h:1},1270291724:{k:"ObjUgc08_01",l:"UGC item 08-01",g:5,x0:0,y0:0,w:1,h:1},1289688035:{k:"ObjTreeCactus",l:"Tree Cactus",g:2,x0:0,y0:0,w:1,h:1},1297681167:{k:"ObjGuardrail_06",l:"Guardrail 06",g:2,x0:0,y0:0,w:2,h:1},1318660451:{k:"FacilityTower",l:"Tower",g:1,x0:-1,y0:-1,w:4,h:4},1319914885:{k:"HouseUgc08_00",l:"UGC house 08-00",g:5,x0:0,y0:0,w:1,h:1},1321098751:{k:"ObjBonfire_02",l:"Bonfire 02",g:2,x0:0,y0:0,w:1,h:1},1327582325:{k:"ObjFenceChain_05",l:"Fence Chain 05",g:2,x0:0,y0:0,w:1,h:1},1328171564:{k:"FacilityMarket",l:"Market",g:1,x0:-1,y0:-1,w:3,h:3},1328671915:{k:"ObjFlowerNarcissus_01",l:"Flower Narcissus 01",g:2,x0:0,y0:0,w:1,h:1},1362256886:{k:"HouseUgc05_01",l:"UGC house 05-01",g:5,x0:0,y0:0,w:1,h:1},1363505095:{k:"ObjBenchTerrace_02",l:"Bench Terrace 02",g:2,x0:0,y0:0,w:2,h:1},1375333350:{k:"ObjFencePipe_03",l:"Fence Pipe 03",g:2,x0:0,y0:0,w:1,h:1},1378130989:{k:"ObjSprinkler_04",l:"Sprinkler 04",g:2,x0:0,y0:0,w:1,h:1},1399623403:{k:"ObjStreetLampRetro_01",l:"Street Lamp Retro 01",g:2,x0:0,y0:0,w:1,h:1},1403381172:{k:"ObjBeachBed_01",l:"Beach Bed 01",g:2,x0:0,y0:0,w:2,h:1},1405994296:{k:"ObjTableBench_07",l:"Table Bench 07",g:2,x0:0,y0:1,w:2,h:2},1415767053:{k:"ObjVendingMachine_01",l:"Vending Machine 01",g:2,x0:0,y0:0,w:1,h:1},1416161857:{k:"ObjBenchTerrace",l:"Bench Terrace",g:2,x0:0,y0:0,w:2,h:1},1421117121:{k:"ObjBenchHome_04",l:"Bench Home 04",g:2,x0:0,y0:0,w:2,h:1},1432242545:{k:"ObjStreetLamp_07",l:"Street Lamp 07",g:2,x0:0,y0:0,w:1,h:1},1453539845:{k:"HouseUgc01_01",l:"UGC house 01-01",g:5,x0:0,y0:0,w:1,h:1},1539407450:{k:"ObjHedge_06",l:"Hedge 06",g:2,x0:0,y0:0,w:2,h:1},1548008212:{k:"ObjTrashCan_05",l:"Trash Can 05",g:2,x0:0,y0:0,w:1,h:1},1551948025:{k:"ObjJackOLantern_04",l:"Jack OLantern 04",g:2,x0:0,y0:0,w:2,h:1},1559521247:{k:"HouseUgc09_00",l:"UGC house 09-00",g:5,x0:0,y0:0,w:1,h:1},1582587206:{k:"ObjLighthouse_06",l:"Lighthouse 06",g:2,x0:0,y0:0,w:2,h:2},1586479199:{k:"ObjTrashCan",l:"Trash Can",g:2,x0:0,y0:0,w:1,h:1},1587577542:{k:"ObjHedge_04",l:"Hedge 04",g:2,x0:0,y0:0,w:2,h:1},1607801125:{k:"ObjTreeBroadleaf_02",l:"Tree Broadleaf 02",g:2,x0:0,y0:0,w:1,h:1},1620528925:{k:"ObjBenchPark_03",l:"Bench Park 03",g:2,x0:0,y0:0,w:2,h:1},1631459144:{k:"ObjFlowerTulip_01",l:"Flower Tulip 01",g:2,x0:0,y0:0,w:1,h:1},1648333700:{k:"ObjSignboardTutorial",l:"Signboard Tutorial",g:2,x0:0,y0:0,w:4,h:5},1662672605:{k:"ObjBeachBed_07",l:"Beach Bed 07",g:2,x0:0,y0:0,w:2,h:1},1668968372:{k:"HouseUgc05_02",l:"UGC house 05-02",g:5,x0:0,y0:0,w:1,h:1},1669175133:{k:"ObjVendingMachine_02",l:"Vending Machine 02",g:2,x0:0,y0:0,w:1,h:1},1670855140:{k:"FacilitySupermarket",l:"Supermarket",g:1,x0:-1,y0:-1,w:4,h:4},1677782931:{k:"FacilityInteriorShop",l:"Interior Shop",g:1,x0:-1,y0:-1,w:4,h:4},1678503578:{k:"ObjStepIron_02",l:"Step Iron 02",g:4,x0:0,y0:0,w:1,h:1},1682855988:{k:"ObjTrafficLight",l:"Traffic Light",g:2,x0:0,y0:0,w:1,h:1},1683006902:{k:"ObjStreetLamp_06",l:"Street Lamp 06",g:2,x0:0,y0:0,w:1,h:1},1700605168:{k:"ObjStreetLamp_03",l:"Street Lamp 03",g:2,x0:0,y0:0,w:1,h:1},1726767246:{k:"HouseUgc14_01",l:"UGC house 14-01",g:5,x0:0,y0:0,w:1,h:1},1727314661:{k:"ObjFenceChain_03",l:"Fence Chain 03",g:2,x0:0,y0:0,w:1,h:1},1739933801:{k:"ObjStreetLampRetro_04",l:"Street Lamp Retro 04",g:2,x0:0,y0:0,w:1,h:1},1742599116:{k:"ObjFireworksErupting_01",l:"Fireworks Erupting 01",g:2,x0:0,y0:0,w:1,h:1},1756385290:{k:"ObjPinwheel_05",l:"Pinwheel 05",g:2,x0:0,y0:0,w:1,h:1},1774808710:{k:"ObjSprinkler_02",l:"Sprinkler 02",g:2,x0:0,y0:0,w:1,h:1},1777368773:{k:"ObjRock",l:"Rock",g:2,x0:0,y0:0,w:1,h:1},1810082716:{k:"ObjFenceChain_06",l:"Fence Chain 06",g:2,x0:0,y0:0,w:1,h:1},1817165326:{k:"ObjUgc05_01",l:"UGC item 05-01",g:5,x0:0,y0:0,w:1,h:1},1828723383:{k:"ObjTrafficLight_07",l:"Traffic Light 07",g:2,x0:0,y0:0,w:1,h:1},1845122854:{k:"ObjBenchPark_07",l:"Bench Park 07",g:2,x0:0,y0:0,w:2,h:1},1846500828:{k:"ObjFenceGuardpipe_02",l:"Fence Guardpipe 02",g:2,x0:0,y0:0,w:2,h:1},1851671116:{k:"ObjFlowerpot_04",l:"Flowerpot 04",g:2,x0:0,y0:0,w:1,h:1},1857308459:{k:"ObjDrinkingFountain_04",l:"Drinking Fountain 04",g:2,x0:0,y0:0,w:1,h:1},1860879724:{k:"HouseUgc04_01",l:"UGC house 04-01",g:5,x0:0,y0:0,w:1,h:1},1867512239:{k:"ObjUgc05_02",l:"UGC item 05-02",g:5,x0:0,y0:0,w:1,h:1},1872115102:{k:"ObjLighthouse_07",l:"Lighthouse 07",g:2,x0:0,y0:0,w:2,h:2},1876987313:{k:"ObjSprinkler_05",l:"Sprinkler 05",g:2,x0:0,y0:0,w:1,h:1},1888153579:{k:"ObjRock_02",l:"Rock 02",g:2,x0:0,y0:0,w:1,h:1},1892479307:{k:"ObjTreeCherry",l:"Tree Cherry",g:2,x0:0,y0:0,w:1,h:1},1894886590:{k:"ObjFenceStake_05",l:"Fence Stake 05",g:2,x0:0,y0:0,w:1,h:1},1899470972:{k:"ObjStreetLampRetro_07",l:"Street Lamp Retro 07",g:2,x0:0,y0:0,w:1,h:1},1913636927:{k:"ObjSwingRider_04",l:"Swing Rider 04",g:2,x0:0,y0:0,w:1,h:1},1920454976:{k:"ObjFenceStake_02",l:"Fence Stake 02",g:2,x0:0,y0:0,w:1,h:1},1925992232:{k:"ObjFenceChain_04",l:"Fence Chain 04",g:2,x0:0,y0:0,w:1,h:1},1926105237:{k:"ObjClockTower_06",l:"Clock Tower 06",g:2,x0:0,y0:0,w:1,h:1},1928007034:{k:"ObjFireworksAerial",l:"Fireworks Aerial",g:2,x0:0,y0:0,w:1,h:1},1930604427:{k:"ObjFenceIron_04",l:"Fence Iron 04",g:2,x0:0,y0:0,w:1,h:1},1938544546:{k:"FacilityFerrisWheel",l:"Ferris Wheel",g:1,x0:-4,y0:-2,w:9,h:5},1939585028:{k:"ObjBenchPark_01",l:"Bench Park 01",g:2,x0:0,y0:0,w:2,h:1},1947306552:{k:"ObjBell",l:"Bell",g:2,x0:0,y0:0,w:1,h:1},1972450863:{k:"ObjFenceIron_03",l:"Fence Iron 03",g:2,x0:0,y0:0,w:1,h:1},1979613473:{k:"ObjStepWood_01",l:"Step Wood 01",g:4,x0:0,y0:0,w:1,h:1},1992224240:{k:"ObjUgc11_01",l:"UGC item 11-01",g:5,x0:0,y0:0,w:1,h:1},2006671206:{k:"FacilityFountainPark",l:"Fountain Park",g:1,x0:-2,y0:-4,w:6,h:10},2008429533:{k:"ObjWeed",l:"Weed",g:2,x0:0,y0:0,w:1,h:1},2010128532:{k:"ObjStepIron",l:"Step Iron",g:4,x0:0,y0:0,w:1,h:1},2033971343:{k:"ObjFenceLattice_05",l:"Fence Lattice 05",g:2,x0:0,y0:0,w:1,h:1},2039268894:{k:"ObjBell_03",l:"Bell 03",g:2,x0:0,y0:0,w:1,h:1},2041237609:{k:"ObjShowerOutdoor_05",l:"Shower Outdoor 05",g:2,x0:0,y0:0,w:1,h:1},2044151996:{k:"HouseUgc06_02",l:"UGC house 06-02",g:5,x0:0,y0:0,w:1,h:1},2050167741:{k:"ObjLighthouse_04",l:"Lighthouse 04",g:2,x0:0,y0:0,w:2,h:2},2058577339:{k:"ObjFlowerLavender",l:"Flower Lavender",g:2,x0:0,y0:0,w:1,h:1},2066282692:{k:"ObjSwingRider_03",l:"Swing Rider 03",g:2,x0:0,y0:0,w:1,h:1},2077682878:{k:"ObjSeesaw_05",l:"Seesaw 05",g:2,x0:0,y0:0,w:2,h:1},2079525591:{k:"ObjFenceChain_02",l:"Fence Chain 02",g:2,x0:0,y0:0,w:1,h:1},2089002300:{k:"ObjFencePipe_04",l:"Fence Pipe 04",g:2,x0:0,y0:0,w:1,h:1},2092258170:{k:"FacilityFountain",l:"Fountain",g:1,x0:0,y0:0,w:4,h:3},2093101411:{k:"ObjSwingRider_01",l:"Swing Rider 01",g:2,x0:0,y0:0,w:1,h:1},2096577602:{k:"ObjFenceBarbed_04",l:"Fence Barbed 04",g:2,x0:0,y0:0,w:1,h:1},2135651897:{k:"ObjWeed_01",l:"Weed 01",g:2,x0:0,y0:0,w:1,h:1},2146655109:{k:"FacilityClothShop",l:"Cloth Shop",g:1,x0:-1,y0:-1,w:4,h:4},2150055370:{k:"ObjTreeElectric",l:"Tree Electric",g:2,x0:0,y0:0,w:1,h:1},2160386419:{k:"ObjFlowerTulip",l:"Flower Tulip",g:2,x0:0,y0:0,w:1,h:1},2178450445:{k:"ObjSeesaw_06",l:"Seesaw 06",g:2,x0:0,y0:0,w:2,h:1},2182895204:{k:"ObjSwingRider",l:"Swing Rider",g:2,x0:0,y0:0,w:1,h:1},2187373677:{k:"ObjBenchHome_02",l:"Bench Home 02",g:2,x0:0,y0:0,w:2,h:1},2222532493:{k:"ObjSafetyCone_05",l:"Safety Cone 05",g:2,x0:0,y0:0,w:1,h:1},2234192954:{k:"ObjThrone_04",l:"Throne 04",g:2,x0:0,y0:0,w:1,h:1},2253612093:{k:"ObjSignboardTutorial_02",l:"Signboard Tutorial 02",g:2,x0:0,y0:0,w:4,h:5},2259534973:{k:"ObjAerogenerator_03",l:"Aerogenerator 03",g:2,x0:0,y0:0,w:1,h:1},2260693628:{k:"ObjBeachBed_06",l:"Beach Bed 06",g:2,x0:0,y0:0,w:2,h:1},2263174899:{k:"ObjStreetLampRetro_05",l:"Street Lamp Retro 05",g:2,x0:0,y0:0,w:1,h:1},2266790827:{k:"HouseUgc11_00",l:"UGC house 11-00",g:5,x0:0,y0:0,w:1,h:1},2293045448:{k:"ObjFenceBarbed_03",l:"Fence Barbed 03",g:2,x0:0,y0:0,w:1,h:1},2302321853:{k:"ObjSwingRider_02",l:"Swing Rider 02",g:2,x0:0,y0:0,w:1,h:1},2304373025:{k:"ObjFenceWood_01",l:"Fence Wood 01",g:2,x0:0,y0:0,w:1,h:1},2305845941:{k:"ObjGrandlight_01",l:"Grandlight 01",g:2,x0:0,y0:0,w:1,h:1},2355590688:{k:"ObjFencePipe_05",l:"Fence Pipe 05",g:2,x0:0,y0:0,w:1,h:1},2359413290:{k:"ObjFenceGuardpipe_05",l:"Fence Guardpipe 05",g:2,x0:0,y0:0,w:2,h:1},2364250209:{k:"ObjTreeElectric_04",l:"Tree Electric 04",g:2,x0:0,y0:0,w:1,h:1},2367499398:{k:"ObjDrinkingFountain",l:"Drinking Fountain",g:2,x0:0,y0:0,w:1,h:1},2368225891:{k:"ObjStepIron_06",l:"Step Iron 06",g:4,x0:0,y0:0,w:1,h:1},2369969929:{k:"ObjShowerOutdoor",l:"Shower Outdoor",g:2,x0:0,y0:0,w:1,h:1},2373634532:{k:"ObjTrashCan_01",l:"Trash Can 01",g:2,x0:0,y0:0,w:1,h:1},2374677234:{k:"ObjTrashCan_03",l:"Trash Can 03",g:2,x0:0,y0:0,w:1,h:1},2388354172:{k:"ObjTreeElectric_02",l:"Tree Electric 02",g:2,x0:0,y0:0,w:1,h:1},2396271908:{k:"ObjFenceBarbed_01",l:"Fence Barbed 01",g:2,x0:0,y0:0,w:1,h:1},2428306673:{k:"ObjFenceStake_03",l:"Fence Stake 03",g:2,x0:0,y0:0,w:1,h:1},2429223335:{k:"ObjUgc08_00",l:"UGC item 08-00",g:5,x0:0,y0:0,w:1,h:1},2459334013:{k:"ObjFenceBarbed",l:"Fence Barbed",g:2,x0:0,y0:0,w:1,h:1},2464681042:{k:"ObjUgc14_02",l:"UGC item 14-02",g:5,x0:0,y0:0,w:1,h:1},2465216612:{k:"ObjThrone_02",l:"Throne 02",g:2,x0:0,y0:0,w:1,h:1},2477574256:{k:"ObjArchAir_05",l:"Arch Air 05",g:2,x0:0,y0:0,w:3,h:1},2478810755:{k:"ObjTableBench_01",l:"Table Bench 01",g:2,x0:0,y0:1,w:2,h:2},2483318495:{k:"ObjTableBench",l:"Table Bench",g:2,x0:0,y0:1,w:2,h:2},2493690188:{k:"ObjLanternSakura",l:"Lantern Sakura",g:2,x0:0,y0:0,w:1,h:1},2499405382:{k:"ObjUgc04_00",l:"UGC item 04-00",g:5,x0:0,y0:0,w:1,h:1},2510758471:{k:"ObjUgc10_01",l:"UGC item 10-01",g:5,x0:0,y0:0,w:1,h:1},2516209457:{k:"ObjClockTower_03",l:"Clock Tower 03",g:2,x0:0,y0:0,w:1,h:1},2523816503:{k:"ObjUgc03_00",l:"UGC item 03-00",g:5,x0:0,y0:0,w:1,h:1},2528596183:{k:"ObjFenceWood_02",l:"Fence Wood 02",g:2,x0:0,y0:0,w:1,h:1},2529223002:{k:"ObjGrandlight_03",l:"Grandlight 03",g:2,x0:0,y0:0,w:1,h:1},2536519975:{k:"ObjDrinkingFountain_01",l:"Drinking Fountain 01",g:2,x0:0,y0:0,w:1,h:1},2537026222:{k:"ObjTableBench_02",l:"Table Bench 02",g:2,x0:0,y0:1,w:2,h:2},2551713932:{k:"ObjTreeConiferous",l:"Tree Coniferous",g:2,x0:0,y0:0,w:1,h:1},2579553957:{k:"ObjAerogenerator_04",l:"Aerogenerator 04",g:2,x0:0,y0:0,w:1,h:1},2593732756:{k:"ObjGrandlight_05",l:"Grandlight 05",g:2,x0:0,y0:0,w:1,h:1},2614173144:{k:"ObjFireworksErupting_02",l:"Fireworks Erupting 02",g:2,x0:0,y0:0,w:1,h:1},2629432155:{k:"ObjFlowerCosmos_01",l:"Flower Cosmos 01",g:2,x0:0,y0:0,w:1,h:1},2654985329:{k:"ObjBeachParasol_02",l:"Beach Parasol 02",g:2,x0:0,y0:0,w:1,h:1},2668836949:{k:"ObjUgc12_00",l:"UGC item 12-00",g:5,x0:0,y0:0,w:1,h:1},2687315758:{k:"ObjSafetyCone_01",l:"Safety Cone 01",g:2,x0:0,y0:0,w:1,h:1},2706119446:{k:"ObjArchAir_02",l:"Arch Air 02",g:2,x0:0,y0:0,w:3,h:1},2724097940:{k:"HouseUgc10_01",l:"UGC house 10-01",g:5,x0:0,y0:0,w:1,h:1},2757042465:{k:"ObjFlowerAnemone_01",l:"Flower Anemone 01",g:2,x0:0,y0:0,w:1,h:1},2774027879:{k:"ObjLighthouse_01",l:"Lighthouse 01",g:2,x0:0,y0:0,w:2,h:2},2781634385:{k:"ObjStepWood_06",l:"Step Wood 06",g:4,x0:0,y0:0,w:1,h:1},2782947808:{k:"ObjArchAir",l:"Arch Air",g:2,x0:0,y0:0,w:3,h:1},2821162009:{k:"ObjBeachParasol_03",l:"Beach Parasol 03",g:2,x0:0,y0:0,w:1,h:1},2825860999:{k:"ObjPinwheel_01",l:"Pinwheel 01",g:2,x0:0,y0:0,w:1,h:1},2842617929:{k:"ObjSwingRider_06",l:"Swing Rider 06",g:2,x0:0,y0:0,w:1,h:1},2844178450:{k:"ObjDrinkingFountain_07",l:"Drinking Fountain 07",g:2,x0:0,y0:0,w:1,h:1},2860575475:{k:"ObjTrafficLight_05",l:"Traffic Light 05",g:2,x0:0,y0:0,w:1,h:1},2866294480:{k:"ObjBeachParasol_06",l:"Beach Parasol 06",g:2,x0:0,y0:0,w:1,h:1},2871387871:{k:"ObjSprinkler_01",l:"Sprinkler 01",g:2,x0:0,y0:0,w:1,h:1},2878165968:{k:"ObjLighthouse",l:"Lighthouse",g:2,x0:0,y0:0,w:2,h:2},2878543142:{k:"ObjStepWood_07",l:"Step Wood 07",g:4,x0:0,y0:0,w:1,h:1},2896602132:{k:"HouseUgc06_01",l:"UGC house 06-01",g:5,x0:0,y0:0,w:1,h:1},2898059670:{k:"ObjBeachBed_05",l:"Beach Bed 05",g:2,x0:0,y0:0,w:2,h:1},2898389404:{k:"ObjStepIron_07",l:"Step Iron 07",g:4,x0:0,y0:0,w:1,h:1},2939536350:{k:"ObjTableBench_06",l:"Table Bench 06",g:2,x0:0,y0:1,w:2,h:2},2959627971:{k:"ObjBenchHome_01",l:"Bench Home 01",g:2,x0:0,y0:0,w:2,h:1},2963661317:{k:"ObjFencePipe_02",l:"Fence Pipe 02",g:2,x0:0,y0:0,w:1,h:1},2975531685:{k:"ObjShowerOutdoor_01",l:"Shower Outdoor 01",g:2,x0:0,y0:0,w:1,h:1},2999441935:{k:"HouseUgc02_02",l:"UGC house 02-02",g:5,x0:0,y0:0,w:1,h:1},3005639485:{k:"ObjTrafficLight_06",l:"Traffic Light 06",g:2,x0:0,y0:0,w:1,h:1},3007108676:{k:"ObjStreetLamp_02",l:"Street Lamp 02",g:2,x0:0,y0:0,w:1,h:1},3018711323:{k:"ObjTrafficLight_02",l:"Traffic Light 02",g:2,x0:0,y0:0,w:1,h:1},3018886823:{k:"FacilityAtelier",l:"Atelier",g:1,x0:-1,y0:-1,w:4,h:4},3033682560:{k:"ObjBenchPark_05",l:"Bench Park 05",g:2,x0:0,y0:0,w:2,h:1},3037496341:{k:"ObjFenceBarbed_05",l:"Fence Barbed 05",g:2,x0:0,y0:0,w:1,h:1},3040259869:{k:"ObjFenceWood_05",l:"Fence Wood 05",g:2,x0:0,y0:0,w:1,h:1},3050352553:{k:"FacilityPark",l:"Park",g:1,x0:0,y0:0,w:6,h:10},3064429186:{k:"ObjFlowerAnemone_02",l:"Flower Anemone 02",g:2,x0:0,y0:0,w:1,h:1},3073446218:{k:"ObjDrinkingFountain_06",l:"Drinking Fountain 06",g:2,x0:0,y0:0,w:1,h:1},3073932996:{k:"ObjJackOLantern_01",l:"Jack OLantern 01",g:2,x0:0,y0:0,w:2,h:1},3100096344:{k:"ObjTreeElectric_01",l:"Tree Electric 01",g:2,x0:0,y0:0,w:1,h:1},3152964083:{k:"ObjShowerOutdoor_04",l:"Shower Outdoor 04",g:2,x0:0,y0:0,w:1,h:1},3159909495:{k:"ObjFlowerpot",l:"Flowerpot",g:2,x0:0,y0:0,w:1,h:1},3163171382:{k:"ObjUgc02_01",l:"UGC item 02-01",g:5,x0:0,y0:0,w:1,h:1},3169888299:{k:"ObjBell_02",l:"Bell 02",g:2,x0:0,y0:0,w:1,h:1},3173699010:{k:"ObjFenceIron_02",l:"Fence Iron 02",g:2,x0:0,y0:0,w:1,h:1},3184946612:{k:"ObjPinwheel_04",l:"Pinwheel 04",g:2,x0:0,y0:0,w:1,h:1},3192150062:{k:"ObjUgc01_00",l:"UGC item 01-00",g:5,x0:0,y0:0,w:1,h:1},3197048161:{k:"ObjUgc02_02",l:"UGC item 02-02",g:5,x0:0,y0:0,w:1,h:1},3210000261:{k:"ObjGrandlight_07",l:"Grandlight 07",g:2,x0:0,y0:0,w:1,h:1},3211945535:{k:"ObjBenchTerrace_03",l:"Bench Terrace 03",g:2,x0:0,y0:0,w:2,h:1},3264012957:{k:"ObjFlowerNarcissus",l:"Flower Narcissus",g:2,x0:0,y0:0,w:1,h:1},3270707229:{k:"ObjBeachParasol_04",l:"Beach Parasol 04",g:2,x0:0,y0:0,w:1,h:1},3286831482:{k:"ObjBonfire_04",l:"Bonfire 04",g:2,x0:0,y0:0,w:1,h:1},3290173571:{k:"ObjShowerOutdoor_03",l:"Shower Outdoor 03",g:2,x0:0,y0:0,w:1,h:1},3303494031:{k:"ObjBeachParasol_05",l:"Beach Parasol 05",g:2,x0:0,y0:0,w:1,h:1},3304823802:{k:"ObjBenchHome_03",l:"Bench Home 03",g:2,x0:0,y0:0,w:2,h:1},3310782891:{k:"ObjTrashCan_04",l:"Trash Can 04",g:2,x0:0,y0:0,w:1,h:1},3316023673:{k:"ObjStreetLamp_01",l:"Street Lamp 01",g:2,x0:0,y0:0,w:1,h:1},3323976992:{k:"ObjGrandlight_06",l:"Grandlight 06",g:2,x0:0,y0:0,w:1,h:1},3324124643:{k:"ObjArchAir_06",l:"Arch Air 06",g:2,x0:0,y0:0,w:3,h:1},3335501077:{k:"ObjFencePipe",l:"Fence Pipe",g:2,x0:0,y0:0,w:1,h:1},3345491137:{k:"ObjTrafficLight_01",l:"Traffic Light 01",g:2,x0:0,y0:0,w:1,h:1},3345628502:{k:"ObjAerogenerator_01",l:"Aerogenerator 01",g:2,x0:0,y0:0,w:1,h:1},3369108085:{k:"ObjBeachBed_02",l:"Beach Bed 02",g:2,x0:0,y0:0,w:2,h:1},3370951053:{k:"ObjBenchTerrace_06",l:"Bench Terrace 06",g:2,x0:0,y0:0,w:2,h:1},3373056939:{k:"ObjAerogenerator",l:"Aerogenerator",g:2,x0:0,y0:0,w:1,h:1},3373915832:{k:"ObjFencePipe_07",l:"Fence Pipe 07",g:2,x0:0,y0:0,w:1,h:1},3374398909:{k:"ObjBonfire",l:"Bonfire",g:2,x0:0,y0:0,w:1,h:1},3378305717:{k:"ObjFenceStake_04",l:"Fence Stake 04",g:2,x0:0,y0:0,w:1,h:1},3386909679:{k:"ObjSeesaw",l:"Seesaw",g:2,x0:0,y0:0,w:2,h:1},3393226563:{k:"ObjSnowman_02",l:"Snowman 02",g:2,x0:0,y0:0,w:1,h:1},3396441638:{k:"ObjTreeElectric_03",l:"Tree Electric 03",g:2,x0:0,y0:0,w:1,h:1},3409750561:{k:"ObjPinwheel_02",l:"Pinwheel 02",g:2,x0:0,y0:0,w:1,h:1},3414254725:{k:"ObjFenceWood_07",l:"Fence Wood 07",g:2,x0:0,y0:0,w:1,h:1},3414451855:{k:"FacilityBuildingShop",l:"Building Shop",g:1,x0:-1,y0:-1,w:4,h:4},3436664130:{k:"HouseUgc03_01",l:"UGC house 03-01",g:5,x0:0,y0:0,w:1,h:1},3457538448:{k:"ObjBenchHome_06",l:"Bench Home 06",g:2,x0:0,y0:0,w:2,h:1},3458061592:{k:"ObjFlowerpot_06",l:"Flowerpot 06",g:2,x0:0,y0:0,w:1,h:1},3470333089:{k:"ObjUgc09_00",l:"UGC item 09-00",g:5,x0:0,y0:0,w:1,h:1},3470474515:{k:"ObjVendingMachine_03",l:"Vending Machine 03",g:2,x0:0,y0:0,w:1,h:1},3504031921:{k:"ObjLanternSakura_04",l:"Lantern Sakura 04",g:2,x0:0,y0:0,w:1,h:1},3510406896:{k:"ObjShowerOutdoor_07",l:"Shower Outdoor 07",g:2,x0:0,y0:0,w:1,h:1},3514859617:{k:"ObjSafetyCone_04",l:"Safety Cone 04",g:2,x0:0,y0:0,w:1,h:1},3537877371:{k:"ObjTrafficLight_03",l:"Traffic Light 03",g:2,x0:0,y0:0,w:1,h:1},3544460531:{k:"ObjSprinkler",l:"Sprinkler",g:2,x0:0,y0:0,w:1,h:1},3545428145:{k:"ObjRoadSign_01",l:"Road Sign 01",g:2,x0:0,y0:0,w:1,h:1},3573368707:{k:"HouseUgc08_01",l:"UGC house 08-01",g:5,x0:0,y0:0,w:1,h:1},3583871116:{k:"ObjSnowman_03",l:"Snowman 03",g:2,x0:0,y0:0,w:1,h:1},3597730914:{k:"ObjFenceLattice_06",l:"Fence Lattice 06",g:2,x0:0,y0:0,w:1,h:1},3619145577:{k:"HouseUgc02_01",l:"UGC house 02-01",g:5,x0:0,y0:0,w:1,h:1},3624301968:{k:"ObjFlowerpot_02",l:"Flowerpot 02",g:2,x0:0,y0:0,w:1,h:1},3626053408:{k:"ObjUgc01_01",l:"UGC item 01-01",g:5,x0:0,y0:0,w:1,h:1},3637821916:{k:"ObjBeachBed_03",l:"Beach Bed 03",g:2,x0:0,y0:0,w:2,h:1},3648443616:{k:"ObjStepWood_04",l:"Step Wood 04",g:4,x0:0,y0:0,w:1,h:1},3648818393:{k:"ObjTreeElectric_07",l:"Tree Electric 07",g:2,x0:0,y0:0,w:1,h:1},3654500377:{k:"ObjSeesaw_03",l:"Seesaw 03",g:2,x0:0,y0:0,w:2,h:1},3656109814:{k:"ObjStepWood_03",l:"Step Wood 03",g:4,x0:0,y0:0,w:1,h:1},3667717458:{k:"ObjFenceStake",l:"Fence Stake",g:2,x0:0,y0:0,w:1,h:1},3677459484:{k:"ObjBenchHome_07",l:"Bench Home 07",g:2,x0:0,y0:0,w:2,h:1},3680329683:{k:"ObjUgc15_00",l:"UGC item 15-00",g:5,x0:0,y0:0,w:1,h:1},3698309902:{k:"ObjJackOLantern_06",l:"Jack OLantern 06",g:2,x0:0,y0:0,w:2,h:1},3702358591:{k:"ObjSafetyCone_03",l:"Safety Cone 03",g:2,x0:0,y0:0,w:1,h:1},3708486923:{k:"ObjThrone",l:"Throne",g:2,x0:0,y0:0,w:1,h:1},3714190189:{k:"ObjUgc06_01",l:"UGC item 06-01",g:5,x0:0,y0:0,w:1,h:1},3733972699:{k:"HouseUgc11_01",l:"UGC house 11-01",g:5,x0:0,y0:0,w:1,h:1},3747080599:{k:"ObjStreetLampRetro_06",l:"Street Lamp Retro 06",g:2,x0:0,y0:0,w:1,h:1},3756768570:{k:"ObjSafetyCone_02",l:"Safety Cone 02",g:2,x0:0,y0:0,w:1,h:1},3762194734:{k:"ObjFenceWood_06",l:"Fence Wood 06",g:2,x0:0,y0:0,w:1,h:1},3763313522:{k:"ObjClockTower_01",l:"Clock Tower 01",g:2,x0:0,y0:0,w:1,h:1},3792846558:{k:"ObjBenchPark_02",l:"Bench Park 02",g:2,x0:0,y0:0,w:2,h:1},3793508587:{k:"ObjFlowerNemophila",l:"Flower Nemophila",g:2,x0:0,y0:0,w:1,h:1},3811338528:{k:"HouseUgc15_00",l:"UGC house 15-00",g:5,x0:0,y0:0,w:1,h:1},3823445259:{k:"ObjFenceChain",l:"Fence Chain",g:2,x0:0,y0:0,w:1,h:1},3823918136:{k:"HouseDollHouse",l:"Doll House",g:0,x0:-2,y0:-1,w:6,h:4},3826007578:{k:"ObjAerogenerator_02",l:"Aerogenerator 02",g:2,x0:0,y0:0,w:1,h:1},3829411274:{k:"ObjPinwheel_03",l:"Pinwheel 03",g:2,x0:0,y0:0,w:1,h:1},3831990017:{k:"ObjBenchHome_05",l:"Bench Home 05",g:2,x0:0,y0:0,w:2,h:1},3835742909:{k:"ObjFenceLattice_07",l:"Fence Lattice 07",g:2,x0:0,y0:0,w:1,h:1},3840247168:{k:"ObjStepWood_05",l:"Step Wood 05",g:4,x0:0,y0:0,w:1,h:1},3848255868:{k:"ObjFenceIron_06",l:"Fence Iron 06",g:2,x0:0,y0:0,w:1,h:1},3854794544:{k:"ObjGrandlight",l:"Grandlight",g:2,x0:0,y0:0,w:1,h:1},3856305431:{k:"ObjRock_01",l:"Rock 01",g:2,x0:0,y0:0,w:1,h:1},3863714471:{k:"ObjClockTower_05",l:"Clock Tower 05",g:2,x0:0,y0:0,w:1,h:1},3884459661:{k:"ObjFenceLattice_03",l:"Fence Lattice 03",g:2,x0:0,y0:0,w:1,h:1},3894961180:{k:"ObjFlowerSunflowers",l:"Flower Sunflowers",g:2,x0:0,y0:0,w:1,h:1},3895877689:{k:"ObjBenchPark_06",l:"Bench Park 06",g:2,x0:0,y0:0,w:2,h:1},3905073081:{k:"ObjBenchTerrace_04",l:"Bench Terrace 04",g:2,x0:0,y0:0,w:2,h:1},3924672246:{k:"ObjShowerOutdoor_02",l:"Shower Outdoor 02",g:2,x0:0,y0:0,w:1,h:1},3927195293:{k:"ObjVendingMachine_05",l:"Vending Machine 05",g:2,x0:0,y0:0,w:1,h:1},3937845268:{k:"ObjPinwheel",l:"Pinwheel",g:2,x0:0,y0:0,w:1,h:1},3940415376:{k:"ObjFenceStake_06",l:"Fence Stake 06",g:2,x0:0,y0:0,w:1,h:1},3950725454:{k:"ObjBell_06",l:"Bell 06",g:2,x0:0,y0:0,w:1,h:1},3953975819:{k:"ObjLanternSakura_05",l:"Lantern Sakura 05",g:2,x0:0,y0:0,w:1,h:1},3961792497:{k:"ObjStepIron_05",l:"Step Iron 05",g:4,x0:0,y0:0,w:1,h:1},3966423151:{k:"ObjPinwheel_06",l:"Pinwheel 06",g:2,x0:0,y0:0,w:1,h:1},3983048478:{k:"ObjFenceLattice_02",l:"Fence Lattice 02",g:2,x0:0,y0:0,w:1,h:1},3990298880:{k:"ObjStepWood_02",l:"Step Wood 02",g:4,x0:0,y0:0,w:1,h:1},4000969252:{k:"ObjFireworksAerial_02",l:"Fireworks Aerial 02",g:2,x0:0,y0:0,w:1,h:1},4013325018:{k:"HouseOneRoom",l:"One Room",g:0,x0:-1,y0:-1,w:3,h:4},4015424557:{k:"ObjStreetLampRetro_03",l:"Street Lamp Retro 03",g:2,x0:0,y0:0,w:1,h:1},4019854785:{k:"ObjFenceLattice",l:"Fence Lattice",g:2,x0:0,y0:0,w:1,h:1},4020465897:{k:"ObjFlowerCosmos",l:"Flower Cosmos",g:2,x0:0,y0:0,w:1,h:1},4026788288:{k:"FacilityPawnShop",l:"Pawn Shop",g:1,x0:-1,y0:-1,w:4,h:4},4030067326:{k:"ObjUgc04_01",l:"UGC item 04-01",g:5,x0:0,y0:0,w:1,h:1},4031093034:{k:"ObjJackOLantern_07",l:"Jack OLantern 07",g:2,x0:0,y0:0,w:2,h:1},4035110090:{k:"ObjBeachParasol",l:"Beach Parasol",g:2,x0:0,y0:0,w:1,h:1},4048367207:{k:"HouseUgc13_00",l:"UGC house 13-00",g:5,x0:0,y0:0,w:1,h:1},4068399679:{k:"ObjFenceWood",l:"Fence Wood",g:2,x0:0,y0:0,w:1,h:1},4070299352:{k:"ObjStepStone",l:"Step Stone",g:4,x0:0,y0:0,w:1,h:1},4077706731:{k:"ObjUgc13_00",l:"UGC item 13-00",g:5,x0:0,y0:0,w:1,h:1},4105215049:{k:"ObjClockTower",l:"Clock Tower",g:2,x0:0,y0:0,w:1,h:1},4110075409:{k:"ObjSignboardTutorial_01",l:"Signboard Tutorial 01",g:2,x0:0,y0:0,w:4,h:5},4114125466:{k:"ObjStepIron_01",l:"Step Iron 01",g:4,x0:0,y0:0,w:1,h:1},4117785034:{k:"ObjStreetLampRetro",l:"Street Lamp Retro",g:2,x0:0,y0:0,w:1,h:1},4118782885:{k:"ObjClockTower_04",l:"Clock Tower 04",g:2,x0:0,y0:0,w:1,h:1},4121477381:{k:"ObjFenceIron",l:"Fence Iron",g:2,x0:0,y0:0,w:1,h:1},4127405198:{k:"ObjTrashCan_06",l:"Trash Can 06",g:2,x0:0,y0:0,w:1,h:1},4137214859:{k:"ObjFlowerAnemone",l:"Flower Anemone",g:2,x0:0,y0:0,w:1,h:1},4142699085:{k:"ObjFenceChain_01",l:"Fence Chain 01",g:2,x0:0,y0:0,w:1,h:1},4150774062:{k:"ObjFenceIron_01",l:"Fence Iron 01",g:2,x0:0,y0:0,w:1,h:1},4172080327:{k:"ObjBenchPark_04",l:"Bench Park 04",g:2,x0:0,y0:0,w:2,h:1},4192853248:{k:"ObjThrone_06",l:"Throne 06",g:2,x0:0,y0:0,w:1,h:1},4212321839:{k:"ObjClockTower_02",l:"Clock Tower 02",g:2,x0:0,y0:0,w:1,h:1},4241043812:{k:"ObjFenceGuardpipe_01",l:"Fence Guardpipe 01",g:2,x0:0,y0:0,w:2,h:1},4245474169:{k:"ObjLighthouse_03",l:"Lighthouse 03",g:2,x0:0,y0:0,w:2,h:2},4251387480:{k:"ObjSafetyCone_06",l:"Safety Cone 06",g:2,x0:0,y0:0,w:1,h:1},4252123315:{k:"ObjFenceWood_04",l:"Fence Wood 04",g:2,x0:0,y0:0,w:1,h:1},4259114738:{k:"ObjUgc06_02",l:"UGC item 06-02",g:5,x0:0,y0:0,w:1,h:1},4266011679:{k:"ObjDrinkingFountain_03",l:"Drinking Fountain 03",g:2,x0:0,y0:0,w:1,h:1},4272962507:{k:"ObjGuardrail",l:"Guardrail",g:2,x0:0,y0:0,w:2,h:1},4274830798:{k:"ObjFenceBarbed_07",l:"Fence Barbed 07",g:2,x0:0,y0:0,w:1,h:1},4290699592:{k:"ObjSeesaw_01",l:"Seesaw 01",g:2,x0:0,y0:0,w:2,h:1}};
+const MAP_ACTOR_GROUPS=['house','facility','deco','room','step','ugc','unknown'];
+// ── MapData JS end ──────────────────────────────────────────────────────────────
+// ── ltdimages.png lookup (auto-generated by tools/gen_ltdimg.py from
+//    ltdimages_mapping.json). Maps friendly item labels to asset roots in
+//    github.com/ltdimages/images. Append "_NN.png" for a specific color
+//    variant, or "_00.png" for the default thumbnail. ─────────────────────
+const LTD_CLOTH_IMG={"3D glasses":"ClothHeadwearGlassThreeD","5-panel cap":"ClothHeadwearHatJet","ABC pants":"ClothBottomsPantsLongAbc","ABC sweatshirt":"ClothTopsOuterLongAbc","Aran skirt":"ClothBottomsSkirtBoxKnit","Aran sweater":"ClothTopsOuterLongAran","B-3 jacket":"ClothTopsYshirtLongB3","Catrina dress":"ClothTopslongDressHalfKatrina","Cossack hat":"ClothHeadwearHatCossack","Cowichan sweater":"ClothTopsOuterLongCowichan","DSLR camera":"ClothAccessoryNeckCamera","Daruma suit":"ClothAllCostumeLongDaruma","Gobelin skirt":"ClothBottomsSkirtMiniGobelin","Japanese bathroom sandals":"ClothShoesSandalBathroom","Japanese hair ornament":"ClothHeadwearOrnamentSideWakazari","Japanese mesh cap":"ClothHeadwearHatJapan","Japanese sandals":"ClothShoesSandalZori","Japanese-pattern pants":"ClothBottomsPantsLongWagara","Korean flower shoes":"ClothShoesPumpsKkotshin","Nordic socks":"ClothSocksNordic","Nordic sweater":"ClothTopsOuterLongNordicSweater","Panama hat":"ClothHeadwearHatPanama","Santa boots":"ClothShoesBootsLongSanta","Santa coat":"ClothTopsCoatLongSanta","Santa dress":"ClothTopslongAlineLongSanta","Santa hat":"ClothHeadwearHatSanta","Santa pants":"ClothBottomsPantsLongSanta","TV mask":"ClothHeadwearFullfaceTelevision","Tyrolean dress":"ClothTopslongDressHalfAlpinist","Tyrolean hat":"ClothHeadwearHatTyrolean","Tyrolean lederhosen":"ClothTopslongOverallLongAlpinist","UFO suit":"ClothAllUfoAlien","V-neck sweater":"ClothTopsTshirtLongVneck","V-neck tee":"ClothTopsTshirtHalfVneck","VR headset":"ClothHeadwearGlassHMD","Viking clothes":"ClothTopsMantleLongViking","Viking hat":"ClothHeadwearHatViking","accent-lines polo shirt":"ClothTopsYshirtHalfLinePolo","accented socks":"ClothSocksOnePoint","accordion skirt":"ClothBottomsSkirtLongAccordion","acorn knit hat":"ClothHeadwearHatAcorn","aerobics leotard":"ClothTopslongOverallSleevelessAerobics","angel halo":"ClothHeadwearOrnamentTopAngel","angel wings":"ClothAccessoryBackAngel","animal badge":"ClothAccessoryChestBadgeAnimal","animal mask":"ClothHeadwearMaskAnimal","animal shoes":"ClothShoesAnimalAnimalSlipper","animal-print blouson":"ClothTopsOuterLongAnimalBlouson","animal-print graphic tee":"ClothTopsTshirtHalfAnimal","ankle socks":"ClothSocksShort","anorak jacket":"ClothTopsOuterLongAnorak","antique boots":"ClothShoesBootsLongAntique","antique brooch":"ClothAccessoryChestAntique","ao dai":"ClothTopslongBoxDressLongAodai","ao gam":"ClothTopsCoatLongAogam","apple hat":"ClothHeadwearHatApple","apron":"ClothTopsCoatLongApron","argyle socks":"ClothSocksArgyle","argyle vest":"ClothTopsYshirtLongArgyleVest","aristocratic clothes":"ClothTopsCoatLongNoble","aristocratic dress":"ClothTopslongDressLongNoble","aristocratic pants":"ClothBottomsBloomersNoble","astronaut helmet":"ClothHeadwearFullfaceAstronaut","astronaut suit":"ClothAllMascotLongAstronaut","asymmetric coat":"ClothTopsCoatLongAsymmetry","avocado suit":"ClothAllCostumeLongAvocado","axe":"ClothAccessoryBackAxe","baby bonnet":"ClothHeadwearCostumeBaby","baby snapsuit":"ClothAllBodySuitLongBaby","back-ribbon socks":"ClothSocksBackRibbon","backward beret":"ClothHeadwearHatBackHunting","backward cap":"ClothHeadwearHatBackCap","baggy jeans":"ClothBottomsPantsWideBaggy","baggy striped long-sleeve tee":"ClothTopsCoatLongBorder","baji jeogori":"ClothTopslongOverallLongBajiJeogori","ballet dress":"ClothTopslongDressSleevelessBallet","ballet shoes":"ClothShoesSandalBallet","ballet suit":"ClothAllBodySuitLongBallet","balmacaan coat":"ClothTopsCoatLongSoutienCollar","bandanna":"ClothHeadwearHatBandana","bandanna tube top":"ClothTopsBandana","baseball attire":"ClothTopslongOverallLongBaseball","baseball cap":"ClothHeadwearHatBaseball","baseball shirt":"ClothTopsTshirtHalfBaseball","basic 5-panel cap":"ClothHeadwearHatJetSimple","basic bandanna":"ClothHeadwearHatTowel","basic camisole":"ClothTopsTshirtSleevelessSimpleCamisole","basic cap":"ClothHeadwearHatSimpleCap","basic dress":"ClothTopslongAlineHalfLinen","basic dress shirt":"ClothTopsYshirtLongSimple","basic hood":"ClothHeadwearCostumeHood","basic knee-highs":"ClothSocksKneeSocks","basic knit beanie":"ClothHeadwearHatSimpleKnit","basic leggings":"ClothSocksLeggings","basic long-sleeve tee":"ClothTopsTshirtLongSimple","basic mask":"ClothHeadwearMaskPlain","basic pullover hoodie":"ClothTopsOuterLongParka","basic pumps":"ClothShoesPumpsSimple","basic scarf":"ClothAccessoryMufflerSimple","basic short-sleeve dress shirt":"ClothTopsYshirtHalfSimple","basic shorts":"ClothBottomsPantsWideSimpleHalf","basic sneakers":"ClothShoesSneakerSimple","basic sweatshirt":"ClothTopsOuterLongSimpleSweater","basic tee":"ClothTopsTshirtHalfSimple","basic turtleneck":"ClothTopsYshirtLongHighNeck","basic vest":"ClothTopsYshirtLongSimpleVest","basic wide-leg pants":"ClothBottomsPantsWideSimple","basketball shorts":"ClothBottomsPantsWideBasketball","basketball tank top":"ClothTopsTshirtSleevelessBasketball","bath towel":"ClothTopslongBoxDressSleevelessBathTowel","bathrobe":"ClothTopslongBoxDressLongBathrobe","batting helmet":"ClothHeadwearProtectorBatter","bead necklace":"ClothAccessoryNeckAcrylic","beaded slip-ons":"ClothShoesSandalBeads","beanie":"ClothHeadwearHatKnit","bear backpack":"ClothAccessoryBagBear","bear hood":"ClothHeadwearCostumeBear","bear slippers":"ClothShoesSandalBear","bear suit":"ClothAllMascotLongBear","bear tail":"ClothAccessoryWaistBear","bear-ear beanie":"ClothHeadwearHatBear","bee hat":"ClothHeadwearHatBee","bee stinger":"ClothAccessoryWaistBee","bee suit":"ClothAllCostumeLongBee","bee wings":"ClothAccessoryBackBee","belted coat":"ClothTopslongBoxDressLongBubbly","belted gingham dress":"ClothTopslongAlongHalfCheck","beret":"ClothHeadwearHatBeret","big lace ribbon":"ClothHeadwearOrnamentFrontLolita","big ribbon":"ClothHeadwearOrnamentFrontBigRibbon","big-number jersey":"ClothTopsTshirtHalfBigNumber","bijou necklace":"ClothAccessoryNeckBijou","bijou sandals":"ClothShoesSandalBijoux","bike helmet":"ClothHeadwearHatBicycle","biker jacket":"ClothTopsTshirtLongRiders","biker's leathers":"ClothTopslongOverallLongRiderSuit","bikini bottoms":"ClothBottomsBodyBaseBikini","bikini top":"ClothTopsBodyBaseBikini","bird brooch":"ClothAccessoryChestBird","bird hood":"ClothHeadwearCostumeBird","bird suit":"ClothAllCostumeLongBird","bird's-nest hat":"ClothHeadwearOrnamentFrontNest","birthday hat":"ClothHeadwearHatBirthday","blazer with bow":"ClothTopsYshirtLongBlazerRibbon","blazer with necktie":"ClothTopsYshirtLongBlazerTie","block-checkered socks":"ClothSocksBlockCheck","blouse with bow":"ClothTopsYshirtLongBowtieBlouse","boa-fleece jacket":"ClothTopsOuterLongBoaFleece","board shorts":"ClothBottomsPantsWideSurf","boat shoes":"ClothShoesStandardDeck","bodysuit":"ClothAllBodySuitLongBodySuit","bodysuit cap":"ClothHeadwearCoverBodySuit","bolo tie":"ClothAccessoryNeckLoopTie","bomber jacket":"ClothTopsOuterLongMA1","border pants":"ClothBottomsPantsLongBorder","botanical-print board shorts":"ClothBottomsPantsWideBotanical","botanical-print outdoor hat":"ClothHeadwearHatOutdoorBotanical","botanical-print skirt":"ClothBottomsSkirtBoxBotanical","botanical-print slip-ons":"ClothShoesStandardBotanicalSlipon","boutonniere":"ClothAccessoryChestBoutonniere","bow":"ClothAccessoryBackBow","bow tie":"ClothAccessoryNeckBowTie","bow-tie boots":"ClothShoesBootsShortRibbon","bow-tie pumps":"ClothShoesPumpsRibbon","bow-tie sandals":"ClothShoesSandalRibbon","bow-tie strappy pumps":"ClothShoesMuleRibbon","bowler hat":"ClothHeadwearHatBowler","box-logo tee":"ClothTopsTshirtHalfBoxLogo","boxing trunks":"ClothBottomsPantsWideBoxing","bright cap":"ClothHeadwearHatColorCap","bright sneakers":"ClothShoesSneakerHighTec","bright-bead necklace":"ClothAccessoryNeckColorBeads","brimmed woolly hat":"ClothHeadwearHatKnitCap","bubble-tea suit":"ClothAllCupLongTapioca","bucket hat":"ClothHeadwearHatBucket","buckle loafers":"ClothShoesLoaferBuckle","bug antennae":"ClothHeadwearOrnamentTopInsect","building suit":"ClothAllBoxLongBuilding","bunny ears":"ClothHeadwearOrnamentFrontBunny","bunny tail":"ClothAccessoryWaistRabbit","bunny-ear ribbon":"ClothHeadwearOrnamentFrontRabbitRibbon","business shoes":"ClothShoesPointedBusiness","business-suit jacket":"ClothTopsTshirtLongOffice","business-suit jacket and tie":"ClothTopsYshirtLongSuit","butterfly backpack":"ClothAccessoryBagButterfly","butterfly hair clip":"ClothHeadwearOrnamentSideButterfly","butterfly wings":"ClothAccessoryBackButterfly","button-up skirt":"ClothBottomsSkirtBoxFrontButton","cake suit":"ClothAllCylinderLongCake","cameo brooch":"ClothAccessoryChestCameo","camisole dress":"ClothTopslongBoxDressHalfCamisole","camisole-layered tee":"ClothTopsTshirtHalfCamisoleTshirt","camo cap":"ClothHeadwearHatCamouflage","camo jacket":"ClothTopsOuterLongCamouflage","camo shorts":"ClothBottomsPantsWideCamouflage","camo skirt":"ClothBottomsSkirtBoxCamouflage","cap with badges":"ClothHeadwearHatBadgesCap","capri pants":"ClothBottomsPantsLongCapri","car suit":"ClothAllCarLongCar","cardboard-box mask":"ClothHeadwearFullfaceCardboard","cardboard-box suit":"ClothAllBoxLongCardboard","cardboard-robot suit":"ClothAllBoxLongCardboardRobot","cargo pants":"ClothBottomsPantsWideCargo","cargo shorts":"ClothBottomsPantsWideCargoHalf","casual coveralls":"ClothTopslongSalopetteLongCasual","casual kimono":"ClothTopslongKimonoLongKinagashi","cat hood":"ClothHeadwearCostumeCat","cat knee-highs":"ClothSocksCat","cat suit":"ClothAllMascotLongCat","cat tail":"ClothAccessoryWaistCat","cat-ear cap":"ClothHeadwearHatCatCap","cat-ear knit hat":"ClothHeadwearHatKnitCat","catcher attire":"ClothTopslongOverallLongCatcher","catcher's mask":"ClothHeadwearCoverCatcher","caterpillar suit":"ClothAllCostumeLongCaterpillar","caveman attire":"ClothTopslongBoxDressSleevelessCaveman","celestial lights":"ClothAccessoryBackLight","chain":"ClothAccessoryNeckChain","chain cargo pants":"ClothBottomsPantsWideChain","charro suit":"ClothTopslongOverallLongMariachi","checkered ankle socks":"ClothSocksCheckShort","checkered beret":"ClothHeadwearHatBeretCheck","checkered cargo pants":"ClothBottomsPantsWideCheckCargo","checkered pencil skirt":"ClothBottomsSkirtBoxCheck","checkered scarf":"ClothAccessoryMufflerCheck","checkered shorts":"ClothBottomsPantsWideCheckHalf","checkered slacks":"ClothBottomsPantsLongSlacksCheck","checkered wide-leg pants":"ClothBottomsPantsWideCheck","checkered-hem pants":"ClothBottomsPantsLongRollUp","cheerleader attire":"ClothTopslongAlineSleevelessCheer","chef clothing":"ClothTopsCoatLongCook","chef hat":"ClothHeadwearHatCook","cheongsam":"ClothTopslongBoxDressLongChangshan","chicken hood":"ClothHeadwearCostumeHen","chicken suit":"ClothAllCostumeLongHen","chicken tail":"ClothAccessoryWaistHen","children's hat":"ClothHeadwearHatSchool","chima jeogori":"ClothTopslongAlongLongChimaJeogori","china poblana":"ClothTopslongDressHalfChinaPoblana","chino pants":"ClothBottomsPantsLongChino","chino shorts":"ClothBottomsPantsLongChinoHalf","chiton dress":"ClothTopslongBoxDressSleevelessAncient","city backpack":"ClothAccessoryBagTown","classic-maid attire":"ClothTopslongDressLongMaid","classical dress":"ClothTopslongAlongLongClassical","cleats":"ClothShoesSneakerSpike","cloche hat":"ClothHeadwearHatCloche","clown mask":"ClothHeadwearMaskPierrot","coach jacket":"ClothTopsYshirtLongCoachJacket","coat dress":"ClothTopslongAlineLongCoatDress","coin slot":"ClothAccessoryBackCoin","collarless button-down":"ClothTopsYshirtLongBandCollar","collarless coat":"ClothTopsCoatLongNocollar","color-blocked tee":"ClothTopsTshirtHalfSwitching","colored tights":"ClothSocksTightsColor","colorful dress":"ClothTopslongDressSleevelessColor","colorful pants":"ClothBottomsPantsLongSimpleColor","combat cap":"ClothHeadwearHatWork","comfy backless sandals":"ClothShoesSandalComfort","compression shirt":"ClothTopsCompression","conical hat":"ClothHeadwearHatKasa","corduroy cap":"ClothHeadwearHatCorduroy","corduroy jacket":"ClothTopsYshirtLongCorduroy","corduroy pants":"ClothBottomsPantsWideCorduroy","corncob suit":"ClothAllCylinderLongCorn","cosmic antennae":"ClothHeadwearOrnamentTopAntenna","coveralls":"ClothTopslongOverallLongOverall","cow hood":"ClothHeadwearCostumeCow","cow suit":"ClothAllCostumeLongCow","cow tail":"ClothAccessoryWaistCow","crab hood":"ClothHeadwearCostumeCrab","crazy-color shirt":"ClothTopsYshirtLongMultiColor","cropped knit camisole":"ClothTopsKnitCamisole","cropped pants":"ClothBottomsPantsLongCropped","cropped tank top":"ClothTopsCroppedTankTop","cropped tee":"ClothTopsCroppedTee","cropped wide-leg pants":"ClothBottomsPantsWideCropped","crossed hairpins":"ClothHeadwearOrnamentSidePinCross","crow mask":"ClothHeadwearMaskCrow","crown":"ClothHeadwearHatCrown","cute badge":"ClothAccessoryChestBadgeCute","cyberpunk helmet":"ClothHeadwearFullfaceCyber","cyberpunk suit":"ClothAllMascotLongCyber","cyberpunk sunglasses":"ClothHeadwearGlassCyber","cyberpunk wings":"ClothAccessoryBackCyberWing","cycling attire":"ClothTopslongOverallHalfBicycle","daisy hairpin":"ClothHeadwearOrnamentSideDaisy","decorative hair clip":"ClothHeadwearOrnamentSideBijou","denim dress":"ClothTopslongAlineHalfJumperSkirt","denim jacket":"ClothTopsYshirtLongDenim","denim maxi skirt":"ClothBottomsSkirtLongDenimMaxi","denim miniskirt":"ClothBottomsSkirtMiniDenimMini","denim pencil skirt":"ClothBottomsSkirtBoxDenim","detective hat":"ClothHeadwearHatDetectives","devil hood":"ClothHeadwearCostumeDevil","devil suit":"ClothAllBodySuitLongDevil","devil tail":"ClothAccessoryWaistDevil","devil wings":"ClothAccessoryBackDevil","diner hat":"ClothHeadwearHatDiner","dinosaur backpack":"ClothAccessoryBagDinosaur","dinosaur hood":"ClothHeadwearCostumeDinosaur","dinosaur pants":"ClothBottomsPantsLongDinosaur","dinosaur suit":"ClothAllMonsterLongDinosaur","dinosaur tail":"ClothAccessoryWaistDinosaur","disco jumpsuit":"ClothTopslongSalopetteLongDisco","disco-star jumpsuit":"ClothTopslongSalopetteLongStar","display-only sunglasses":"ClothAccessoryNeckSunglasses","disposable diaper":"ClothBottomsDiaper","distressed sweater":"ClothTopsOuterLongDamaged","distressed tights":"ClothSocksDamage","diving helmet":"ClothHeadwearFullfaceDivingHelmet","diving suit":"ClothAllMascotLongDivinng","dog hood":"ClothHeadwearCostumeDog","dog suit":"ClothAllMascotLongDog","dog tail":"ClothAccessoryWaistDog","dog-logo jacket":"ClothTopsYshirtLongDogJersey","dog-logo pants":"ClothBottomsPantsWideDogJersey","dolly dress":"ClothTopslongDressHalfDolly","dolly shirt":"ClothTopsYshirtPuffDolly","dotera":"ClothTopsCoatLongDotera","dotted pumpkin pants":"ClothBottomsBloomersDot","dotted shirt":"ClothTopsYshirtLongDot","dotted shorts":"ClothBottomsPantsWideDotHalf","dotted skirt":"ClothBottomsSkirtLongDot","double-striped socks":"ClothSocksTowLine","down boots":"ClothShoesThickDown","down jacket":"ClothTopsOuterLongDownJacket","down pants":"ClothBottomsPantsLongDown","dragon hood":"ClothHeadwearCostumeDragon","dragon suit":"ClothAllMonsterLongDragon","dragon tail":"ClothAccessoryWaistDragon","dragon wings":"ClothAccessoryBackDragon","draped skirt":"ClothBottomsSkirtLongDrape","dreamy dress":"ClothTopslongDressHalfDreamy","dreamy jacket":"ClothTopsOuterLongYumekawaSukajan","dreamy unicorn sweatshirt":"ClothTopsOuterLongYumekawaParka","dress shirt and cardigan":"ClothTopsYshirtLongShirtCardigan","dress shirt and sweater":"ClothTopsYshirtLongShirtKnit","dress shirt with vest":"ClothTopsYshirtLongGilet","drinking straw":"ClothHeadwearOrnamentSideStraw","duffle coat":"ClothTopsCoatLongDuffle","earflap hat":"ClothHeadwearHatEarflaps","egg-sushi suit":"ClothAllCostumeLongTamago","eggplant suit":"ClothAllCostumeLongEggplant","eggshell hat":"ClothHeadwearHatEgg","elegant dress":"ClothTopslongDressHalfSimple","elephant-print maxi skirt":"ClothBottomsSkirtLongElephant","elephant-print wide-leg pants":"ClothBottomsPantsWideElephant","embroidered blouse":"ClothTopsTshirtLongPeasant","embroidered dress":"ClothTopslongAlongHalfEmbroidery","emergency button":"ClothAccessoryBackEmergencyButton","engineer boots":"ClothShoesBootsLongEngineer","exercise tank top":"ClothTopsTshirtSleevelessTraining","explorer hat":"ClothHeadwearHatExplorer","explorer's attire":"ClothTopslongSalopetteHalfSafari","eye mask":"ClothHeadwearGlassEyeMask","eye patch":"ClothHeadwearGlassEyepatch","fairy dress":"ClothTopslongDressSleevelessFairy","fairy wings":"ClothAccessoryBackFairy","fancy hat":"ClothHeadwearHatDress","far-future suit":"ClothAllBodySuitLongFuture","faux-fur boots":"ClothShoesThickFur","faux-fur coat dress":"ClothTopslongAlongLongFurCoat","faux-fur hood":"ClothHeadwearCostumeFurHood","faux-fur muffler":"ClothAccessoryMufflerFur","feather brooch":"ClothAccessoryChestFeather","festival tee":"ClothTopsTshirtHalfFestival","figure-skating dress":"ClothTopslongDressSleevelessFigure","figure-skating top":"ClothTopsTshirtLongFigure","firefighter attire":"ClothTopslongSalopetteLongFirefighter","firefighter helmet":"ClothHeadwearProtectorFirefighter","fish hood":"ClothHeadwearCostumeFish","fish-folk suit":"ClothAllMonsterLongFish","fisherman beanie":"ClothHeadwearHatShallow","fishnet tights":"ClothSocksFishnet","flames tee":"ClothTopsCoatHalfFire","flannel shirt":"ClothTopsYshirtLongFlannel","flapper dress":"ClothTopslongBoxDressSleevelessFlapper","flapper hairpin":"ClothHeadwearOrnamentSideFlapper","flared miniskirt":"ClothBottomsSkirtMiniFlare","flared skirt":"ClothBottomsSkirtLongFlare","flashy medallion":"ClothAccessoryNeckCoin","fleece hat":"ClothHeadwearHatFleece","flight-attendant hat":"ClothHeadwearHatCA","flight-attendant top":"ClothTopsYshirtLongCA","flip-flops":"ClothShoesSandalBeach","flippers":"ClothShoesFinDivingFins","floating feathers":"ClothAccessoryBackFeather","floral dress":"ClothTopslongAlongLongFlower","floral jumpsuit":"ClothTopslongSalopetteHalfJumpSuit","floral leggings":"ClothSocksFlower","floral palazzo pants":"ClothBottomsPantsWideFlower","floral skirt":"ClothBottomsSkirtLongFlower","floral sweater":"ClothTopsOuterLongFlower","floral-embroidered tights":"ClothSocksEmbroidery","flower cap":"ClothHeadwearHatFlowerCrown","flower garland":"ClothAccessoryMufflerFlower","flower hair clip":"ClothHeadwearOrnamentSidePinFlower","flower hairpin":"ClothHeadwearOrnamentSideFlower","flower hat":"ClothHeadwearOrnamentTopFlower","flower hood":"ClothHeadwearCoverFlower","flower necklace":"ClothAccessoryNeckFlower","flower sandals":"ClothShoesSandalFlower","flower sunglasses":"ClothHeadwearGlassFlower","football attire":"ClothTopslongOverallHalfAmericanFootball","football helmet":"ClothHeadwearProtectorAmericanfootball","formal dress with jacket":"ClothTopslongAlineLongFormal","formal suspenders getup":"ClothTopslongSalopetteHalfSuspendersFormal","fried-egg suit":"ClothAllCostumeLongEgg","fried-shrimp suit":"ClothAllCostumeLongFriedShrimp","frilled blouse":"ClothTopsTshirtLongFrilled","frilled skirt":"ClothBottomsSkirtMiniFrill","frilly dress":"ClothTopslongAlongLongFrilled","frog hood":"ClothHeadwearCostumeFrog","frog suit":"ClothAllCostumeLongFrog","fruit hat":"ClothHeadwearCoverFruit","fruit-print tee":"ClothTopsTshirtHalfFruits","garden-gnome shirt":"ClothTopsCoatLongFairy","gas mask":"ClothHeadwearMaskGasMask","gaucho pants":"ClothBottomsPantsWideGaucho","gaudy suit jacket":"ClothTopsYshirtLongGaudy","geometric skirt":"ClothBottomsSkirtLongFolklore","geometric-print tee":"ClothTopsTshirtHalfGeometric","geta":"ClothShoesGetaGeta","giant sword":"ClothAccessoryBackBigSword","gingham dress":"ClothTopslongDressHalfGingham","gingham shirt":"ClothTopsYshirtLongGinghamCheck","gladiator armor":"ClothTopsCoatHalfGladiator","gladiator helmet":"ClothHeadwearFullmaskGladiator","gladiator sandals":"ClothShoesSandalGladiator","glen plaid shorts":"ClothBottomsPantsWideGlen","goggles":"ClothHeadwearGlassGoggle","goldfish tee":"ClothTopsTshirtHalfGoldfish","gothic dress":"ClothTopslongBoxDressLongGothic","gradation skirt":"ClothBottomsSkirtLongGradation","grade-schooler backpack":"ClothAccessoryBagSchool","gradient sweater":"ClothTopsOuterLongGradation","graduate cap":"ClothHeadwearHatAcademic","graduation robe":"ClothTopsCoatLongAcademic","guapi mao":"ClothHeadwearHatGuapimao","guayabera":"ClothTopsYshirtHalfCuba","guitar case":"ClothAccessoryBackGuitarCase","gym attire":"ClothTopslongMuscleLongTraining","hair clip":"ClothHeadwearOrnamentSideHairClip","hair roller":"ClothHeadwearOrnamentFrontHairCurler","half helmet and goggles":"ClothHeadwearProtectorHalfHelmet","half-zip fleece pullover":"ClothTopsOuterLongHalfZip","hamburger suit":"ClothAllCylinderLongHamburger","hamster hood":"ClothHeadwearCostumeHamster","hamster suit":"ClothAllPlumpLongHamster","happi jacket":"ClothTopsYshirtHalfHappi","happy flowers":"ClothAccessoryBackFlower","happy hearts":"ClothAccessoryBackHeart","headphones":"ClothAccessoryMufflerHeadphone","heart apron":"ClothTopsCoatHalfHeartApron","heart hood":"ClothHeadwearCostumeHeart","heart pendant":"ClothAccessoryNeckHeart","heart staff":"ClothAccessoryBackMagicalStick","heart sunglasses":"ClothHeadwearGlassHeart","heart sweater":"ClothTopsOuterLongHeart","heart tee":"ClothTopsTshirtHalfHeart","heart-buckle skirt":"ClothBottomsSkirtMiniHeartBuckle","heart-print cap":"ClothHeadwearHatHeart","heart-print sweater":"ClothTopsYshirtLongHeart","heart-print tights":"ClothSocksHeart","heavy-metal suit":"ClothAllBodySuitLongHeavyMetal","hemp-leaf yukata":"ClothTopslongKimonoLongLinen","hero helmet":"ClothHeadwearFullmaskHero","hero scarf":"ClothAccessoryMufflerHero","hero suit":"ClothAllBodySuitLongHero","hibiscus hairpin":"ClothHeadwearOrnamentSideHibiscus","hibiscus-print shirt":"ClothTopsYshirtHalfHibiscus","high-tops":"ClothShoesHighcutSneaker","high-waist pinafore dress":"ClothTopslongDressLongStrap","hiking shoes":"ClothShoesHighcutTrekking","hiking shorts":"ClothBottomsPantsWideOutdoor","hippie pants":"ClothBottomsPantsLongMonpe","hockey mask":"ClothHeadwearMaskHockey","holey socks":"ClothSocksHoled","holiday-tree dress":"ClothTopslongAlineSleevelessChristmas","holographic cap":"ClothHeadwearHatHologram","hoodie dress":"ClothTopslongBoxDressLongParka","horn":"ClothHeadwearOrnamentFrontHorn","horse hood":"ClothHeadwearCostumeHorse","horse suit":"ClothAllMascotLongHorse","horse tail":"ClothAccessoryWaistHorse","hot-dog hood":"ClothHeadwearCostumeHotdog","hot-dog suit":"ClothAllCostumeLongHotdog","houndstooth dress":"ClothTopslongBoxDressLongChidori","houndstooth skirt":"ClothBottomsSkirtBoxChidori","hunting cap":"ClothHeadwearHatHunting","ice skates":"ClothShoesSkateFigure","ice-cream tee":"ClothTopsTshirtHalfIcecream","ice-hockey attire":"ClothTopslongOverallLongIceHockey","ice-hockey helmet":"ClothHeadwearProtectorIceHockey","indoor shoes":"ClothShoesSandalSchool","jack-o'-lantern mask":"ClothHeadwearFullmaskPumpkin","jack-o'-lantern suit":"ClothAllCostumeLongPumpkin","jacquard shorts":"ClothBottomsPantsWideJacquard","jacquard socks":"ClothSocksJacquard","jeans":"ClothBottomsPantsLongDenim","jelly sandals":"ClothShoesSandalJelly","jester hat":"ClothHeadwearHatPierrot","jester suit":"ClothAllPlumpLongPierrot","jet pack":"ClothAccessoryBackJetpack","jinbei":"ClothTopslongSalopetteHalfJimbei","jockey attire":"ClothTopsYshirtLongJockey","jockey cap":"ClothHeadwearHatJockey","jogging jacket":"ClothTopsYshirtLongRunning","jorts":"ClothBottomsPantsWideDenimHalf","jumpsuit":"ClothTopslongSalopetteHalfAllinOne","kaffiyeh and agal":"ClothHeadwearProtectorShemagh","kandora":"ClothTopslongBoxDressLongKandoora","kanji tee":"ClothTopsTshirtHalfKanji","karate gi":"ClothTopslongSalopetteLongJudo","katana":"ClothAccessoryBackKatana","kerchief":"ClothHeadwearHatKerchief","key ring":"ClothHeadwearOrnamentTopKeyHolder","kid sneakers":"ClothShoesSneakerKids","kitsune mask":"ClothHeadwearMaskFox","knapsack":"ClothAccessoryBagKnapsack","knee guards":"ClothSocksKneeSleeve","kneepad pants":"ClothBottomsPantsLongPatch","knight helmet":"ClothHeadwearFullmaskArmor","knight sword":"ClothAccessoryBackSword","knit dress":"ClothTopslongBoxDressLongKnit","knit earflap hat":"ClothHeadwearProtectorEarflaps","knit pants":"ClothBottomsPantsWideKnit","koala hood":"ClothHeadwearCostumeKoala","koala suit":"ClothAllCostumeLongKoala","kung-fu shirt":"ClothTopsYshirtLongKungfu","kung-fu shoes":"ClothShoesSandalKungfu","kurta":"ClothTopsCoatLongKurta","lab coat":"ClothTopsCoatLongDoctor","lace pencil skirt":"ClothBottomsSkirtBoxLace","lace top":"ClothTopsLace","lace-overlay dress":"ClothTopslongAlongHalfLace","lace-up boots":"ClothShoesBootsShortLaceUp","laced loafers":"ClothShoesLoaferLaceUp","lacy socks":"ClothSocksWholeLace","lacy stockings":"ClothSocksLaceStocking","latte suit":"ClothAllCupLongLatte","layered button-down":"ClothTopsCoatLongLayered","layered heart tee":"ClothTopsTshirtLongLayeredHeart","layered tee":"ClothTopsTshirtLongLayered","leather boots":"ClothShoesBootsLongLeather","leather coat":"ClothTopsCoatLongLeather","leather helmet":"ClothHeadwearProtectorRugby","leather miniskirt":"ClothBottomsSkirtMiniLeather","leather rocker pants":"ClothBottomsPantsLongRock","leather shorts":"ClothBottomsPantsWideLeather","lemon-print skirt":"ClothBottomsSkirtLongLemon","leopard tee":"ClothTopsCoatHalfLeopard","leopard-print maxi skirt":"ClothBottomsSkirtLongLeopard","leopard-print miniskirt":"ClothBottomsSkirtBoxLeopard","leopard-print pants":"ClothBottomsPantsWideLeopard","leopard-print pumps":"ClothShoesPumpsLeopard","lettered tee":"ClothTopsTshirtLongAlphabet","lion hood":"ClothHeadwearCostumeLion","lion suit":"ClothAllMascotLongLion","loafers":"ClothShoesLoaferLoafer","long denim dress":"ClothTopslongBoxDressLongDenim","long knit cardigan":"ClothTopsCoatLongKnitGown","long pencil skirt":"ClothBottomsSkirtBoxLong","long pinafore dress":"ClothTopslongAlongLongJumperSkirt","long track shorts":"ClothBottomsPantsWideKneeJersey","long wraparound skirt":"ClothBottomsSkirtBoxWrap","long-sleeve crop top":"ClothTopsCropped","long-sleeve deck-striped tee":"ClothTopsTshirtLongPinBorder","long-sleeve grunge shirt":"ClothTopsYshirtLongGrunge","long-sleeve logo sweatshirt":"ClothTopsOuterLongArmPrint","long-sleeve shirt with tie":"ClothTopsYshirtLongNecktie","long-sleeve striped tee":"ClothTopsTshirtLongBorder","luchador mask":"ClothHeadwearFullmaskLucha","luxury coat":"ClothTopslongBoxDressLongGown","magic staff":"ClothAccessoryBackStaff","magic symbol":"ClothAccessoryBackMagicCircle","magical attire":"ClothTopslongDressHalfMagical","magical pendant":"ClothAccessoryNeckShiningPendant","maid attire":"ClothTopslongDressHalfMaid","maid headdress":"ClothHeadwearOrnamentFrontMaid","marionette control bar":"ClothHeadwearOrnamentTopPuppet","masquerade mask":"ClothHeadwearGlassMasquerade","mawashi":"ClothBottomsPantsLongMawashi","medal":"ClothAccessoryNeckMedal","medical face mask":"ClothHeadwearMaskMask","mermaid dress":"ClothTopslongAlongSleevelessMermaid","mesh cap":"ClothHeadwearHatMesh","metallic pants":"ClothBottomsPantsWideMetallic","metallic sneakers":"ClothShoesSneakerMetalic","metro hat":"ClothHeadwearHatMetro","mid-length dotted skirt":"ClothBottomsSkirtLongDotMiddle","mini backpack":"ClothAccessoryBagMini","mini top hat":"ClothHeadwearOrnamentSideMiniSilkHat","mini-UFO hat":"ClothHeadwearOrnamentTopUfo","moccasins":"ClothShoesSneakerMoccasin","monkey hood":"ClothHeadwearCostumeMonkey","monkey suit":"ClothAllMascotLongMonkey","monkey tail":"ClothAccessoryWaistMonkey","monogram-print dress":"ClothTopslongAlineSleevelessMonogram","monster hood":"ClothHeadwearCostumeMonster","monster socks":"ClothSocksMonster","monster suit":"ClothAllMonsterLongMonster","monster tail":"ClothAccessoryWaistMonster","morning-glory yukata":"ClothTopslongKimonoLongYukataMorningGlory","mountain parka":"ClothTopsOuterLongMountain","mouton miniskirt":"ClothBottomsSkirtBoxMouton","multicolored shorts":"ClothBottomsPantsWideMulticolor","multicolored striped socks":"ClothSocksMultiBorder","multistriped dress":"ClothTopslongAlongSleevelessMultiStripe","multistriped pants":"ClothBottomsPantsWideMultiStripe","multistriped shirt":"ClothTopsYshirtLongMultiStripe","multistriped sweater":"ClothTopsTshirtLongMultiBorderKnit","multistriped tee":"ClothTopsTshirtHalfMultiBorder","mummy hat":"ClothHeadwearHatMummy","mummy suit":"ClothAllBodySuitLongMummy","muscle suit":"ClothTopslongMuscleLongMuscle","mushroom hat":"ClothHeadwearHatMushroom","mushroom suit":"ClothAllCostumeLongMushroom","musical notes":"ClothAccessoryBackMusicalNote","name tag":"ClothAccessoryChestNameTag","name-tag lanyard":"ClothAccessoryNeckNameplate","natural-fiber dress":"ClothTopslongAlongLongNatural","neck pouch":"ClothAccessoryNeckPouch","neck towel":"ClothAccessoryMufflerTowel","newsboy cap":"ClothHeadwearHatNewsboy","nightgown":"ClothTopslongAlongHalfNegligee","ninja attire":"ClothTopslongOverallLongNinja","ninja hood":"ClothHeadwearCostumeNinja","no-show socks":"ClothSocksAnkle","nubuck boots":"ClothShoesBootsShortNubuck","nurse attire":"ClothTopslongBoxDressHalfNurse","nurse cap":"ClothHeadwearOrnamentFrontNurseCap","nurse top":"ClothTopsYshirtHalfNurse","ocean-motif dress":"ClothTopslongAlineSleevelessMarine","office-uniform top":"ClothTopsYshirtLongOffice","old-fashioned dress":"ClothTopslongDressLongClassic","oni mask":"ClothHeadwearMaskOgre","oni suit":"ClothAllBodySuitLongOgre","open-collar shirt":"ClothTopsYshirtHalfOpenCollar","open-school-uniform top":"ClothTopsYshirtLongGakuranOpen","outdoor hat":"ClothHeadwearHatOutdoor","outdoor sandals":"ClothShoesSandalOutdoor","outdoor work shirt":"ClothTopsYshirtLongWork","outdoorsy backpack":"ClothAccessoryBagOutdoor","over-sized sweater":"ClothTopsCoatLongKnit","over-the-top dress":"ClothTopslongDressLongLolita","overalls":"ClothTopslongOverallLongOverallDenim","oversized tee":"ClothTopsCoatHalfBigTee","oxygen tank":"ClothAccessoryBackOxygen","painter coveralls":"ClothTopslongSalopetteLongSplashed","painter pants":"ClothBottomsPantsWidePainter","paisley jacket":"ClothTopsTshirtLongPaisley","pajama pants":"ClothBottomsPantsWidePajama","pajama shirt":"ClothTopsTshirtLongPajama","palm-tree shorts":"ClothBottomsPantsWidePalmTree","paper-bag mask":"ClothHeadwearFullmaskPaperBag","party dress":"ClothTopslongAlineSleevelessParty","party hat":"ClothHeadwearHatParty","pastel jacket":"ClothTopsTshirtLongPastelJacket","patchwork maxi skirt":"ClothBottomsSkirtLongPatchwork","patchy sweatpants":"ClothBottomsPantsWidePatch","patterned fleece jacket":"ClothTopsOuterLongFleecePattern","patterned shirt":"ClothTopsYshirtHalfPatterned","patterned sweater":"ClothTopsOuterLongPatterned","patterned tank top":"ClothTopsTshirtSleevelessPattern","patterned vest":"ClothTopsTshirtLongPatternedVest","peacoat":"ClothTopsCoatLongPea","pearl brooch":"ClothAccessoryChestPearl","pearl hair clip":"ClothHeadwearOrnamentSidePearl","pearl necklace":"ClothAccessoryNeckPearl","pearl pumps":"ClothShoesPumpsPearls","pencil miniskirt":"ClothBottomsSkirtBoxMini","pencil skirt":"ClothBottomsSkirtBoxSimple","pendant":"ClothAccessoryNeckPendant","penguin hood":"ClothHeadwearCostumePenguin","penguin suit":"ClothAllPlumpLongPenguin","pepper suit":"ClothAllCylinderLongPepper","phantom-thief attire":"ClothTopsMantleLongPhantomThief","phantom-thief mask":"ClothHeadwearGlassPhantomThief","pharaoh attire":"ClothTopslongBoxDressHalfPharaoh","pharaoh headdress":"ClothHeadwearCoverPharaoh","photo-print tee":"ClothTopsTshirtHalfPhoto","pig hood":"ClothHeadwearCostumePig","pig suit":"ClothAllCostumeLongPig","pig tail":"ClothAccessoryWaistPig","pillbox hat":"ClothHeadwearHatToque","pilot jacket":"ClothTopsYshirtLongPilotUniform","pinafore dress":"ClothTopslongAlongLongPinafore","pinafore school attire":"ClothTopslongBoxDressLongJumper","pineapple hat":"ClothHeadwearHatPineapple","pineapple suit":"ClothAllCostumeLongPineapple","pirate coat":"ClothTopsCoatLongPirate","pirate hat":"ClothHeadwearHatPirate","pixel sunglasses":"ClothHeadwearGlassPixel","plaid apron":"ClothTopsCoatLongApronCheck","plaid coat":"ClothTopsCoatLongCheck","plaid dress":"ClothTopslongAlongLongCheck","plaid jacket":"ClothTopsTshirtLongCheckJacket","plaid newsboy cap":"ClothHeadwearHatNewsboyCheck","plaid-flannel shirt":"ClothTopsYshirtLongRetroCheck","plain socks":"ClothSocksSocks","playing-card suit":"ClothAllBoxLongTrump","pleated skirt":"ClothBottomsSkirtLongPleats","pocket tee":"ClothTopsTshirtHalfPocket","pointed hat":"ClothHeadwearHatPointy","police hat":"ClothHeadwearHatPolice","police officer vest":"ClothTopsYshirtHalfPolice","police-car suit":"ClothAllCarLongPoliseCar","polka-dot dress":"ClothTopslongDressHalfPolkaDot","polka-dot leggings":"ClothSocksLeggingsDot","polo dress":"ClothTopslongBoxDressLongPolo","polo shirt":"ClothTopsYshirtHalfPolo","pom-pom dress":"ClothTopslongAlineLongPompon","pom-pom knit beanie":"ClothHeadwearHatKnitPompom","pop-idol dress":"ClothTopslongDressHalfIdol","pop-idol hat":"ClothHeadwearOrnamentSideIdol","pop-out glasses":"ClothHeadwearGlassEye","pot":"ClothHeadwearHatPot","price tag":"ClothHeadwearOrnamentTopTag","prince crown":"ClothHeadwearOrnamentTopPrince","princely attire":"ClothTopsMantleLongPrince","princess dress":"ClothTopslongDressHalfPrincess","princess shoes":"ClothShoesPumpsGlass","printed-design face mask":"ClothHeadwearMaskPrintMask","professional backpack":"ClothAccessoryBagBusiness","professional skirt":"ClothBottomsSkirtBoxOffice","propeller cap":"ClothHeadwearHatPropellerCap","puff-sleeve blouse":"ClothTopsYshirtPuffBlouse","puffy vest":"ClothTopsYshirtLongDownVest","pumpkin pants":"ClothBottomsBloomersPumpkin","punk boots":"ClothShoesBootsLongPunk","qipao":"ClothTopslongBoxDressHalfQipao","quad-button skirt":"ClothBottomsSkirtMiniDoubleButton","quilted jacket":"ClothTopsYshirtLongQuilting","rabbit hood":"ClothHeadwearCostumeRabbit","rabbit suit":"ClothAllMascotLongRabbit","race-driver attire":"ClothTopslongOverallLongRacingSuit","racing helmet":"ClothHeadwearFullfaceMotorcycle","rad jeans":"ClothBottomsPantsWideDenimPrinted","ragged dress":"ClothTopslongBoxDressLongRagged","ragged pants":"ClothBottomsPantsLongRagged","ragged shirt":"ClothTopsTshirtLongRagged","raglan long-sleeve tee":"ClothTopsTshirtLongRaglan","raglan pullover sweatshirt":"ClothTopsOuterLongRaglanParka","rain boots":"ClothShoesBootsLongRain","rainbow knee-highs":"ClothSocksKneeSocksRainbow","raincoat":"ClothTopsCoatLongRain","reindeer hood":"ClothHeadwearCostumeReindeer","reindeer suit":"ClothAllMascotLongReindeer","restaurateur clothing":"ClothTopsCoatHalfRestaurant","retro checkered socks":"ClothSocksRetroCheck","retro dress":"ClothTopslongAlineSleevelessRetro","retro floral dress":"ClothTopslongAlineSleevelessFlower","retro gown":"ClothTopslongAlongLongVintage","retro polo shirt":"ClothTopsTshirtLongRetro","retro swimsuit":"ClothTopslongOverallSleevelessSwimwear","rhinestone cap":"ClothHeadwearHatRhinestone","rhinestone sunglasses":"ClothHeadwearGlassLineStone","ribbed leggings":"ClothSocksRib","ribbon":"ClothHeadwearOrnamentSideRibbon","ribbon tights":"ClothSocksRibbon","ring pendant":"ClothAccessoryNeckRing","ringer tee":"ClothTopsTshirtHalfRinger","robe":"ClothTopslongKimonoLongRobe","rock-band tee":"ClothTopsTshirtHalfRockBand","rocker jeans":"ClothBottomsPantsLongDenimDamaged","rodeo-rider duds":"ClothTopsYshirtLongCowboy","rodeo-rider pants":"ClothBottomsPantsWideCowboy","rose corsage":"ClothAccessoryChestRose","rose-patterned shirt":"ClothTopsYshirtLongUniquePattern","rosette":"ClothAccessoryChestRosette","rosette pin":"ClothAccessoryChestCorsage","round-toe pumps":"ClothShoesSandalRound","royal attire":"ClothTopslongAlongLongKing","rubber-ducky hat":"ClothHeadwearOrnamentFrontDuck","rubber-toe high-tops":"ClothShoesHighcutRubberToe","rubber-toe sneakers":"ClothShoesSneakerRubberToe","ruffled socks":"ClothSocksFrilled","rugby attire":"ClothTopsYshirtHalfRugby","rugby shirt":"ClothTopsYshirtLongRugger","rumba dress":"ClothTopslongAlongHalfRumba","rumba suit":"ClothTopslongSalopetteLongMambo","running shoes":"ClothShoesSneakerRunning","running shorts":"ClothBottomsPantsLongRunning","running singlet":"ClothTopsTshirtSleevelessRunning","sabot sandals":"ClothShoesSandalSabo","safety helmet":"ClothHeadwearHatHelmet","safety vest":"ClothTopsYshirtLongSafetyVest","sailor beret":"ClothHeadwearHatMarine","sailor cap":"ClothHeadwearHatSailor","sailor dress":"ClothTopslongAlineHalfSailor","sailor skirt":"ClothBottomsSkirtMiniSailor","sailor-uniform top":"ClothTopsTshirtLongSailor","samba feathers":"ClothAccessoryBackSamba","samba headdress":"ClothHeadwearOrnamentFrontSamba","samba suit":"ClothTopslongOverallSleevelessSamba","samurai armor":"ClothTopsCoatLongSamuraiArmor","samurai helmet":"ClothHeadwearProtectorSamuraiHelmet","samurai shin guards":"ClothShoesBootsLongSamuraiProtection","sarashi":"ClothTopsSarashi","sari":"ClothTopslongAlongHalfSaree","satchel":"ClothAccessoryBagSatchel","satin dress":"ClothTopslongDressSleevelessSatin","scarf with fringe":"ClothAccessoryMufflerFringeStole","scattered roses":"ClothAccessoryBackRose","school skirt":"ClothBottomsSkirtMiniSchool","school slacks":"ClothBottomsPantsLongSchool","school-uniform top":"ClothTopsYshirtLongGakuran","scythe":"ClothAccessoryBackScythe","seashell hairpin":"ClothHeadwearOrnamentSidePinSeashell","seaweed suit":"ClothAllBodySuitLongSeaweed","semi-formal kimono":"ClothTopslongKimonoLongKimono","sensible sneakers":"ClothShoesSneakerDad","sequin pumps":"ClothShoesPumpsGlitter","sequin skirt":"ClothBottomsSkirtMiniSequins","sequined hat":"ClothHeadwearHatSpangle","shampoo-bubbles hat":"ClothHeadwearHatShampoo","shearling boots":"ClothShoesThickMouton","sheep hood":"ClothHeadwearCostumeSheep","sheep suit":"ClothAllCostumeLongSheep","sheer dotted socks":"ClothSocksSeethroughDot","sheer layered top":"ClothTopsTshirtLongLayer","shield sunglasses":"ClothHeadwearGlassShield","shirtdress":"ClothTopslongBoxDressLongShirt","shoes with colorful socks":"ClothShoesLooseSocksColor","shoes with slouchy socks":"ClothShoesLooseSocksSchool","shoes with striped socks":"ClothShoesLooseSocksBorder","short shorts":"ClothBottomsPantsLongHot","short-sleeve cardigan":"ClothTopsYshirtLongHalfCardigan","short-sleeve grunge shirt":"ClothTopsYshirtHalfGrunge","short-sleeve shirt with bow":"ClothTopsYshirtHalfRibbon","short-sleeve shirt with necktie":"ClothTopsYshirtHalfNecktie","shorts":"ClothBottomsPantsLongShort","shoulder-wrap cardigan":"ClothAccessoryNeckCardigan","shower sandals":"ClothShoesSandalShower","shrimp tail":"ClothAccessoryWaistShrimp","shrimp-sushi suit":"ClothAllCostumeLongSushi","shrine maiden's garb":"ClothTopslongKimonoLongMiko","shuriken":"ClothAccessoryBackShuriken","shutter shades":"ClothHeadwearGlassShutter","side-gore ankle boots":"ClothShoesBootsShortSideGore","side-stripe sneakers":"ClothShoesSneakerSideline","silk dress":"ClothTopslongBoxDressSleevelessHalterNeck","silk scarf":"ClothAccessoryMufflerScarf","silk sleeping cap":"ClothHeadwearCoverNightCap","simple dress":"ClothTopslongBoxDressHalfTshirt","simple parka":"ClothTopsCoatLongMods","skateboard helmet":"ClothHeadwearHatSkateboard","skeleton suit":"ClothAllBodySuitLongSkeleton","ski hat and goggles":"ClothHeadwearHatSki","ski jacket":"ClothTopsOuterLongSki","ski pants":"ClothBottomsPantsWideSki","skipper-collar shirt":"ClothTopsTshirtHalfSkipper","skull mask":"ClothHeadwearFullmaskSkull","skull necklace":"ClothAccessoryNeckSkull","skull tee":"ClothTopsTshirtLongSkull","skullcap":"ClothHeadwearHatRoll","slacks":"ClothBottomsPantsLongSlacks","sleek cyberpunk jacket":"ClothTopsOuterLongCyber","sleek cyberpunk pants":"ClothBottomsPantsLongCyber","sleeping cap":"ClothHeadwearHatNightCap","sleeveless denim shirt":"ClothTopsYshirtSleevelessDenimShirt","sleeveless hoodie":"ClothTopsOuterSleevelessHoodie","sleeveless knit top":"ClothTopsOuterSleevelessKnit","sleeveless pullover sweatshirt":"ClothTopsOuterSleevelessParka","sleeveless shirt":"ClothTopsYshirtSleevelessSimple","sleeveless shirtdress":"ClothTopslongAlineSleevelessShirtDress","sleeveless striped shirt":"ClothTopsYshirtSleevelessStripe","sleeveless turtleneck shirt":"ClothTopsYshirtSleevelessTurtleneckKnit","slip dress":"ClothTopslongBoxDressSleevelessSlip","slip-on sandals":"ClothShoesSandalSlipon","slip-ons":"ClothShoesStandardSlipon","slippers":"ClothShoesSandalSlipper","slit pants":"ClothBottomsPantsWideSlit","slouch beanie":"ClothHeadwearCoverBeanie","smock":"ClothTopsTshirtLongSmock","smocked blouse":"ClothTopsYshirtPuffSmock","snap clip":"ClothHeadwearOrnamentSidePin","snood":"ClothAccessoryMufflerSnood","snorkel":"ClothHeadwearGlassSnorkel","snow boots":"ClothShoesBootsLongSnow","snowman hood":"ClothHeadwearCostumeSnowman","snowman suit":"ClothAllCostumeLongSnowman","soccer jersey":"ClothTopsTshirtHalfSoccer","soccer shorts":"ClothBottomsPantsWideSoccor","soft-drink suit":"ClothAllCupLongDrink","soft-serve hat":"ClothHeadwearHatSoftcream","soft-serve suit":"ClothAllCupLongSoftcream","sombrero":"ClothHeadwearHatSombrero","spacey shorts":"ClothBottomsPantsWideSpace","spacey sneakers":"ClothShoesHighcutSpace","spacey sweater":"ClothTopsOuterLongSpace","spacey tights":"ClothSocksSpaceTights","sparkling dress":"ClothTopslongAlongLongShiny","sparkling stars":"ClothAccessoryBackStar","spats":"ClothSocksShortLeggings","spiderweb tights":"ClothSocksSpider","sport sandals":"ClothShoesSandalSneaker","sports bra":"ClothTopsSportsBra","sports-logo dress":"ClothTopslongBoxDressLongLogo","sprout hat":"ClothHeadwearOrnamentTopLeaf","square-motif hat":"ClothHeadwearHatSquare","stag-beetle hood":"ClothHeadwearCostumeStagBeetle","star hood":"ClothHeadwearCostumeStar","star pendant":"ClothAccessoryNeckToy","star sunglasses":"ClothHeadwearGlassStar","star-print tee":"ClothTopsTshirtHalfStar","starry leggings":"ClothSocksStarLeggings","starry socks":"ClothSocksStar","starry stage dress":"ClothTopslongDressHalfStar","starter pants":"ClothBottomsPantsLongDefault","starter shoes":"ClothShoesStandardDefault","starter socks":"ClothSocksDefault","starter top":"ClothTopsTshirtLongDefault","steampunk coat":"ClothTopsMantleLongSteamPunk","steampunk dress":"ClothTopslongDressLongSteamPunk","steampunk hat":"ClothHeadwearHatSteamPunk","stethoscope":"ClothAccessoryNeckStethoscope","sticker-print shirt":"ClothTopsYshirtHalfSticker","stockings":"ClothSocksStocking","stole":"ClothAccessoryMufflerStole","strapped skirt":"ClothBottomsSkirtMiniStrap","strappy pumps":"ClothShoesMuleStrap","strappy sandals":"ClothShoesMuleStrappy","straw boater hat":"ClothHeadwearHatBoater","straw hat":"ClothHeadwearHatStraw","straw sandals":"ClothShoesSandalWaraji","straw skirt":"ClothBottomsSkirtMiniStraw","strawberry hat":"ClothHeadwearHatStrawberry","striped cozy shorts":"ClothBottomsPantsLongRoomWear","striped knee-highs":"ClothSocksKneeSocksBorder","striped leggings":"ClothSocksLeggingsBorder","striped loungewear":"ClothTopsYshirtLongRoomWear","striped maxi skirt":"ClothBottomsSkirtLongStripe","striped pants":"ClothBottomsPantsLongStripe","striped pencil skirt":"ClothBottomsSkirtBoxStripe","striped polo shirt":"ClothTopsYshirtHalfMultiBorderPolo","striped slip-ons":"ClothShoesStandardStripeSlipon","striped slippers":"ClothShoesSandalSlipperBorder","striped socks":"ClothSocksBorder","striped tank top":"ClothTopsTshirtSleevelessBorder","striped-cuff ankle socks":"ClothSocksTwoLineShort","studded backpack":"ClothAccessoryBagStuds","studded boots":"ClothShoesBootsShortStuds","studded dress shoes":"ClothShoesPointedStuds","studded leather choker":"ClothAccessoryNeckLeatherChoker","studded newsboy cap":"ClothHeadwearHatStudsCasquette","student cap":"ClothHeadwearHatStudent","suede pants":"ClothBottomsPantsLongSuede","sugar-skull mask":"ClothHeadwearMaskKatrina","suit of armor":"ClothAllMascotLongArmor","summer cardigan":"ClothTopsTshirtLongSummerCardigan","summer-sailor-uniform top":"ClothTopsTshirtHalfSailor","sunflower dress":"ClothTopslongDressSleevelessSunflower","sunflower skirt":"ClothBottomsSkirtMiniSunflower","sunny-side-up tee":"ClothTopsTshirtHalfEgg","superhero suit":"ClothAllMantleLongHero","sushi socks":"ClothSocksSushi","suspender skirt with blouse":"ClothTopslongAlineHalfSalopette","suspenders getup":"ClothTopslongOverallLongSuspenders","sweatpants":"ClothBottomsPantsLongSweatPants","swim top":"ClothTopsSwim","swim trunks":"ClothBottomsSwim","swimming cap":"ClothHeadwearCoverSwim","tabi socks":"ClothSocksTabi","tailcoat":"ClothTopsMantleLongTailcoat","tailored jacket":"ClothTopsTshirtLongTailoredJacket","tam":"ClothHeadwearHatTam","tank top":"ClothTopsTshirtSleevelessTankTop","tee with nautical scarf":"ClothTopsTshirtHalfScarf","ten-gallon hat":"ClothHeadwearHatCawboy","tennis skirt":"ClothBottomsSkirtMiniTennis","tennis sweater":"ClothTopsTshirtLongTilden","tennis-racket bag":"ClothAccessoryBackTennisRacketCase","text badge":"ClothAccessoryChestBadgeText","thick-lens glasses":"ClothHeadwearGlassBottomBottom","tiara":"ClothHeadwearOrnamentFrontTiara","tie-dye bucket hat":"ClothHeadwearHatTiedye","tie-dye dress":"ClothTopslongAlongSleevelessTiedye","tie-dye socks":"ClothSocksTiedye","tie-dye tee":"ClothTopsTshirtHalfTiedye","tiered skirt":"ClothBottomsSkirtLongTiered","tiger baseball jacket":"ClothTopsOuterLongYokosuka","tiger hood":"ClothHeadwearCostumeTiger","tiger suit":"ClothAllMascotLongTiger","tiger tail":"ClothAccessoryWaistTiger","tights":"ClothSocksTights","tiny-flower pantyhose":"ClothSocksPedicel","toga":"ClothTopslongBoxDressHalfToga","top hat":"ClothHeadwearHatSilk","toy-robot mask":"ClothHeadwearFullfaceRobot","toy-robot suit":"ClothAllBoxLongToyRobot","track jacket":"ClothTopsYshirtLongJersey","track pants":"ClothBottomsPantsLongJersey","track shorts":"ClothBottomsPantsWideJerseyHalf","traditional Korean shoes":"ClothShoesMuleGatshin","traffic-print tee":"ClothTopsTshirtHalfCar","train suit":"ClothAllTrainLongTrain","training pants":"ClothBottomsPantsLongSports","trapper hat":"ClothHeadwearProtectorPilot","trash-can suit":"ClothAllCupLongGarbageCan","travel bag":"ClothAccessoryBagTravel","tree hood":"ClothHeadwearCostumeTree","tree suit":"ClothAllCupLongTree","trench coat":"ClothTopsCoatLongTrench","triceratops hood":"ClothHeadwearCostumeTriceratops","trilby":"ClothHeadwearHatTrilby","triple chain":"ClothAccessoryNeckTripleChain","tropical-print maxi dress":"ClothTopslongBoxDressSleevelessTropical","tube top":"ClothTopsTubetop","tulip hat":"ClothHeadwearHatTulip","tulle skirt":"ClothBottomsSkirtMiniTulle","tuna-sushi suit":"ClothAllCostumeLongTuna","tunic top":"ClothTopsCoatHalfTunic","turban":"ClothHeadwearCoverTurban","turkey hood":"ClothHeadwearCostumeTurkey","turkey suit":"ClothAllMonsterLongTurkey","turkey tail":"ClothAccessoryWaistTurkey","turtle shell":"ClothAccessoryBackTurtle","turtleneck sweater":"ClothTopsYshirtLongTurtleneckKnit","tweed jacket":"ClothTopsTshirtLongTweedJacket","tweed skirt":"ClothBottomsSkirtBoxTweed","two-tone tights":"ClothSocksBicolor","two-toned shirt":"ClothTopsYshirtLongBicolor","ugly holiday sweater":"ClothTopsOuterLongHoliday","university sweatshirt":"ClothTopsOuterLongCollege","utility vest":"ClothTopsYshirtLongMultipulVest","vampire attire":"ClothTopsMantleLongVampire","varsity cardigan":"ClothTopsYshirtLongCollege","varsity jacket":"ClothTopsOuterLongStadium","vertical-striped dress shirt":"ClothTopsYshirtLongStripe","vertical-striped tee":"ClothTopsTshirtHalfStripe","vest and tee":"ClothTopsTshirtHalfGilet","vintage dress":"ClothTopslongBoxDressLongMoga","waders":"ClothTopslongOverallHalfWader","warning light":"ClothHeadwearOrnamentTopColorLamp","water shoes":"ClothShoesStandardMarine","wedding dress":"ClothTopslongDressSleevelessWedding","wedding tiara":"ClothHeadwearOrnamentFrontWedding","weightlifting singlet":"ClothTopslongMuscleLongSinglet","welding mask":"ClothHeadwearMaskWelding","western boots":"ClothShoesBootsLongWestern","western shirt":"ClothTopsYshirtLongWestern","wet suit":"ClothTopslongOverallLongWetSuit","whistle":"ClothAccessoryNeckWhistle","wide-brim felt hat":"ClothHeadwearHatFelt","wide-brim straw hat":"ClothHeadwearHatStrawWide","wide-striped shirt":"ClothTopsYshirtLongWideStripe","windbreaker":"ClothTopsOuterLongWindbreaker","windup key":"ClothAccessoryBackClockwork","wing-tip loafers":"ClothShoesPointedWingTip","witch dress":"ClothTopslongDressHalfWitch","witch hat":"ClothHeadwearHatWitch","witch shoes":"ClothShoesPointedWitch","wizard hat":"ClothHeadwearHatMagician","wizard robe":"ClothTopslongKimonoLongMagician","wooden clogs":"ClothShoesPointedWooden","wooden-bead necklace":"ClothAccessoryNeckWoodBeads","work shirt with patches":"ClothTopsYshirtHalfWappen","workout tights":"ClothSocksRunning","wrap dress":"ClothTopslongAlongHalfCachecoeur","wraparound skirt":"ClothBottomsSkirtMiniWrap","wrestling boots":"ClothShoesBootsLongWrestling","wrestling singlet":"ClothTopslongMuscleLongProWrestling","wrinkled long-sleeve tee":"ClothTopsTshirtLongWrinkles","zebra-print pumps":"ClothShoesPumpsZebra","zip-up hoodie":"ClothTopsOuterLongParkaZip","zipper":"ClothAccessoryBackZipper"};
+const LTD_COORD_IMG={"ABC-loungewear outfit":"Coordinate0166","Aran outfit":"Coordinate0254","B-3 outfit":"Coordinate0288","Cowichan-sweater outfit":"Coordinate0046","DJ outfit":"Coordinate0131","Japanese-print outfit":"Coordinate0182","Nordic-sweater outfit":"Coordinate0049","RN outfit":"Coordinate0321","Santa outfit":"Coordinate0113","Santa-dress outfit":"Coordinate0114","Tyrolean-dress outfit":"Coordinate0294","Tyrolean-lederhosen outfit":"Coordinate0295","Viking costume":"Coordinate0267","Y2K outfit":"Coordinate0144","aerobics outfit":"Coordinate0337","all-black outfit":"Coordinate0283","all-out summer-vacay outfit":"Coordinate0079","angel costume":"Coordinate0117","animal-print-blouson outfit":"Coordinate0303","anorak-jacket outfit":"Coordinate0290","ao dai outfit":"Coordinate0231","ao gam outfit":"Coordinate0274","argyle-vest outfit":"Coordinate0023","aristocratic-coat costume":"Coordinate0178","aristocratic-dress costume":"Coordinate0177","astronaut costume":"Coordinate0123","baby-bird costume":"Coordinate0099","baby-snapsuit outfit":"Coordinate0165","baji jeogori outfit":"Coordinate0293","ballet costume":"Coordinate0209","bandanna-top outfit":"Coordinate0313","baseball uniform":"Coordinate0238","basic-dress outfit":"Coordinate0002","basic-dress-shirt outfit":"Coordinate0004","basic-pullover outfit":"Coordinate0109","basic-sweatshirt outfit":"Coordinate0012","basic-tee outfit":"Coordinate0001","basic-turtleneck outfit":"Coordinate0164","basketball uniform":"Coordinate0211","beach-vacation outfit":"Coordinate0102","bear costume":"Coordinate0194","bear-ear-cap outfit":"Coordinate0076","bee costume":"Coordinate0119","biker outfit":"Coordinate0133","biker-jacket outfit":"Coordinate0234","bird costume":"Coordinate0108","blazer-with-bow outfit":"Coordinate0084","blazer-with-necktie outfit":"Coordinate0083","bodysuit outfit":"Coordinate0121","bomber-jacket outfit":"Coordinate0047","botanical-print-skirt outfit":"Coordinate0039","breezy business outfit":"Coordinate0092","business suit & tie outfit":"Coordinate0019","business-suit outfit":"Coordinate0020","camisole-layered-tee outfit":"Coordinate0038","cardboard-box costume":"Coordinate0189","cardboard-robot costume":"Coordinate0346","cargo-shorts outfit":"Coordinate0006","casual cardigan outfit":"Coordinate0011","casual vest outfit":"Coordinate0024","casual-kimono outfit":"Coordinate0298","cat costume":"Coordinate0125","catcher uniform":"Coordinate0342","celebrity outfit":"Coordinate0226","cheerleader uniform":"Coordinate0225","chef outfit":"Coordinate0077","cheongsam outfit":"Coordinate0199","chicken costume":"Coordinate0304","chima jeogori outfit":"Coordinate0292","city-walk outfit":"Coordinate0143","classic-maid costume":"Coordinate0328","classical-dress outfit":"Coordinate0062","coach-jacket outfit":"Coordinate0031","coat-dress outfit":"Coordinate0050","collarless-coat outfit":"Coordinate0285","color-blocked-tee outfit":"Coordinate0029","colorful checkered outfit":"Coordinate0296","comfy sweats outfit":"Coordinate0069","compression outfit":"Coordinate0330","cool leather outfit":"Coordinate0287","corduroy outfit":"Coordinate0258","cosmic outfit":"Coordinate0276","country outfit":"Coordinate0087","cow costume":"Coordinate0207","cozy fleece outfit":"Coordinate0187","crazy-color-shirt outfit":"Coordinate0148","cyberpunk costume":"Coordinate0172","cycling uniform":"Coordinate0134","dance-performance outfit":"Coordinate0317","denim-dress outfit":"Coordinate0145","denim-jacket outfit":"Coordinate0153","detective outfit":"Coordinate0251","devil costume":"Coordinate0118","dinosaur costume":"Coordinate0112","disco-star outfit":"Coordinate0171","diving costume":"Coordinate0224","dog costume":"Coordinate0124","dog-logo-tracksuit outfit":"Coordinate0329","dolly-dress outfit":"Coordinate0041","dolly-shirt outfit":"Coordinate0142","dotted-shirt outfit":"Coordinate0055","down-jacket outfit":"Coordinate0045","dragon costume":"Coordinate0306","dreamy-dress outfit":"Coordinate0345","dreamy-jacket outfit":"Coordinate0071","dreamy-unicorn outfit":"Coordinate0212","dress shirt & sweater outfit":"Coordinate0034","duffle coat & skirt outfit":"Coordinate0018","elegant-dress outfit":"Coordinate0237","energetic-skirt outfit":"Coordinate0007","exercise outfit":"Coordinate0323","explorer outfit":"Coordinate0244","fairy costume":"Coordinate0181","far-future costume":"Coordinate0204","faux-fur-coat-dress outfit":"Coordinate0147","figure-skating costume":"Coordinate0222","figure-skating-dress costume":"Coordinate0221","firefighter outfit":"Coordinate0271","fish-folk costume":"Coordinate0210","flannel-shirt outfit":"Coordinate0032","flapper-dress outfit":"Coordinate0333","fleece-pullover outfit":"Coordinate0163","flight-attendant outfit":"Coordinate0282","floral-sweater outfit":"Coordinate0301","flower costume":"Coordinate0190","flowery outfit":"Coordinate0168","fluffy loungewear outfit":"Coordinate0072","fly-fisher outfit":"Coordinate0157","football uniform":"Coordinate0344","formal peacoat outfit":"Coordinate0129","formal suspenders outfit":"Coordinate0339","formal vest outfit":"Coordinate0162","formal-dress outfit":"Coordinate0159","frog costume":"Coordinate0094","fruit-print-tee outfit":"Coordinate0043","garden-gnome costume":"Coordinate0266","gaudy bubble-era outfit":"Coordinate0126","gaudy-suit outfit":"Coordinate0098","geometric-print-tee outfit":"Coordinate0056","geometric-skirt outfit":"Coordinate0161","gingham outfit":"Coordinate0028","gladiator costume":"Coordinate0314","goodnight pajama outfit":"Coordinate0111","gothic prince outfit":"Coordinate0025","graduation outfit":"Coordinate0068","grunge outfit":"Coordinate0219","hamster costume":"Coordinate0197","heart-to-heart outfit":"Coordinate0155","hemp-leaf-yukata outfit":"Coordinate0269","hero costume":"Coordinate0122","hibiscus-print-shirt outfit":"Coordinate0042","high-waist-pinafore outfit":"Coordinate0233","hiking outfit":"Coordinate0048","hip-hop outfit":"Coordinate0130","holiday-party outfit":"Coordinate0236","holiday-tree costume":"Coordinate0115","horse costume":"Coordinate0320","hot-dog costume":"Coordinate0100","houndstooth-dress outfit":"Coordinate0253","ice-cream-tee outfit":"Coordinate0096","ice-hockey uniform":"Coordinate0341","jack-o'-lantern costume":"Coordinate0188","jester costume":"Coordinate0213","jockey uniform":"Coordinate0338","jogging outfit":"Coordinate0179","jumpsuit outfit":"Coordinate0057","knight costume":"Coordinate0120","knit-dress outfit":"Coordinate0252","koala costume":"Coordinate0265","kung-fu uniform":"Coordinate0200","kurta outfit":"Coordinate0273","lab-coat outfit":"Coordinate0132","lace-overlay-dress outfit":"Coordinate0248","lace-top outfit":"Coordinate0312","lettered-tee outfit":"Coordinate0215","lion costume":"Coordinate0193","long-denim-dress outfit":"Coordinate0146","long-knit-cardigan outfit":"Coordinate0300","long-sleeve deck-striped outfit":"Coordinate0070","long-sleeve striped-tee outfit":"Coordinate0003","long-sleeve tee & skirt outfit":"Coordinate0005","lovely hearts outfit":"Coordinate0037","luchador uniform":"Coordinate0311","magical costume":"Coordinate0186","maid costume":"Coordinate0263","marathon outfit":"Coordinate0232","mid-shower-doorbell outfit":"Coordinate0063","mid-shower-phone-call outfit":"Coordinate0196","monkey costume":"Coordinate0176","monster costume":"Coordinate0203","morning-glory-yukata outfit":"Coordinate0228","multistriped-sweater outfit":"Coordinate0066","mummy costume":"Coordinate0307","mushroom costume":"Coordinate0340","natural-fiber-dress outfit":"Coordinate0160","nautical outfit":"Coordinate0261","ninja costume":"Coordinate0262","noir-detective outfit":"Coordinate0249","nurse outfit":"Coordinate0322","oni costume":"Coordinate0332","open-school-uniform outfit":"Coordinate0318","over-sized-tee outfit":"Coordinate0223","over-the-top outfit":"Coordinate0058","painter outfit":"Coordinate0097","paisley-jacket outfit":"Coordinate0051","party-dress outfit":"Coordinate0061","pastel-suit outfit":"Coordinate0206","patchwork outfit":"Coordinate0060","patterned-shirt outfit":"Coordinate0075","peacoat outfit":"Coordinate0017","penguin costume":"Coordinate0270","phantom-thief costume":"Coordinate0335","pharaoh costume":"Coordinate0315","photo-print-tee outfit":"Coordinate0015","pig costume":"Coordinate0308","pilot outfit":"Coordinate0281","pinafore-dress outfit":"Coordinate0183","pineapple costume":"Coordinate0255","pirate costume":"Coordinate0090","plaid-coat outfit":"Coordinate0284","plaid-dress outfit":"Coordinate0208","plaid-flannel outfit":"Coordinate0009","plaid-jacket outfit":"Coordinate0240","police uniform":"Coordinate0214","polka-dot-dress outfit":"Coordinate0138","polo-dress outfit":"Coordinate0158","pom-pom-dress outfit":"Coordinate0205","pop-idol outfit":"Coordinate0277","prince costume":"Coordinate0175","princess costume":"Coordinate0174","punky cargo-pants outfit":"Coordinate0325","punky skirt outfit":"Coordinate0326","qipao outfit":"Coordinate0198","quilted jacket & skirt outfit":"Coordinate0302","quilted-jacket outfit":"Coordinate0095","rabbit costume":"Coordinate0110","racing uniform":"Coordinate0259","ragged outfit":"Coordinate0280","raglan-sweatshirt outfit":"Coordinate0139","rainy-day outfit":"Coordinate0103","refreshing lemon outfit":"Coordinate0127","reindeer costume":"Coordinate0116","relaxed tunic-top outfit":"Coordinate0156","retro bedtime outfit":"Coordinate0299","retro-dress outfit":"Coordinate0089","retro-floral-dress outfit":"Coordinate0082","retro-swimsuit outfit":"Coordinate0229","rodeo-rider costume":"Coordinate0309","royal costume":"Coordinate0264","rugby uniform":"Coordinate0324","running outfit":"Coordinate0201","sage costume":"Coordinate0275","sailor school uniform":"Coordinate0086","sailor-dress outfit":"Coordinate0044","samba costume":"Coordinate0305","samurai outfit":"Coordinate0245","sari outfit":"Coordinate0291","school outfit":"Coordinate0327","school uniform":"Coordinate0085","school-smock outfit":"Coordinate0080","seaside-stroll outfit":"Coordinate0247","semi-formal-kimono outfit":"Coordinate0297","sheep costume":"Coordinate0227","shirt-with-bow outfit":"Coordinate0136","shirt-with-necktie outfit":"Coordinate0135","shirtdress outfit":"Coordinate0040","short-sleeve-cardigan outfit":"Coordinate0010","silk-dress outfit":"Coordinate0154","simple-dress outfit":"Coordinate0141","simple-parka outfit":"Coordinate0256","skeleton costume":"Coordinate0195","skiing outfit":"Coordinate0167","skipper-collar-shirt outfit":"Coordinate0151","skirt & down-jacket outfit":"Coordinate0257","skull-tee outfit":"Coordinate0235","sleek cyberpunk outfit":"Coordinate0246","sleeveless-knit-top outfit":"Coordinate0150","sleeveless-shirt outfit":"Coordinate0016","sleeveless-shirtdress outfit":"Coordinate0074","sleeveless-turtleneck outfit":"Coordinate0065","snorkeling outfit":"Coordinate0334","snowman costume":"Coordinate0105","soccer uniform":"Coordinate0239","soft-drink costume":"Coordinate0319","soft-serve costume":"Coordinate0316","sprout costume":"Coordinate0191","stag-beetle costume":"Coordinate0331","star-print-tee outfit":"Coordinate0052","starter outfit":"Coordinate0000","steampunk-coat outfit":"Coordinate0278","steampunk-dress outfit":"Coordinate0279","store-attendant outfit":"Coordinate0220","street-style layered outfit":"Coordinate0021","street-style outfit":"Coordinate0192","striped outfit":"Coordinate0217","striped rugby outfit":"Coordinate0026","striped-polo outfit":"Coordinate0033","stylish heart outfit":"Coordinate0310","summer sailor school uniform":"Coordinate0093","summer vintage-suit outfit":"Coordinate0242","summer-cardigan outfit":"Coordinate0013","sunny sunflower outfit":"Coordinate0081","sunny-side-up outfit":"Coordinate0027","superfan outfit":"Coordinate0260","surveyor outfit":"Coordinate0137","suspenders outfit":"Coordinate0088","sweatshirt & miniskirt outfit":"Coordinate0035","swim outfit":"Coordinate0180","tailcoat outfit":"Coordinate0053","tailored-jacket outfit":"Coordinate0008","tam outfit":"Coordinate0243","tennis uniform":"Coordinate0036","tennis-sweater outfit":"Coordinate0067","tidy button-down outfit":"Coordinate0022","tie-dye-tee outfit":"Coordinate0149","tiger costume":"Coordinate0216","tiger-baseball-jacket outfit":"Coordinate0152","toy-robot costume":"Coordinate0202","tracksuit outfit":"Coordinate0106","tracksuit with shorts outfit":"Coordinate0107","traffic-guard outfit":"Coordinate0241","traffic-print-tee outfit":"Coordinate0054","tree costume":"Coordinate0272","trench-coat outfit":"Coordinate0030","tropical-vacation outfit":"Coordinate0073","turkey costume":"Coordinate0336","turtleneck-sweater outfit":"Coordinate0014","tweed outfit":"Coordinate0078","two-toned-shirt outfit":"Coordinate0059","university outfit":"Coordinate0218","utility-vest outfit":"Coordinate0104","vampire costume":"Coordinate0230","varsity-cardigan outfit":"Coordinate0064","varsity-jacket outfit":"Coordinate0184","vintage outfit":"Coordinate0101","waitstaff outfit":"Coordinate0173","warm fleece outfit":"Coordinate0250","wedding-dress outfit":"Coordinate0169","wedding-suit outfit":"Coordinate0170","western outfit":"Coordinate0185","windbreaker outfit":"Coordinate0286","winter camo outfit":"Coordinate0289","witch costume":"Coordinate0091","wizard costume":"Coordinate0268","work-from-home outfit":"Coordinate0128","wrap-dress outfit":"Coordinate0140","yoga outfit":"Coordinate0343"};
+const LTD_GOODS_IMG={"Ballet 101 DVD":"ItemDVD","Jogging 101 DVD":"ItemDVD","Karate 101 DVD":"ItemDVD","Muscle Building 101 DVD":"ItemDVD","Street Dancing 101 DVD":"ItemDVD","Yoga 101 DVD":"ItemDVD","baseball":"ItemBaseballBall","bubble blower":"ItemSetBubble","camera":"ItemDSLRCamera","guitar":"ItemGuitar","knitting set":"ItemSetKnitting","laptop":"ItemLaptop","maracas":"ItemSetMaracas","painting set":"ItemSetPainting","soccer ball":"ItemSoccerBall","toy sword":"ItemToySword"};
+const LTD_TREASURE_IMG={"9-volt battery":"Treasure_9VDryBattery","Daruma":"Treasure092","Daruma Otoshi game":"Treasure069","Hawaiian key chain":"Treasure124","Hercules beetle":"Treasure_Beetle","J-pop album":"Treasure_CDIdol","Jōmon-period pottery":"Treasure_JomonPottery","Keseran-Pasaran":"Treasure_KeseranPasaran","Statue of Liberty figurine":"Treasure_SatueOfLiberty","Super Scope":"Treasure_Superscope","Tomodachi Life":"Treasure_TomodachiCollection","Tyrannosaurus":"Treasure_Tyrannosaurus","UFO":"Treasure_Ufo","Venetian glass":"Treasure_VenetianGlass","Virtual Boy":"Treasure_VirtualBoy","action movie":"Treasure_DVDAction","adventure game":"Treasure_GameAdventure","alebrije":"Treasure_Alebrijes","alpaca":"Treasure_Alpaca","alpha alien":"Treasure_Alien","aluminum briefcase":"Treasure_DuraluminCase","amber":"Treasure_Amber","amethyst":"Treasure_AmethystDome","ammonite fossil":"Treasure018","animal-shaped planter":"Treasure_AnimalFlowerpot","anime-openings compilation":"Treasure_CDAnimeSong","anonymous notebook":"Treasure_BookSomeonesNote","autumn leaf":"Treasure_FallenLeaves","axolotl":"Treasure_Axolotl","back scratcher":"Treasure_GrandsonsHand","balloon animal":"Treasure_BalloonArt","bamboo box":"Treasure109","bearded dragon":"Treasure_BeardedDragon","bent spoon":"Treasure_BentSpoon","beta alien":"Treasure_Alien","big vase":"Treasure_BigPot","binoculars":"Treasure024","bird feather":"Treasure_BirdFeathers","bird nest":"Treasure_SwallowsNest","bonsai tree":"Treasure046","book of many riddles":"Treasure_BookRiddle","botanical guidebook":"Treasure_BookPlant","botijo":"Treasure_TraditionalSpanishWaterBottle","bottle cap":"Treasure_CrownCap","bouquet":"Treasure047","box of tissues":"Treasure_Tissue","brass key":"Treasure012","bronze palette":"Treasure_BrushBronze","bronze speech bubble":"Treasure_SpeechBubbleBronze","bronze trophy":"Treasure032","bun-tower figure":"Treasure_BaoshanDecoration","butterfly":"Treasure_Butterfly","call bell":"Treasure_CallBell","capybara":"Treasure_Capybara","carnation":"Treasure_Carnation","cartoon":"Treasure_DVDAnimation","cat":"Treasure_Cat","celadon-porcelain tea set":"Treasure_CeladonTeapot","celebrity autograph":"Treasure_Autograph","chess piece":"Treasure_ChessPieces","chick":"Treasure_Chick","children's album":"Treasure_CDNurseryRhyme","chipmunk":"Treasure_Chipmunk","cicada shell":"Treasure_CicadaShell","circuit board":"Treasure_ElectronicSubstrate","classical album":"Treasure_CDClassic","clay figure":"Treasure052","clione":"Treasure_Clione","clown fish":"Treasure_Clownfish","cockatoo":"Treasure_Parrot","coconut bowl":"Treasure_CoconutBowl","colorful basket":"Treasure_ColorfulBasket","compass":"Treasure043","cooking show":"Treasure_DVDCooking","coral":"Treasure064","covered book":"Treasure_BookCover","creature egg":"Treasure_Egg","crystal":"Treasure030","crystal ball":"Treasure_CrystalBall","dancing game":"Treasure_GameDance","dating-sim game":"Treasure_GameLoveSimulation","diamond":"Treasure_Diamond","die":"Treasure059","dirty sock":"Treasure000","disco ball":"Treasure102","dog":"Treasure_Dog","dogū figure":"Treasure_ClayFigure","door handle":"Treasure135","eastern quoll":"Treasure_Quoll","educational game":"Treasure_GameEducation","embroidered decoration":"Treasure_EmbroideryWallHanging","embroidered handkerchief":"Treasure_EmbroideredHandkerchief","engagement ring":"Treasure_EngagementRing","expensive-looking vase":"Treasure_ExpensivePot","famous-mountains calendar":"Treasure_FamousMountainCalendar","faucet":"Treasure010","fighting game":"Treasure_GameAction","fishing lure":"Treasure_Lure","flamingo":"Treasure_Flamingo","floppy disk":"Treasure_Floppy","flyswatter":"Treasure_FlySwatter","four-leaf clover":"Treasure016","foxtail":"Treasure_Nekojarashi","frog":"Treasure_Frog","funny comic":"Treasure_BookManga","gamma alien":"Treasure_Alien","gears":"Treasure_GearParts","ghost":"Treasure_Ghost","glass ornament":"Treasure_GlassZaiku","globe":"Treasure180","gold bar":"Treasure_GoldBar","gold coin":"Treasure_CoinGold","gold palette":"Treasure_BrushGold","gold speech bubble":"Treasure_SpeechBubbleGold","gold trophy":"Treasure034","goldfish":"Treasure_Goldfish","hamster":"Treasure_Hamster","hand mirror":"Treasure_HandMirror","hedgehog":"Treasure_Hedgehog","historical bust":"Treasure162","historical document":"Treasure_BookHistorical","horror game":"Treasure_GameHorror","horror movie":"Treasure_DVDHorror","horror novel":"Treasure_BookHorror","horse":"Treasure_Horse","hourglass":"Treasure027","incense burner":"Treasure_IncenseBurner","insect collection":"Treasure_InsectSpecimen","jazz album":"Treasure_CDJazz","jellyfish":"Treasure_Jellyfish","jewelry box":"Treasure166","kangaroo":"Treasure_Kangaroo","kettle":"Treasure071","koala plush":"Treasure_KoalaStuffedToy","kokeshi doll":"Treasure_KokeshiDoll","light bulb":"Treasure_LightBulb","lion":"Treasure_Lion","live-concert video":"Treasure_DVDLive","lonely earbud":"Treasure_OneEarphoneIsMisissing","loofah":"Treasure028","love story":"Treasure_BookLove","lucky cat":"Treasure053","magnifying glass":"Treasure107","mahjong tile":"Treasure011","makeup box":"Treasure_MakeupBox","maple-syrup tap":"Treasure_MapleSyrupSamplingPort","marble":"Treasure021","marionette":"Treasure113","martian rock":"Treasure122","message in a bottle":"Treasure_MessageBottle","mini car":"Treasure_MiniCar","model train":"Treasure_TrainModel","mosquito coil":"Treasure087","mysterious liquid":"Treasure_MysteriousLiquid","nail polish":"Treasure_NailPolish","nature video":"Treasure_DVDNature","octahedral stone":"Treasure_Octahydrone","octopus":"Treasure_Octopus","olive-oil soap":"Treasure_OliveSoap","omamori":"Treasure067","one-way ticket":"Treasure_Ticket","origami crane":"Treasure054","paper talisman":"Treasure_Bill","parrot":"Treasure_Parakeet","pearl":"Treasure_Pearl","pearlescent accessory case":"Treasure_RadenAccessoryCase","pebble":"Treasure080","penguin":"Treasure_Penguin","perfume":"Treasure_Perfume","picture book":"Treasure_BookPicture","picture-postcards set":"Treasure_PostcardSet","pig":"Treasure_Pig","piggy bank":"Treasure_PigPiggyBank","pile of documents":"Treasure_Document","pine cone":"Treasure094","piñata":"Treasure_Pinata","plastic-model leftovers":"Treasure_PlasticModelParts","platinum palette":"Treasure_BrushPlatinum","platinum speech bubble":"Treasure_SpeechBubblePlatinum","platinum trophy":"Treasure035","plush panda":"Treasure_StuffedToyBear","pocket watch":"Treasure045","pop album":"Treasure_CDPopMusic","puzzle game":"Treasure_GamePuzzle","rabbit":"Treasure_Rabbit","racing game":"Treasure_GameRacing","receipt":"Treasure_Receipt","reggae album":"Treasure_CDReggae","restaurant menu":"Treasure_RestaurantMenu","robot":"Treasure_Robot","rock album":"Treasure_CDRock","rock collection":"Treasure_StoneSpecimen","role-playing game":"Treasure_GameRoleplaying","romantic movie":"Treasure_DVDLove","roof tiles":"Treasure_Tile","rose":"Treasure061","rubber ducky":"Treasure040","ruby":"Treasure_Ruby","safe":"Treasure_Cashbox","satellite dish":"Treasure_Antenna","sauna whisk":"Treasure_Vihta","scented candle":"Treasure085","sci-fi movie":"Treasure_DVDSF","screw":"Treasure015","sea-urchin skeleton":"Treasure_SeaUrchinBone","seashell":"Treasure013","security camera":"Treasure118","self-help book":"Treasure_BookDevelopment","shark":"Treasure_BlackTipReefShark","shiny beads":"Treasure_GlitterBeads","ship in a bottle":"Treasure_BottleShip","shogi \"king\" piece":"Treasure055","shopping-channel show":"Treasure_DVDShopping","silver coin":"Treasure_CoinSilver","silver palette":"Treasure_BrushSilver","silver speech bubble":"Treasure_SpeechBubbleSilver","silver trophy":"Treasure033","slime":"Treasure_Slime","solar panel":"Treasure138","solid-gold cup":"Treasure_GoldCup","spinning top":"Treasure031","spirit":"Treasure_Spirit","sports show":"Treasure_DVDSports","stopwatch":"Treasure_Stopwatch","sugar glider":"Treasure_SugarGlider","suspicious button":"Treasure_SuspiciousSwitch","tabletop light":"Treasure_MoodLight","tanuki statue":"Treasure091","tawashi scrub brush":"Treasure096","techno album":"Treasure_CDDance","tiny terrarium":"Treasure_MiniTerrarium","toilet paper":"Treasure003","toy robot":"Treasure022","treasure map":"Treasure_TreasureMap","tree branch":"Treasure_TreeBranch","tuna":"Treasure_Tuna","turtle":"Treasure_Turtle","unicorn":"Treasure_Unicorn","vacuum tube":"Treasure_VacuumTube","variety show":"Treasure_DVDWideShow","video-game soundtrack":"Treasure_CDGameMusic","water flea":"Treasure_Daphnia","weak-looking elastic rope":"Treasure_RubberString","wind-up teeth":"Treasure175","wire puzzle":"Treasure_CircleOfWisdom","wooden bear statue":"Treasure_WoodenCarvingBear","wool-felt sheep":"Treasure_WoolFelt"};
 // ── Belongings item data ──────────────────────────────────────────────────────
 // CLOTH_DATA[i]=[index,colorCount,nameHash,label,category]
 // COORD_DATA[i]=[saveIndex,keyHash,colorCount,label,category]
@@ -3367,13 +4165,22 @@ function renderBlWornOutfit(idx){
       return blOwnedColors(mask,c[2]).length>0;
     }).map(c=>`<option value="${c[1]>>>0}"${(c[1]>>>0)===coordKH?' selected':''}>${esc(c[3])}</option>`).join('');
     const colorOpts=coordData?blOwnedColors(blCoordMask(coordData[0]),coordData[2]).map(ci=>`<option value="${ci}"${ci===coordCI?' selected':''}>${ci+1}</option>`).join(''):'';
+    const coordImgAsset=coordData?LTD_COORD_IMG[coordData[3]]:null;
+    const coordThumb=coordImgAsset
+      ? `<img class="bl-slot-thumb" loading="lazy" src="/img/${coordImgAsset}_00.png" alt="" onerror="this.classList.add('empty')">`
+      : `<div class="bl-slot-thumb empty"></div>`;
     body+=`<div class="bl-worn-grid">
       <div class="bl-worn-slot">
         <div class="bl-worn-slot-lbl">Coordinate outfit</div>
-        <select class="ed-select" onchange="blCommitCoordKey(this.value)">
-          <option value="0">(none)</option>${coordOpts}</select>
-        ${coordData&&colorOpts?`<div style="margin-top:5px"><select class="ed-select" onchange="blCommitCoordColor(this.value)">${colorOpts}</select></div>`:''}
-        ${coordData?`<div class="bl-coord-pieces">${esc(coordData[3])} · ${esc(coordData[4])}</div>`:''}
+        <div class="bl-slot-body">
+          ${coordThumb}
+          <div class="bl-slot-controls">
+            <select class="ed-select" onchange="blCommitCoordKey(this.value)">
+              <option value="0">(none)</option>${coordOpts}</select>
+            ${coordData&&colorOpts?`<select class="ed-select" onchange="blCommitCoordColor(this.value)">${colorOpts}</select>`:''}
+            ${coordData?`<div class="bl-coord-pieces">${esc(coordData[3])} · ${esc(coordData[4])}</div>`:''}
+          </div>
+        </div>
       </div>
     </div>
     <div style="font-size:.72rem;color:var(--muted)">
@@ -3392,14 +4199,23 @@ function renderBlWornOutfit(idx){
       const ownableForSlot=CLOTH_DATA.filter(c=>c[4]&&s.pfx.some(p=>p.replace('Cloth','')===c[4])&&blOwnedColors(blOwnMask(c[0]),c[1]).length>0);
       const opts=ownableForSlot.map(c=>`<option value="${c[2]>>>0}"${(c[2]>>>0)===kh?' selected':''}>${esc(c[3])}</option>`).join('');
       const colorOpts=cd?blOwnedColors(blOwnMask(cd[0]),cd[1]).map(i=>`<option value="${i}"${i===ci?' selected':''}>${i+1}</option>`).join(''):'';
+      const wornImgAsset=cd?LTD_CLOTH_IMG[cd[3]]:null;
+      const wornThumb=wornImgAsset
+        ? `<img class="bl-slot-thumb" loading="lazy" src="/img/${wornImgAsset}_00.png" alt="" onerror="this.classList.add('empty')">`
+        : `<div class="bl-slot-thumb empty"></div>`;
       body+=`<div class="bl-worn-slot">
         <div class="bl-worn-slot-lbl">${esc(s.key)} <button class="bl-btn-sm" onclick="blClearWornSlot(${s.kh>>>0},${s.ch>>>0},${idx})" style="float:right;margin-top:-2px">✕</button></div>
-        <select class="ed-select" data-kh="${s.kh>>>0}" data-ch="${s.ch>>>0}" onchange="blCommitWornKey(this)">
-          <option value="0">(none)</option>${opts}
-          ${!cd&&kh?`<option value="${kh}" selected>0x${kh.toString(16).padStart(8,'0')} (unknown)</option>`:''}
-        </select>
-        ${cd&&colorOpts?`<div style="margin-top:5px"><select class="ed-select" data-ch="${s.ch>>>0}" onchange="blCommitWornColor(this)">${colorOpts}</select></div>`:''}
-        ${cd?`<div style="font-size:.7rem;color:var(--muted);margin-top:3px">${esc(cd[3])}</div>`:''}
+        <div class="bl-slot-body">
+          ${wornThumb}
+          <div class="bl-slot-controls">
+            <select class="ed-select" data-kh="${s.kh>>>0}" data-ch="${s.ch>>>0}" onchange="blCommitWornKey(this)">
+              <option value="0">(none)</option>${opts}
+              ${!cd&&kh?`<option value="${kh}" selected>0x${kh.toString(16).padStart(8,'0')} (unknown)</option>`:''}
+            </select>
+            ${cd&&colorOpts?`<select class="ed-select" data-ch="${s.ch>>>0}" onchange="blCommitWornColor(this)">${colorOpts}</select>`:''}
+            ${cd?`<div style="font-size:.7rem;color:var(--muted)">${esc(cd[3])}</div>`:''}
+          </div>
+        </div>
       </div>`;
     }
     body+='</div>';
@@ -3501,11 +4317,24 @@ function renderBlGoods(idx){
       ${mkGoodsOpts(sl.sid)}
       ${unknown?`<option value="${sl.sid}" selected>0x${sl.sid.toString(16).padStart(8,'0')} (unknown)</option>`:''}
       </select>`;
+    const treasureImg=sl.tr?LTD_TREASURE_IMG[sl.tr[1]]:null;
+    const ugcImg=isUgc?`/api/preview?stem=UgcGoods${String(sl.ug).padStart(3,'0')}`:null;
+    // Treasures on ltdimages don't have a _00 color-variant suffix, unlike
+    // Cloth/Coordinate. Just append .png to the stem.
+    const thumbSrc=ugcImg||(treasureImg?`/img/${treasureImg}.png`:null);
+    const thumb=thumbSrc
+      ? `<img class="bl-slot-thumb" loading="lazy" src="${thumbSrc}" alt="" onerror="this.classList.add('empty')">`
+      : `<div class="bl-slot-thumb empty"></div>`;
     return `<div class="bl-goods-slot">
       <div class="bl-goods-hd"><span>Slot ${sl.s+1}</span><button class="bl-btn-sm" onclick="blClearGoodsSlot(${sl.ai})">✕</button></div>
-      ${isUgc?`<div style="font-size:.8rem;color:var(--muted)">${esc(ugcGoodsName(sl.ug))}</div>`:opts}
-      ${sl.tr?`<div style="font-size:.7rem;color:var(--muted);margin-top:3px">${esc(sl.tr[1])} · ${esc(sl.tr[2])}</div>`:''}
-      ${dateStr?`<div style="font-size:.7rem;color:var(--muted);margin-top:3px">Got: ${esc(dateStr)}</div>`:''}
+      <div class="bl-slot-body">
+        ${thumb}
+        <div class="bl-slot-controls">
+          ${isUgc?`<div style="font-size:.8rem;color:var(--muted)">${esc(ugcGoodsName(sl.ug))}</div>`:opts}
+          ${sl.tr?`<div style="font-size:.7rem;color:var(--muted)">${esc(sl.tr[1])} · ${esc(sl.tr[2])}</div>`:''}
+          ${dateStr?`<div style="font-size:.7rem;color:var(--muted)">Got: ${esc(dateStr)}</div>`:''}
+        </div>
+      </div>
     </div>`;
   }).join('');
 
@@ -3579,7 +4408,12 @@ function renderBlCloths(idx){
       const on=((eff>>>ci)&1)===1;
       return `<button class="bl-color-chip${on?' owned':''}" title="${esc(c[3])} color ${ci+1}" onclick="blToggleClothColor(${c[0]},${ci},${on?0:1})">${ci+1}</button>`;
     }).join('');
+    const imgAsset=LTD_CLOTH_IMG[c[3]];
+    const thumb=imgAsset
+      ? `<img class="bl-item-thumb" loading="lazy" src="/img/${imgAsset}_00.png" alt="" onerror="this.classList.add('empty')">`
+      : `<div class="bl-item-thumb empty"></div>`;
     return `<div class="bl-item-row${owned?' owned':''}">
+      ${thumb}
       <div class="bl-item-info">
         <div class="bl-item-name">${esc(c[3])}</div>
         <div class="bl-item-meta">${esc(c[4])} &middot; ${blPopcount(eff)}/${c[1]} colors</div>
@@ -3684,7 +4518,12 @@ function renderBlCoords(idx){
       const on=((eff>>>ci)&1)===1;
       return `<button class="bl-color-chip${on?' owned':''}" title="${esc(c[3])} color ${ci+1}" onclick="blToggleCoordColor(${c[0]},${ci},${on?0:1})">${ci+1}</button>`;
     }).join('');
+    const imgAsset=LTD_COORD_IMG[c[3]];
+    const thumb=imgAsset
+      ? `<img class="bl-item-thumb" loading="lazy" src="/img/${imgAsset}_00.png" alt="" onerror="this.classList.add('empty')">`
+      : `<div class="bl-item-thumb empty"></div>`;
     return `<div class="bl-item-row${owned?' owned':''}">
+      ${thumb}
       <div class="bl-item-info">
         <div class="bl-item-name">${esc(c[3])}</div>
         <div class="bl-item-meta">${esc(c[4])} &middot; ${blPopcount(eff)}/${c[2]} colors</div>
@@ -4067,12 +4906,89 @@ function housingAddResident(houseId){
 }
 function housingVacate(hid){
   if(!savMii)return;
-  if(!confirm('Remove every resident from house #'+hid+'?'))return;
+  if(!confirm('Remove every resident from house #'+hid+'? The house itself stays.'))return;
   for(const m of housingCollect()){
     if(m.house===hid)housingWriteLoc(m.i,-1,-1);
   }
   markMiiDirty();
   renderMiiHousing();
+}
+// Helpers for the new "delete" button and auto-cleanup on Map.sav apply.
+// Mirrors upstream's deleteHouseByMapId in ltd-save-editor exactly:
+//   * Only MapObject.ActorKey is written — set to 0 to mark the slot empty.
+//     House.MapId, LinkedMapId, position, etc. are left untouched.
+//   * Only group === 0 (ACTOR_HOUSE = HouseDollHouse / HouseOneRoom) counts
+//     as a deletable house. UGC houses (group 5, HouseUgcXX_YY) are decor,
+//     not residences — upstream's isHouseActor excludes them.
+//   * "Known house ids" come from MapObject (ActorKey + LinkedMapId), not
+//     from House.MapId. House.MapId is the static plot registry and a slot
+//     may already be cleared while the id is still listed there.
+const HOUSING_H_MAP_ACTOR = murmur3('MapObject.ActorKey');
+const HOUSING_H_MAP_LINK  = murmur3('MapObject.MapLink.LinkedMapId');
+function housingAllHouseIds(){
+  if(!savMap)return[];
+  const e=savMap.entries;
+  const n=arrSize(e,HOUSING_H_MAP_ACTOR);
+  const out=[];
+  for(let i=0;i<n;i++){
+    const a=getUIntAt(e,HOUSING_H_MAP_ACTOR,i)>>>0;
+    if(!a)continue;
+    const meta=MAP_ACTOR_INFO[a];
+    if(!meta||meta.g!==0)continue;
+    const link=getIntAt(e,HOUSING_H_MAP_LINK,i);
+    if(link>=0)out.push(link);
+  }
+  return out;
+}
+function housingMapObjectSlotForHouse(hid){
+  if(!savMap||hid<0)return -1;
+  const e=savMap.entries;
+  const n=arrSize(e,HOUSING_H_MAP_ACTOR);
+  for(let i=0;i<n;i++){
+    const a=getUIntAt(e,HOUSING_H_MAP_ACTOR,i)>>>0;
+    if(!a)continue;
+    const meta=MAP_ACTOR_INFO[a];
+    if(!meta||meta.g!==0)continue;
+    if(getIntAt(e,HOUSING_H_MAP_LINK,i)===hid)return i;
+  }
+  return -1;
+}
+function housingScrubMapHouse(hid){
+  if(!savMap||hid<0)return false;
+  const slot=housingMapObjectSlotForHouse(hid);
+  if(slot<0)return false;
+  setUIntAt(savMap.entries,HOUSING_H_MAP_ACTOR,slot,0);
+  mapState.dirty=true;
+  const btn=document.getElementById('map-apply-btn');
+  if(btn)btn.disabled=false;
+  return true;
+}
+function housingResidentCount(hid){
+  if(!savMii||hid<0)return 0;
+  let c=0;
+  for(const m of housingCollect()) if(m.house===hid)c++;
+  return c;
+}
+function housingDeleteHouse(hid){
+  if(!savMii)return;
+  if(!savMap){
+    housingShowError('Load Map.sav first (Map tab → load Map.sav) so the editor can scrub the house actor.');
+    return;
+  }
+  if(!confirm('Delete house #'+hid+' from the island? Residents will be made unhoused.'))return;
+  // Kick residents (Mii.sav) and remove the house actor (Map.sav).
+  for(const m of housingCollect()){
+    if(m.house===hid)housingWriteLoc(m.i,-1,-1);
+  }
+  housingScrubMapHouse(hid);
+  markMiiDirty();
+  renderMiiHousing();
+}
+function housingCleanupEmptyHouses(){
+  if(!savMap||!savMii)return;
+  for(const hid of housingAllHouseIds()){
+    if(housingResidentCount(hid)===0)housingScrubMapHouse(hid);
+  }
 }
 function housingSelectSlot(i){
   savMiiSlot=i;
@@ -4107,6 +5023,9 @@ function renderMiiHousing(){
   }
   const houses=new Map();
   const unhoused=[];
+  // Seed every known house from Map.sav so vacated houses stay visible in
+  // the editor; auto-cleanup at applyMap() time removes the empty ones.
+  for(const hid of housingAllHouseIds()) if(!houses.has(hid)) houses.set(hid,[]);
   for(const m of miis){
     if(m.house<0){unhoused.push(m);continue;}
     if(!houses.has(m.house))houses.set(m.house,[]);
@@ -4163,7 +5082,9 @@ function renderMiiHousing(){
       if(!rowsByRoom.has(r.room))rowsByRoom.set(r.room,[]);
       rowsByRoom.get(r.room).push(r);
     }
-    const totalRooms=Math.max(maxRoom+1,0);
+    // Vacated / empty houses (no residents yet) still get at least one drop
+    // slot so the user can re-populate without the card being a dead end.
+    const totalRooms=Math.max(maxRoom+1,1);
     const hLabel = housingHouseName(hid);
     const titleHtml = hLabel
       ? `<span class="hou-card-name">${esc(hLabel)}</span><span class="hou-id">#${hid}</span>`
@@ -4172,7 +5093,8 @@ function renderMiiHousing(){
       <div class="hou-card-head">
         <span class="hou-card-title">${titleHtml}</span>
         <span class="hou-card-meta">${residents.length}</span>
-        <button class="hou-card-vacate" onclick="housingVacate(${hid})" title="Evict every resident in this house">vacate</button>
+        <button class="hou-card-vacate" onclick="housingVacate(${hid})" title="Evict residents; keep the house standing (empty houses are auto-deleted on save)">vacate</button>
+        <button class="hou-card-vacate" onclick="housingDeleteHouse(${hid})" title="Delete the house from the island and unhouse its residents">delete</button>
       </div>
       <div class="hou-card-body">`;
     for(let r=0;r<totalRooms;r++){
@@ -4487,22 +5409,38 @@ function renderBrowseDetail(){
       ${tags.length?`<div class="br-detail-row"><b>tags</b><div class="br-detail-tags">${tags.map(t=>`<span class="br-tag">${esc(t)}</span>`).join('')}</div></div>`:''}
       ${info.description?`<div class="br-detail-desc">${esc(info.description)}</div>`:''}
       <div class="br-import-box">
-        ${isFromSav?'':`<div class="br-import-hint" style="color:var(--err)">⚠ This mii was uploaded as a photo/QR only. The .ltd download may not exist.</div>`}
-        ${allowCopy?'':`<div class="br-import-hint">Note: the creator marked this mii as not freely copyable. Please respect their wishes.</div>`}
-        <div class="br-import-hint" style="color:var(--err)"><b>This will overwrite the chosen Mii slot.</b> Pick the slot you want to replace.</div>
-        <div class="br-import-row">
-          <label>overwrite slot</label>
-          <input type="number" id="br-import-slot" min="1" max="70" value="${(savMii&&typeof savMiiSlot==='number')?(savMiiSlot+1):1}" oninput="updateBrowseOverwriteHint()">
-          <span class="br-import-hint" id="br-overwrite-target" style="flex:1"></span>
+        <div class="br-import-title">import to your save</div>
+        <div class="br-import-warn"><b>This will overwrite the chosen Mii slot.</b> Pick the slot you want to replace below.</div>
+        ${isFromSav?'':`<div class="br-import-note">⚠ This mii was uploaded as a photo/QR only — the .ltd download may not exist.</div>`}
+        ${allowCopy?'':`<div class="br-import-note">Note: the creator marked this mii as not freely copyable. Please respect their wishes.</div>`}
+        <div class="br-import-slot-row">
+          <label for="br-import-slot">slot</label>
+          <div class="br-import-stepper">
+            <button type="button" onclick="stepBrowseSlot(-1)" aria-label="previous slot" title="previous slot">−</button>
+            <input type="number" id="br-import-slot" min="1" max="70" value="${(savMii&&typeof savMiiSlot==='number')?(savMiiSlot+1):1}" oninput="updateBrowseOverwriteHint()">
+            <button type="button" onclick="stepBrowseSlot(1)" aria-label="next slot" title="next slot">+</button>
+          </div>
+          <span class="br-import-slot-range">of 70</span>
         </div>
-        <div class="br-import-row">
+        <div class="br-import-target" id="br-overwrite-target">— load Mii.sav first</div>
+        <div class="br-import-action">
           <button class="btn btn-primary" id="br-import-btn" onclick="doBrowseImport(${d.id})" ${savMii?'':'disabled title="Load Mii.sav first"'}>${savMii?'⬇ overwrite slot with this Mii':'load Mii.sav first'}</button>
-          <span class="status info" id="br-import-status" style="flex:1"></span>
+          <span class="status info" id="br-import-status"></span>
         </div>
       </div>
     </div>
   </div>`;
   card.innerHTML=html;
+  updateBrowseOverwriteHint();
+}
+// Increment/decrement the slot number via the stepper buttons.
+function stepBrowseSlot(delta){
+  const slotInp=document.getElementById('br-import-slot');
+  if(!slotInp)return;
+  let v=parseInt(slotInp.value);
+  if(!isFinite(v))v=1;
+  v=Math.max(1,Math.min(70,v+delta));
+  slotInp.value=v;
   updateBrowseOverwriteHint();
 }
 // Shows the existing Mii name in the chosen slot, so the user knows what
@@ -4511,14 +5449,15 @@ function updateBrowseOverwriteHint(){
   const slotInp=document.getElementById('br-import-slot');
   const tgt=document.getElementById('br-overwrite-target');
   if(!slotInp||!tgt)return;
-  if(!savMii){tgt.textContent='— load Mii.sav first';tgt.style.color='var(--err)';return;}
+  tgt.className='br-import-target';
+  if(!savMii){tgt.classList.add('bad');tgt.textContent='⚠ load Mii.sav first';return;}
   const slot=parseInt(slotInp.value);
-  if(!isFinite(slot)||slot<1||slot>70){tgt.textContent='— invalid slot';tgt.style.color='var(--err)';return;}
+  if(!isFinite(slot)||slot<1||slot>70){tgt.classList.add('bad');tgt.textContent='⚠ invalid slot — must be 1–70';return;}
   const nh=H('Mii.Name.Name');
   let name='';
   try{name=getWStr32At(savMii.entries,nh,slot-1);}catch(e){}
-  if(name){tgt.innerHTML='— replacing <b>'+esc(name)+'</b>';tgt.style.color='var(--muted)';}
-  else    {tgt.innerHTML='— slot is empty';tgt.style.color='var(--muted)';}
+  if(name){tgt.innerHTML='slot '+slot+' currently holds <b>'+esc(name)+'</b> — it will be replaced';}
+  else    {tgt.classList.add('empty');tgt.textContent='slot '+slot+' is currently empty';}
 }
 async function doBrowseImport(id){
   const slotInp=document.getElementById('br-import-slot');
@@ -4627,8 +5566,13 @@ function renderMiiRelations(){
     const outFixed=isRelFixed(outT),inFixed=isRelFixed(inT);
     const outCol=relColor(outT),inCol=relColor(inT);
     const tst=getUInt64At(e,H_TST,i),tstVal=u64ToDateLocal(tst);
+    const isOutUnknown=(outT>>>0)===0x0784a8dc;
     rows+=`<div class="rel-row" style="border-left-color:${outCol}">
-      <div class="rel-row-head"><span class="rel-row-name">${esc(oName)}</span><span style="font-size:.72rem;color:var(--muted)">pair #${i+1} &middot; slot ${other+1}</span></div>
+      <div class="rel-row-head">
+        <span class="rel-row-name">${esc(oName)}</span>
+        <span style="font-size:.72rem;color:var(--muted)">pair #${i+1} &middot; slot ${other+1}</span>
+        ${isOutUnknown?'<button class="bl-btn-sm rel-batch-know" onclick="relBatchKnow()" title="Convert every Unknown relation for this Mii to Know with natural game values" style="margin-left:auto;border-color:var(--ok);color:var(--ok)">Batch Know</button>':''}
+      </div>
       <div class="rel-row-fields">
         <div class="rel-row-col">
           <div class="rel-row-col-lbl" style="color:${outCol}">your view</div>
@@ -4674,6 +5618,39 @@ function onTypeSetTimeChange(ev){
   const secs=dateLocalToU64(ev.target.value);
   if(secs===null)return;
   setUInt64At(savMii.entries,0x1a892e50,pi,secs);
+}
+// Convert every Unknown relation this Mii has into Know. Meter is set to one
+// of the natural in-game values (0..200, only the discrete thresholds the
+// game itself stamps) and "Since" is bumped to right now.
+function relBatchKnow(){
+  if(!savMii)return;
+  const e=savMii.entries,slot=savMiiSlot;
+  const H_IA=0xf7420afb,H_IB=0x4071f71c,H_BASE=0x8b41897e,H_METER=0x42c2fc2f,H_TST=0x1a892e50;
+  const H_UNKNOWN=0x0784a8dc,H_KNOW=0x354a0515;
+  // Natural game values the meter takes for the Know type. Other ints work
+  // technically, but the game itself only ever stamps these.
+  const NATURAL=[0,20,40,60,100,120,140];
+  const nowSecs=Math.floor(Date.now()/1000);
+  const pc=arrSize(e,H_IA);
+  let changed=0;
+  for(let i=0;i<pc;i++){
+    const a=getIntAt(e,H_IA,i),b=getIntAt(e,H_IB,i);
+    if(a<0||b<0)continue;
+    if(a!==slot&&b!==slot)continue;
+    const selfA=(a===slot);
+    const outIdx=selfA?i*2:i*2+1,inIdx=selfA?i*2+1:i*2;
+    const outT=getAnyEnumAt(e,H_BASE,outIdx)>>>0;
+    if(outT!==H_UNKNOWN)continue;
+    // Know is symmetric — both directions get the same hash.
+    setEnumAt(e,H_BASE,outIdx,H_KNOW);
+    setEnumAt(e,H_BASE,inIdx,H_KNOW);
+    const meter=NATURAL[Math.floor(Math.random()*NATURAL.length)];
+    setIntAt(e,H_METER,outIdx,meter);
+    setIntAt(e,H_METER,inIdx,meter);
+    setUInt64At(e,H_TST,i,BigInt(nowSecs));
+    changed++;
+  }
+  if(changed>0)renderMiiRelations();
 }
 // ── Social inline (client-side, reflects unsaved edits) ──────────────────────
 function renderMiiSocial(){
@@ -4729,6 +5706,7 @@ static void SendStr(int fd,const std::string& s){SendAll(fd,s.c_str(),s.size());
 static void Send200(int fd,const std::string& ct,const std::string& body){std::string h="HTTP/1.1 200 OK\r\nContent-Type: "+ct+"\r\nContent-Length: "+std::to_string(body.size())+"\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n";SendStr(fd,h);SendStr(fd,body);}
 static void Send200Bin(int fd,const std::string& ct,const std::vector<uint8_t>& body,const std::string& disp=""){std::string h="HTTP/1.1 200 OK\r\nContent-Type: "+ct+"\r\nContent-Length: "+std::to_string(body.size())+"\r\nAccess-Control-Allow-Origin: *\r\n";if(!disp.empty())h+="Content-Disposition: "+disp+"\r\n";h+="Connection: close\r\n\r\n";SendStr(fd,h);SendAll(fd,(const char*)body.data(),body.size());}
 static void Send404(int fd){SendStr(fd,"HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nNot found");}
+static void Send302(int fd,const std::string& location){std::string h="HTTP/1.1 302 Found\r\nLocation: "+location+"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";SendStr(fd,h);}
 static void Send500(int fd,const std::string& msg){std::string esc;for(char c:msg){if(c=='"')esc+="\\\"";else if(c=='\\')esc+="\\\\";else esc+=c;}std::string body="{\"ok\":false,\"error\":\""+esc+"\"}";std::string h="HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nContent-Length: "+std::to_string(body.size())+"\r\nConnection: close\r\n\r\n";SendStr(fd,h);SendStr(fd,body);}
 
 struct Request{std::string method,path,query,body,contentType;size_t contentLength=0;};
@@ -4808,11 +5786,13 @@ static void HandleExport(int fd,const std::string& query){
 static void HandleImport(int fd,const Request& req){
     auto fields=ParseMultipart(req.body,req.contentType);
     std::string stem;std::vector<uint8_t> fileData;std::string fileExt=".png";
-    std::string encoderStr,bc1ModeStr;
+    std::string encoderStr,bc1ModeStr,fitModeStr,matteStr;
     for(auto& f:fields){
         if(f.name=="stem")stem=f.data;
         else if(f.name=="encoder")encoderStr=f.data;
         else if(f.name=="bc1Mode")bc1ModeStr=f.data;
+        else if(f.name=="fitMode")fitModeStr=f.data;
+        else if(f.name=="matte")matteStr=f.data;
         else if(f.name=="file"){fileData.assign(f.data.begin(),f.data.end());if(!f.filename.empty()){size_t dot=f.filename.rfind('.');if(dot!=std::string::npos)fileExt=f.filename.substr(dot);}}
     }
     if(stem.empty()||fileData.empty()){SrvLog("Import: missing stem or file",true);Send500(fd,"Missing stem or file");return;}
@@ -4830,9 +5810,18 @@ static void HandleImport(int fd,const Request& req){
     TextureProcessor::ImportOptions opts;
     opts.pngPath=tmpPath;opts.destStem=found->directory()+"/"+found->stem;
     opts.writeCanvas=found->hasCanvas();opts.writeThumb=found->hasThumb();opts.thumbPath=found->thumbPath;opts.noSrgb=false;opts.originalUgctexPath=found->ugctexPath;
-    if(encoderStr=="rgbcx") opts.encoder=TextureProcessor::Bc1Encoder::Rgbcx;
+    if(encoderStr=="pca") opts.encoder=TextureProcessor::Bc1Encoder::PCA;
     if(bc1ModeStr=="fourColor") opts.bc1Mode=TextureProcessor::Bc1Mode::FourColor;
     else if(bc1ModeStr=="threeColor") opts.bc1Mode=TextureProcessor::Bc1Mode::ThreeColor;
+    if(fitModeStr=="contain") opts.fitMode=TextureProcessor::FitMode::Contain;
+    else if(fitModeStr=="fill") opts.fitMode=TextureProcessor::FitMode::Fill;
+    else opts.fitMode=TextureProcessor::FitMode::Cover;
+    // Matte color comes in as '#RRGGBB' (or empty = transparent). Only used
+    // when fit=contain; otherwise the resize ignores it.
+    if(!matteStr.empty() && matteStr.size()==7 && matteStr[0]=='#'){
+        auto h=[&](int o){int v=0;for(int i=0;i<2;i++){char c=matteStr[o+i];v<<=4;if(c>='0'&&c<='9')v|=c-'0';else if(c>='a'&&c<='f')v|=c-'a'+10;else if(c>='A'&&c<='F')v|=c-'A'+10;}return (uint8_t)v;};
+        opts.matte={h(1),h(3),h(5),255};
+    }
 
     SrvLog("Import: queuing PNG decode on main thread (IMG_Load not thread-safe)");
     {mutexLock(&s_importMutex);s_importJob={opts,tmpPath};s_importState=ImportState::Queued;s_importResult="";mutexUnlock(&s_importMutex);}
@@ -5181,12 +6170,13 @@ static void HandleSaveDownload(int fd, const std::string& query) {
     SrvLog("Save download: "+which+" ("+std::to_string(sz)+" bytes)");
 }
 
-// POST /api/save/upload?file=player|mii  — receive modified .sav and commit
+// POST /api/save/upload?file=player|mii|map  — receive modified .sav and commit
 static void HandleSaveUpload(int fd, const Request& req) {
     std::string which = GetQueryParam(req.query, "file");
     const char* path = nullptr;
     if      (which=="player") path=SAVE_PLAYER_SAV;
     else if (which=="mii")    path=SAVE_MII_SAV;
+    else if (which=="map")    path=SAVE_MAP_SAV;
     else { Send500(fd,"Invalid file"); return; }
 
     if (req.body.size() < 0x20) { Send500(fd,"File too small"); return; }
@@ -5201,8 +6191,9 @@ static void HandleSaveUpload(int fd, const Request& req) {
 
     mutexLock(&s_mutex);
     s_pendingCommit = true;
-    if (which == "player") s_pendingPlayerSavReload = true;
-    else if (which == "mii") { s_pendingMiiSavReload = true; s_pendingMiiRefresh = true; }
+    if      (which == "player") s_pendingPlayerSavReload = true;
+    else if (which == "mii")  { s_pendingMiiSavReload = true; s_pendingMiiRefresh = true; }
+    else if (which == "map")    s_pendingMapSavReload = true;
     mutexUnlock(&s_mutex);
     SrvLog("Save upload OK: "+which+" ("+std::to_string(req.body.size())+" bytes)");
     Send200(fd,"application/json","{\"ok\":true}");
@@ -5370,6 +6361,27 @@ static void HandleShareImport(int fd, const std::string& query) {
     Send200(fd, "application/json", "{\"ok\":true}");
 }
 
+// GET /img/<asset>.png — 302-redirect the browser to the ltdimages repo on
+// GitHub so it fetches the full-size image directly. Filename is validated to
+// prevent path traversal (the redirect Location is built from it).
+static bool IsSafeAssetName(const std::string& s) {
+    if (s.empty() || s.size() > 96) return false;
+    if (s.find("..") != std::string::npos) return false;
+    if (s.size() < 5 || s.substr(s.size() - 4) != ".png") return false;
+    for (char c : s) {
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+              || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == '-'))
+            return false;
+    }
+    return true;
+}
+static void HandleItemImage(int fd, const std::string& path) {
+    // path is like "/img/Cloth...Hat_00.png" — strip the "/img/" prefix.
+    std::string name = path.substr(5);
+    if (!IsSafeAssetName(name)) { Send404(fd); return; }
+    Send302(fd, "https://raw.githubusercontent.com/ltdimages/images/main/" + name);
+}
+
 static void HandleConnection(int fd){
     mutexLock(&s_mutex); s_lastConnectTick = armGetSystemTick(); mutexUnlock(&s_mutex);
     Request req;if(!ReadRequest(fd,req)){close(fd);return;}
@@ -5394,6 +6406,7 @@ static void HandleConnection(int fd){
     else if(req.method=="GET"  &&req.path=="/api/share/info")      HandleShareInfo(fd,req.query);
     else if(req.method=="GET"  &&req.path=="/api/share/image")     HandleShareImage(fd,req.query);
     else if(req.method=="POST" &&req.path=="/api/share/import")    HandleShareImport(fd,req.query);
+    else if(req.method=="GET"  &&req.path.compare(0,5,"/img/")==0)  HandleItemImage(fd,req.path);
     else Send404(fd);
     close(fd);
 }
@@ -5420,7 +6433,7 @@ static void ServerThreadFunc(void*){
 namespace HttpServer {
 void Start(int port,const std::string& ugcPath){
     if(s_running) return;
-    s_port=port;s_ugcPath=ugcPath;s_running=true;s_pendingCommit=false;s_pendingPlayerSavReload=false;s_pendingMiiSavReload=false;
+    s_port=port;s_ugcPath=ugcPath;s_running=true;s_pendingCommit=false;s_pendingPlayerSavReload=false;s_pendingMiiSavReload=false;s_pendingMapSavReload=false;
     mutexInit(&s_mutex);mutexInit(&s_logMutex);mutexInit(&s_importMutex);mutexInit(&s_bgMutex);
     s_logWrite=0;s_logRead=0;s_importState=ImportState::Idle;s_bgState=ImportState::Idle;
     MkdirP("/switch/TomoToolNX");
@@ -5436,6 +6449,8 @@ bool HasPendingPlayerSavReload(){mutexLock(&s_mutex);bool v=s_pendingPlayerSavRe
 void ClearPendingPlayerSavReload(){mutexLock(&s_mutex);s_pendingPlayerSavReload=false;mutexUnlock(&s_mutex);}
 bool HasPendingMiiSavReload(){mutexLock(&s_mutex);bool v=s_pendingMiiSavReload;mutexUnlock(&s_mutex);return v;}
 void ClearPendingMiiSavReload(){mutexLock(&s_mutex);s_pendingMiiSavReload=false;mutexUnlock(&s_mutex);}
+bool HasPendingMapSavReload(){mutexLock(&s_mutex);bool v=s_pendingMapSavReload;mutexUnlock(&s_mutex);return v;}
+void ClearPendingMapSavReload(){mutexLock(&s_mutex);s_pendingMapSavReload=false;mutexUnlock(&s_mutex);}
 bool HasPendingImport(){mutexLock(&s_importMutex);bool v=(s_importState==ImportState::Queued);mutexUnlock(&s_importMutex);return v;}
 ImportJob TakePendingImport(){mutexLock(&s_importMutex);ImportJob job=s_importJob;s_importState=ImportState::InProgress;mutexUnlock(&s_importMutex);return job;}
 void FinishImport(const std::string& result){mutexLock(&s_importMutex);s_importResult=result;s_importState=ImportState::Done;mutexUnlock(&s_importMutex);}

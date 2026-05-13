@@ -315,6 +315,19 @@ void SetIntAt(SavFile& s, uint32_t h, int idx, int32_t v) {
 void SetUIntAt(SavFile& s, uint32_t h, int idx, uint32_t v) {
     ArrayWrite(FindMut(s,h), DT_UIntArray, idx, v);
 }
+float GetFloatAt(const SavFile& s, uint32_t h, int idx, float def) {
+    uint32_t raw = 0;
+    if (!ArrayRead(Find(s,h), DT_FloatArray, idx, raw)) return def;
+    float v;
+    memcpy(&v, &raw, 4);
+    return v;
+}
+void SetFloatAt(SavFile& s, uint32_t h, int idx, float v) {
+    uint32_t raw;
+    memcpy(&raw, &v, 4);
+    ArrayWrite(FindMut(s,h), DT_FloatArray, idx, raw);
+}
+
 uint64_t GetUInt64At(const SavFile& s, uint32_t h, int idx, uint64_t def) {
     const Entry* e = Find(s, h);
     if (!e || e->type != DT_UInt64Array || e->payload.size() < 4) return def;

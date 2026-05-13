@@ -1,13 +1,10 @@
 #pragma once
-// updater.h — Auto-update from GitHub releases
-// Background thread checks latest release, downloads NRO if newer.
+// updater.h — Check GitHub for a newer release and tell the user where to grab it.
 
 #include <string>
 
-#define APP_VERSION "1.3.0"  // bump this before each release
+#define APP_VERSION "1.3.1"  // bump this before each release
 #define GITHUB_REPO "miiazertyy/TomoToolNX"
-#define UPDATE_NRO_PATH     "sdmc:/switch/TomoToolNX/TomoToolNX.nro"
-#define UPDATE_NRO_SWAP     "sdmc:/switch/TomoToolNX/TomoToolNX_new.nro"
 
 namespace Updater {
 
@@ -16,17 +13,13 @@ enum class State {
     Checking,
     UpdateAvailable,
     NoUpdate,
-    Downloading,
-    Done,
     Error
 };
 
 void     StartCheck();           // Start background version check
 State    GetState();
-float    GetProgress();          // 0.0-1.0 during download
 std::string GetLatestVersion();  // e.g. "1.0.1"
 std::string GetError();
-void     StartDownload();        // Call after user confirms
 void     Cleanup();              // Call on exit
 
 // Compare version strings, returns true if a > b
