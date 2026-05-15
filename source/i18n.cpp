@@ -15,8 +15,10 @@ namespace {
 const std::vector<Lang::Entry> kAvailable = {
     {"en", "English"},
     {"fr", "Français"},
-    // {"es", "Español"},
-    // {"de", "Deutsch"},
+    {"es", "Español"},
+    {"de", "Deutsch"},
+    {"ru", "Русский"},
+    {"zh", "简体中文"},
     // {"it", "Italiano"},
     // {"pt", "Português"},
     // {"ja", "日本語"},

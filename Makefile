@@ -27,7 +27,7 @@ include $(DEVKITPRO)/libnx/switch_rules
 TARGET      := TomoToolNX
 APP_TITLE   := TomoToolNX
 APP_AUTHOR  := Imprimante
-APP_VERSION := 1.3.1
+APP_VERSION := 1.3.2
 # Title ID intentionally left blank for emulator compatibility:
 # Ryubing 1.3.279's Discord-integration module reacts to the "active title
 # changed" event during NRO load and dereferences the not-yet-registered
@@ -89,7 +89,7 @@ HAZE_CXXFLAGS := -g -Os -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -f
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
-LIBS	:= -lSDL2_ttf -lfreetype -lharfbuzz -lbz2 -lSDL2_image -lSDL2 -lpng -ljpeg -lwebp -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -lz -lzstd -lEGL -lglapi -ldrm_nouveau -lnx
+LIBS	:= -lSDL2_ttf -lfreetype -lharfbuzz -lbz2 -lSDL2_image -lSDL2_mixer -lvorbisidec -lmodplug -lmpg123 -lopusfile -lopus -lFLAC -logg -lSDL2 -lpng -ljpeg -lwebp -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -lz -lzstd -lEGL -lglapi -ldrm_nouveau -lnx
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, libhaze.a is in $(BUILD)/

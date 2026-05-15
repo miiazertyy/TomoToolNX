@@ -389,6 +389,8 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
 /* ── browse online (TomodachiShare) ─────────────────────────────────────── */
 .btn-share-icon{border-color:#5a8cc8;color:#5a8cc8;display:inline-flex;align-items:center;justify-content:center;padding:0;width:28px;height:28px;flex-shrink:0}
 .btn-share-icon:hover:not(:disabled){border-color:#7aaee8;color:#7aaee8;background:rgba(122,174,232,.08)}
+#btn-mii-import{background:transparent}
+#btn-mii-import:hover:not(:disabled){background:transparent}
 #mii-browse-panel{padding:10px 12px;display:flex;flex-direction:column;gap:10px;box-sizing:border-box;min-height:100%}
 .br-toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:8px 10px}
 .br-search{flex:1;min-width:160px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:5px 9px;border-radius:3px;font-size:.85rem;font-family:inherit;outline:none}
@@ -4115,6 +4117,15 @@ function blFormatTime(t){
 let blClothFilter='owned', blClothSearch='', blClothCat='All';
 let blCoordFilter='owned', blCoordSearch='';
 
+// Some ltdimages assets only exist with a color suffix (e.g. _00.png).
+// If the bare .png 404s, retry the _00 variant once.
+function blImgFallback(img){
+  if(/_\d\d\.png(\?.*)?$/.test(img.src)){
+    img.onerror=null; img.classList.add('empty'); return;
+  }
+  img.src=img.src.replace(/\.png(\?.*)?$/,'_00.png$1');
+}
+
 // ── Belongings render ─────────────────────────────────────────────────────────
 function renderMiiBelongings(){
   if(!savMii)return;
@@ -4167,7 +4178,7 @@ function renderBlWornOutfit(idx){
     const colorOpts=coordData?blOwnedColors(blCoordMask(coordData[0]),coordData[2]).map(ci=>`<option value="${ci}"${ci===coordCI?' selected':''}>${ci+1}</option>`).join(''):'';
     const coordImgAsset=coordData?LTD_COORD_IMG[coordData[3]]:null;
     const coordThumb=coordImgAsset
-      ? `<img class="bl-slot-thumb" loading="lazy" src="/img/${coordImgAsset}_00.png" alt="" onerror="this.classList.add('empty')">`
+      ? `<img class="bl-slot-thumb" loading="lazy" src="/img/${coordImgAsset}_00.png" alt="" onerror="blImgFallback(this)">`
       : `<div class="bl-slot-thumb empty"></div>`;
     body+=`<div class="bl-worn-grid">
       <div class="bl-worn-slot">
@@ -4201,7 +4212,7 @@ function renderBlWornOutfit(idx){
       const colorOpts=cd?blOwnedColors(blOwnMask(cd[0]),cd[1]).map(i=>`<option value="${i}"${i===ci?' selected':''}>${i+1}</option>`).join(''):'';
       const wornImgAsset=cd?LTD_CLOTH_IMG[cd[3]]:null;
       const wornThumb=wornImgAsset
-        ? `<img class="bl-slot-thumb" loading="lazy" src="/img/${wornImgAsset}_00.png" alt="" onerror="this.classList.add('empty')">`
+        ? `<img class="bl-slot-thumb" loading="lazy" src="/img/${wornImgAsset}_00.png" alt="" onerror="blImgFallback(this)">`
         : `<div class="bl-slot-thumb empty"></div>`;
       body+=`<div class="bl-worn-slot">
         <div class="bl-worn-slot-lbl">${esc(s.key)} <button class="bl-btn-sm" onclick="blClearWornSlot(${s.kh>>>0},${s.ch>>>0},${idx})" style="float:right;margin-top:-2px">✕</button></div>
@@ -4317,13 +4328,16 @@ function renderBlGoods(idx){
       ${mkGoodsOpts(sl.sid)}
       ${unknown?`<option value="${sl.sid}" selected>0x${sl.sid.toString(16).padStart(8,'0')} (unknown)</option>`:''}
       </select>`;
-    const treasureImg=sl.tr?LTD_TREASURE_IMG[sl.tr[1]]:null;
+    // _treasureByHash covers every sid the game uses for "goods pocket"
+    // items, but the labels are split across two ltdimages tables:
+    // event-drop treasures live in LTD_TREASURE_IMG, gift-shop goods (DVD,
+    // camera, toy sword, guitar, …) live in LTD_GOODS_IMG. Check both.
+    const treasureImg=sl.tr?(LTD_TREASURE_IMG[sl.tr[1]]||LTD_GOODS_IMG[sl.tr[1]]):null;
     const ugcImg=isUgc?`/api/preview?stem=UgcGoods${String(sl.ug).padStart(3,'0')}`:null;
-    // Treasures on ltdimages don't have a _00 color-variant suffix, unlike
-    // Cloth/Coordinate. Just append .png to the stem.
+    // ltdimages stores these without a _NN color-variant suffix.
     const thumbSrc=ugcImg||(treasureImg?`/img/${treasureImg}.png`:null);
     const thumb=thumbSrc
-      ? `<img class="bl-slot-thumb" loading="lazy" src="${thumbSrc}" alt="" onerror="this.classList.add('empty')">`
+      ? `<img class="bl-slot-thumb" loading="lazy" src="${thumbSrc}" alt="" onerror="blImgFallback(this)">`
       : `<div class="bl-slot-thumb empty"></div>`;
     return `<div class="bl-goods-slot">
       <div class="bl-goods-hd"><span>Slot ${sl.s+1}</span><button class="bl-btn-sm" onclick="blClearGoodsSlot(${sl.ai})">✕</button></div>
@@ -4410,7 +4424,7 @@ function renderBlCloths(idx){
     }).join('');
     const imgAsset=LTD_CLOTH_IMG[c[3]];
     const thumb=imgAsset
-      ? `<img class="bl-item-thumb" loading="lazy" src="/img/${imgAsset}_00.png" alt="" onerror="this.classList.add('empty')">`
+      ? `<img class="bl-item-thumb" loading="lazy" src="/img/${imgAsset}_00.png" alt="" onerror="blImgFallback(this)">`
       : `<div class="bl-item-thumb empty"></div>`;
     return `<div class="bl-item-row${owned?' owned':''}">
       ${thumb}
@@ -4520,7 +4534,7 @@ function renderBlCoords(idx){
     }).join('');
     const imgAsset=LTD_COORD_IMG[c[3]];
     const thumb=imgAsset
-      ? `<img class="bl-item-thumb" loading="lazy" src="/img/${imgAsset}_00.png" alt="" onerror="this.classList.add('empty')">`
+      ? `<img class="bl-item-thumb" loading="lazy" src="/img/${imgAsset}_00.png" alt="" onerror="blImgFallback(this)">`
       : `<div class="bl-item-thumb empty"></div>`;
     return `<div class="bl-item-row${owned?' owned':''}">
       ${thumb}
@@ -5196,9 +5210,9 @@ const browseState={
   detail:null, detailImgIdx:0, detailLoading:false,
   searchDebounce:0, everLoaded:false,
 };
-function browseQS(){
+function browseQSForPage(page){
   const p=new URLSearchParams();
-  p.set('page',browseState.page);
+  p.set('page',page);
   p.set('limit',24);
   p.set('sort',browseState.sort);
   if(browseState.q)p.set('q',browseState.q);
@@ -5207,20 +5221,78 @@ function browseQS(){
   if(browseState.isFromSaveFile)p.set('isFromSaveFile','true');
   return p.toString();
 }
+function browseQS(){return browseQSForPage(browseState.page);}
+// LRU cache for list pages. TTL so like-counts / new uploads refresh on revisit.
+const BROWSE_CACHE_MAX=8, BROWSE_CACHE_TTL=5*60*1000;
+const browseCache=new Map();
+function browseCacheGet(qs){
+  const e=browseCache.get(qs);
+  if(!e)return null;
+  if(Date.now()-e.t>BROWSE_CACHE_TTL){browseCache.delete(qs);return null;}
+  // Map preserves insertion order — re-insert to mark as most-recent.
+  browseCache.delete(qs); browseCache.set(qs,e);
+  return e.data;
+}
+function browseCachePut(qs,data){
+  if(browseCache.has(qs))browseCache.delete(qs);
+  browseCache.set(qs,{data,t:Date.now()});
+  while(browseCache.size>BROWSE_CACHE_MAX){
+    const k=browseCache.keys().next().value;
+    browseCache.delete(k);
+  }
+}
+function browsePrefetchThumbs(miis){
+  if(!miis||!miis.length)return;
+  for(const m of miis){
+    const img=new Image();
+    img.decoding='async';
+    img.src='/api/share/image?id='+encodeURIComponent(m.id)+'&type=mii';
+  }
+}
+async function browseFetchPage(qs){
+  const r=await fetch('/api/share/list?'+qs);
+  if(!r.ok){
+    let msg='HTTP '+r.status;
+    try{const j=await r.json();if(j&&j.error)msg=j.error;}catch(_){}
+    throw new Error(msg);
+  }
+  const j=await r.json();
+  const data={
+    miis:Array.isArray(j.miis)?j.miis:[],
+    totalCount:j.totalCount||0,
+    lastPage:Math.max(1,j.lastPage||1),
+  };
+  browseCachePut(qs,data);
+  return data;
+}
+function browsePrefetchNext(){
+  const next=browseState.page+1;
+  if(next>browseState.lastPage)return;
+  const qs=browseQSForPage(next);
+  const cached=browseCacheGet(qs);
+  if(cached){browsePrefetchThumbs(cached.miis);return;}
+  browseFetchPage(qs).then(d=>browsePrefetchThumbs(d.miis)).catch(()=>{});
+}
 async function loadBrowsePage(){
+  const qs=browseQS();
+  const cached=browseCacheGet(qs);
+  if(cached){
+    browseState.miis=cached.miis;
+    browseState.totalCount=cached.totalCount;
+    browseState.lastPage=cached.lastPage;
+    if(browseState.page>browseState.lastPage)browseState.page=browseState.lastPage;
+    browseState.loading=false; browseState.error='';
+    renderMiiBrowse();
+    browsePrefetchNext();
+    return;
+  }
   browseState.loading=true; browseState.error='';
   renderMiiBrowse();
   try{
-    const r=await fetch('/api/share/list?'+browseQS());
-    if(!r.ok){
-      let msg='HTTP '+r.status;
-      try{const j=await r.json();if(j&&j.error)msg=j.error;}catch(_){}
-      throw new Error(msg);
-    }
-    const j=await r.json();
-    browseState.miis=Array.isArray(j.miis)?j.miis:[];
-    browseState.totalCount=j.totalCount||0;
-    browseState.lastPage=Math.max(1,j.lastPage||1);
+    const d=await browseFetchPage(qs);
+    browseState.miis=d.miis;
+    browseState.totalCount=d.totalCount;
+    browseState.lastPage=d.lastPage;
     if(browseState.page>browseState.lastPage)browseState.page=browseState.lastPage;
   }catch(e){
     browseState.miis=[];
@@ -5228,6 +5300,7 @@ async function loadBrowsePage(){
   }
   browseState.loading=false;
   renderMiiBrowse();
+  if(!browseState.error)browsePrefetchNext();
 }
 function renderMiiBrowse(){
   const root=document.getElementById('mii-browse-panel');
@@ -6321,10 +6394,10 @@ static void HandleShareImage(int fd, const std::string& query) {
     long status = ShareCurlFetch(url, body, err);
     if (status == 0) { Send500(fd, "Network error: " + err); return; }
     if (status != 200) { Send500(fd, "Upstream returned HTTP " + std::to_string(status)); return; }
-    // Set a short cache so the grid doesn't re-fetch on every render.
+    // Images for a given (id,type) are immutable upstream, so cache long.
     std::string h = "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: "
                     + std::to_string(body.size())
-                    + "\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: public, max-age=300\r\nConnection: close\r\n\r\n";
+                    + "\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: public, max-age=3600, immutable\r\nConnection: close\r\n\r\n";
     SendStr(fd, h);
     SendAll(fd, (const char*)body.data(), body.size());
 }

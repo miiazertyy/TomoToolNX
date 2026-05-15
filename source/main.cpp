@@ -37,6 +37,7 @@
 #include <climits>
 #include <map>
 #include <set>
+#include <unordered_map>
 #include <curl/curl.h>
 
 #ifndef M_PI
@@ -49,17 +50,90 @@ static const int SCREEN_W = 1280;
 static const int SCREEN_H = 720;
 static const int HTTP_PORT = 8080;
 
-static const SDL_Color COL_BG     = {10,  10,  10,  255};
-static const SDL_Color COL_PANEL  = {22,  22,  22,  255};
-static const SDL_Color COL_PANEL2 = {32,  32,  32,  255};
-static const SDL_Color COL_SEL    = {50,  50,  50,  255};
-static const SDL_Color COL_BORDER = {55,  55,  55,  255};
-static const SDL_Color COL_TEXT   = {220, 220, 220, 255};
-static const SDL_Color COL_DIM    = {100, 100, 100, 255};
-static const SDL_Color COL_GOLD   = {200, 170, 100, 255};
-static const SDL_Color COL_GREEN  = {100, 190, 120, 255};
-static const SDL_Color COL_RED    = {190, 90,  90,  255};
-static const SDL_Color COL_ACCENT = {120, 180, 200, 255};
+// ─── Theme system ─────────────────────────────────────────────────────────────
+// All UI colors live on the active theme so users can toggle palettes at
+// runtime (Settings → Theme). The legacy "Original" theme reproduces the
+// pre-revamp look pixel-for-pixel; "Switch" is the new default.
+struct Theme {
+    SDL_Color bg, panel, panel2, sel, border, text, dim, gold, red, accent, green, glow;
+    int  cornerRadius;
+    bool shadow;
+};
+
+static const Theme THEME_ORIGINAL = {
+    /*bg*/     {10,  10,  10, 255},
+    /*panel*/  {22,  22,  22, 255},
+    /*panel2*/ {32,  32,  32, 255},
+    /*sel*/    {50,  50,  50, 255},
+    /*border*/ {55,  55,  55, 255},
+    /*text*/   {220, 220, 220, 255},
+    /*dim*/    {100, 100, 100, 255},
+    /*gold*/   {200, 170, 100, 255},
+    /*red*/    {190, 90,  90,  255},
+    /*accent*/ {120, 180, 200, 255},
+    /*green*/  {100, 190, 120, 255},
+    /*glow*/   {200, 170, 100, 0},     // unused while shadow=false
+    /*cornerRadius*/ 0,
+    /*shadow*/       false,
+};
+
+// "Switch" theme — muted warm-gold primary, dusty-blue secondary. Pulled back
+// from the previous neon-yellow / cyan combo so it reads as a calm, dreamy
+// Tomodachi Life mood on an OLED panel rather than a flashy native UI.
+static const Theme THEME_SWITCH = {
+    /*bg*/     {6,    7,  12, 255},   // OLED black with a faint blue undertone
+    /*panel*/  {20,  22,  30, 255},   // dusk-blue card
+    /*panel2*/ {28,  31,  40, 255},
+    /*sel*/    {38,  42,  54, 255},   // soft selected fill
+    /*border*/ {62,  66,  80, 255},   // cool resting border
+    /*text*/   {228,225, 215, 255},   // warm white — slightly cream so the
+                                      //   accents don't look acid against it
+    /*dim*/    {130,130, 140, 255},
+    /*gold*/   {222,198, 120, 255},   // muted warm gold (was neon yellow)
+    /*red*/    {205,100, 105, 255},   // dusty red
+    /*accent*/ {120,170, 200, 255},   // dusty blue (was bright cyan)
+    /*green*/  {130,195, 150, 255},   // sage green
+    /*glow*/   {222,198, 120, 130},   // matches gold, lower alpha for halos
+    /*cornerRadius*/ 6,
+    /*shadow*/       true,
+};
+
+static Theme gTheme = THEME_SWITCH;
+
+// All existing call sites use these macro names; expansion keeps them
+// pointing at the active theme without touching ~700 references.
+#define COL_BG     (gTheme.bg)
+#define COL_PANEL  (gTheme.panel)
+#define COL_PANEL2 (gTheme.panel2)
+#define COL_SEL    (gTheme.sel)
+#define COL_BORDER (gTheme.border)
+#define COL_TEXT   (gTheme.text)
+#define COL_DIM    (gTheme.dim)
+#define COL_GOLD   (gTheme.gold)
+#define COL_RED    (gTheme.red)
+#define COL_ACCENT (gTheme.accent)
+#define COL_GREEN  (gTheme.green)
+
+namespace ThemeNS {
+    struct Entry { std::string code; std::string labelKey; };
+    static const std::vector<Entry> kAvailable = {
+        { "switch",   "theme.switch"   },
+        { "original", "theme.original" },
+    };
+    static std::string g_current = "switch";
+
+    static void Apply(const std::string& code) {
+        if      (code == "original") gTheme = THEME_ORIGINAL;
+        else                         gTheme = THEME_SWITCH;
+    }
+    static void SetCurrent(const std::string& code) {
+        for (const auto& e : kAvailable) if (e.code == code) { g_current = code; Apply(code); return; }
+        g_current = "switch"; Apply("switch");
+    }
+    static const std::string&         Current()   { return g_current; }
+    static const std::vector<Entry>&  Available() { return kAvailable; }
+    [[maybe_unused]] static void Init() { Apply(g_current); }
+}
 
 static PadState      gPad;
 static SDL_Renderer* gRen = nullptr;
@@ -73,19 +147,54 @@ static TTF_Font* gFontSm  = nullptr; // 16px — body text, labels
 static TTF_Font* gFontMd  = nullptr; // 22px — section titles, selected items
 static TTF_Font* gFontLg  = nullptr; // 32px — screen titles, hero text
 
-static void FontInit() {
-    TTF_Init();
-    // Load font from embedded byte array — no romfs required
-    SDL_RWops* rw = SDL_RWFromConstMem(FONT_DATA, (int)FONT_DATA_SIZE);
-    if (rw) {
-        gFontSm = TTF_OpenFontRW(rw, 0, 16);
-        SDL_RWseek(rw, 0, RW_SEEK_SET);
-        gFontMd = TTF_OpenFontRW(rw, 0, 22);
-        SDL_RWseek(rw, 0, RW_SEEK_SET);
-        gFontLg = TTF_OpenFontRW(rw, 1, 32); // 1 = free rw when done
+// Embedded font has no Cyrillic / CJK glyphs; for ru/zh borrow the
+// system shared font via pl.
+static const void* gActiveFontData = nullptr;
+static size_t      gActiveFontSize = 0;
+static void PickFontForLang(const std::string& code, const void*& outData, size_t& outSize) {
+    outData = FONT_DATA; outSize = FONT_DATA_SIZE;
+    PlSharedFontType type;
+    bool wantShared = false;
+    if      (code == "zh") { type = PlSharedFontType_ChineseSimplified; wantShared = true; }
+    else if (code == "ru") { type = PlSharedFontType_Standard;          wantShared = true; }
+    if (!wantShared) return;
+    static bool plReady = false;
+    if (!plReady) {
+        if (R_FAILED(plInitialize(PlServiceType_User))) return;
+        plReady = true;
+    }
+    PlFontData pf{};
+    if (R_SUCCEEDED(plGetSharedFontByType(&pf, type))) {
+        outData = pf.address; outSize = pf.size;
     }
 }
+static void TextCacheFlush();  // defined below; called here on language swap
+static void FontReload(const std::string& langCode) {
+    // Cached glyph textures came from the previous font and would render
+    // mismatched after a language swap — drop them so the new font is used.
+    TextCacheFlush();
+    if (gFontSm) { TTF_CloseFont(gFontSm); gFontSm = nullptr; }
+    if (gFontMd) { TTF_CloseFont(gFontMd); gFontMd = nullptr; }
+    if (gFontLg) { TTF_CloseFont(gFontLg); gFontLg = nullptr; }
+    PickFontForLang(langCode, gActiveFontData, gActiveFontSize);
+    SDL_RWops* rw = SDL_RWFromConstMem(gActiveFontData, (int)gActiveFontSize);
+    if (!rw) return;
+    // Russian: the Switch shared Standard font is wider than the embedded
+    // Latin font and translations run longer — shrink a notch to fit.
+    int szSm = 16, szMd = 22, szLg = 32;
+    if (langCode == "ru") { szSm = 14; szMd = 19; szLg = 28; }
+    gFontSm = TTF_OpenFontRW(rw, 0, szSm);
+    SDL_RWseek(rw, 0, RW_SEEK_SET);
+    gFontMd = TTF_OpenFontRW(rw, 0, szMd);
+    SDL_RWseek(rw, 0, RW_SEEK_SET);
+    gFontLg = TTF_OpenFontRW(rw, 1, szLg); // 1 = free rw when done
+}
+static void FontInit() {
+    TTF_Init();
+    FontReload(Lang::Current());
+}
 static void FontQuit() {
+    TextCacheFlush();
     if(gFontSm) TTF_CloseFont(gFontSm);
     if(gFontMd) TTF_CloseFont(gFontMd);
     if(gFontLg) TTF_CloseFont(gFontLg);
@@ -97,40 +206,437 @@ static TTF_Font* GetFont(Font f) {
     switch(f){ case Font::Md: return gFontMd; case Font::Lg: return gFontLg; default: return gFontSm; }
 }
 
-// Draw text at (x,y) top-left
-static void DrawText(const std::string& text, int x, int y, SDL_Color col, Font f=Font::Sm) {
-    if(text.empty()) return;
+// ─── Text texture cache ───────────────────────────────────────────────────────
+// Without this every DrawText call rasterised the glyphs with TTF_Render*Blended
+// and uploaded a fresh GPU texture, then destroyed it — easily ~50 alloc/upload
+// cycles per frame on busy screens (Mii Stats, Map, Settings), which blew past
+// the 16.6ms vsync window and pinned the framerate at 30fps. Caching by
+// (text, font-size, color) lets every repeat draw collapse into a single
+// SDL_RenderCopy. LRU-evicted at a bounded size so memory stays in check.
+struct TextCacheEntry { SDL_Texture* tex; int w, h; Uint32 lastUsed; };
+static std::unordered_map<std::string, TextCacheEntry> gTextCache;
+static Uint32  gTextCacheFrame = 0;
+static const size_t kTextCacheMax = 512;
+
+static void TextCacheFlush() {
+    for (auto& kv : gTextCache) if (kv.second.tex) SDL_DestroyTexture(kv.second.tex);
+    gTextCache.clear();
+}
+
+static SDL_Texture* GetTextTexture(const std::string& text, Font f, SDL_Color col,
+                                   int& outW, int& outH) {
+    // Compact composite key — 16 bytes fixed prefix + the text.
+    char prefix[24];
+    int n = snprintf(prefix, sizeof(prefix), "%d|%02x%02x%02x%02x|",
+                     (int)f, col.r, col.g, col.b, col.a);
+    std::string key; key.reserve((size_t)n + text.size());
+    key.append(prefix, (size_t)n).append(text);
+
+    auto it = gTextCache.find(key);
+    if (it != gTextCache.end()) {
+        it->second.lastUsed = gTextCacheFrame;
+        outW = it->second.w; outH = it->second.h;
+        return it->second.tex;
+    }
     TTF_Font* font = GetFont(f);
+    if (!font) return nullptr;
     SDL_Surface* surf = TTF_RenderUTF8_Blended(font, text.c_str(), col);
-    if(!surf) return;
+    if (!surf) return nullptr;
     SDL_Texture* tex = SDL_CreateTextureFromSurface(gRen, surf);
+    int w = surf->w, h = surf->h;
     SDL_FreeSurface(surf);
-    if(!tex) return;
-    int w,h; SDL_QueryTexture(tex,nullptr,nullptr,&w,&h);
-    SDL_Rect dst{x,y,w,h};
-    SDL_RenderCopy(gRen,tex,nullptr,&dst);
-    SDL_DestroyTexture(tex);
+    if (!tex) return nullptr;
+
+    if (gTextCache.size() >= kTextCacheMax) {
+        // Evict the least-recently-used entry. Linear scan is fine at this size.
+        auto oldest = gTextCache.begin();
+        for (auto cit = gTextCache.begin(); cit != gTextCache.end(); ++cit)
+            if (cit->second.lastUsed < oldest->second.lastUsed) oldest = cit;
+        if (oldest->second.tex) SDL_DestroyTexture(oldest->second.tex);
+        gTextCache.erase(oldest);
+    }
+    gTextCache.emplace(std::move(key),
+                       TextCacheEntry{ tex, w, h, gTextCacheFrame });
+    outW = w; outH = h;
+    return tex;
+}
+
+// Draw text at (x,y) top-left — cached.
+static void DrawText(const std::string& text, int x, int y, SDL_Color col, Font f=Font::Sm) {
+    if (text.empty()) return;
+    int w = 0, h = 0;
+    SDL_Texture* tex = GetTextTexture(text, f, col, w, h);
+    if (!tex) return;
+    SDL_Rect dst{x, y, w, h};
+    SDL_RenderCopy(gRen, tex, nullptr, &dst);
 }
 
 // Draw text centered at (cx,cy)
 static void DrawTextC(const std::string& text, int cx, int cy, SDL_Color col, Font f=Font::Sm) {
-    if(text.empty()) return;
-    TTF_Font* font = GetFont(f);
-    int w,h; TTF_SizeUTF8(font, text.c_str(), &w, &h);
-    DrawText(text, cx-w/2, cy-h/2, col, f);
+    if (text.empty()) return;
+    int w = 0, h = 0;
+    SDL_Texture* tex = GetTextTexture(text, f, col, w, h);
+    if (!tex) return;
+    SDL_Rect dst{ cx - w/2, cy - h/2, w, h };
+    SDL_RenderCopy(gRen, tex, nullptr, &dst);
 }
 
-static void FillRect(int x,int y,int w,int h,SDL_Color c){
+// ─── Rect primitives ──────────────────────────────────────────────────────────
+// FillRect / DrawRect auto-route to rounded variants when the active theme has
+// cornerRadius > 0 and the rect is large enough that rounding actually fits.
+// Square-corner themes (Original) hit the legacy fast path.
+
+static void FillRectSquare(int x,int y,int w,int h,SDL_Color c){
     SDL_SetRenderDrawColor(gRen,c.r,c.g,c.b,c.a);
     SDL_Rect r{x,y,w,h};SDL_RenderFillRect(gRen,&r);
 }
-static void DrawRect(int x,int y,int w,int h,SDL_Color c){
+static void DrawRectSquare(int x,int y,int w,int h,SDL_Color c){
     SDL_SetRenderDrawColor(gRen,c.r,c.g,c.b,c.a);
     SDL_Rect r{x,y,w,h};SDL_RenderDrawRect(gRen,&r);
 }
 
+// Filled rounded rectangle via scan-line: middle rows draw full width, top/bottom
+// rows use circle math for the corner inset. ~h fill-rect calls per rect.
+static void FillRectRounded(int x,int y,int w,int h,int r,SDL_Color c){
+    if (r <= 0 || w < 2*r || h < 2*r) { FillRectSquare(x,y,w,h,c); return; }
+    SDL_SetRenderDrawColor(gRen, c.r, c.g, c.b, c.a);
+    // Middle band — single fill
+    SDL_Rect mid{ x, y + r, w, h - 2*r };
+    SDL_RenderFillRect(gRen, &mid);
+    // Top / bottom caps — scanline with circle inset
+    for (int dy = 0; dy < r; dy++) {
+        float fy = (float)(r - dy) - 0.5f;
+        int   off = r - (int)sqrtf((float)(r*r) - fy*fy);
+        SDL_Rect top{ x + off, y + dy,             w - 2*off, 1 };
+        SDL_Rect bot{ x + off, y + h - 1 - dy,     w - 2*off, 1 };
+        SDL_RenderFillRect(gRen, &top);
+        SDL_RenderFillRect(gRen, &bot);
+    }
+}
+
+// Outline variant — 4 straight edges + 4 corner arcs.
+static void DrawRectRounded(int x,int y,int w,int h,int r,SDL_Color c){
+    if (r <= 0 || w < 2*r || h < 2*r) { DrawRectSquare(x,y,w,h,c); return; }
+    SDL_SetRenderDrawColor(gRen, c.r, c.g, c.b, c.a);
+    // Straight edges
+    SDL_RenderDrawLine(gRen, x + r,         y,           x + w - 1 - r, y);
+    SDL_RenderDrawLine(gRen, x + r,         y + h - 1,   x + w - 1 - r, y + h - 1);
+    SDL_RenderDrawLine(gRen, x,             y + r,       x,             y + h - 1 - r);
+    SDL_RenderDrawLine(gRen, x + w - 1,     y + r,       x + w - 1,     y + h - 1 - r);
+    // Corner arcs — sample each "edge pixel" of the quarter circle
+    for (int dy = 0; dy < r; dy++) {
+        float fy = (float)(r - dy) - 0.5f;
+        int   off = r - (int)sqrtf((float)(r*r) - fy*fy);
+        SDL_RenderDrawPoint(gRen, x + off,             y + dy);
+        SDL_RenderDrawPoint(gRen, x + w - 1 - off,     y + dy);
+        SDL_RenderDrawPoint(gRen, x + off,             y + h - 1 - dy);
+        SDL_RenderDrawPoint(gRen, x + w - 1 - off,     y + h - 1 - dy);
+    }
+}
+
+// Soft drop shadow — two stacked translucent rounded rects offset downward.
+// Cheap on Tegra; no-op when the theme doesn't want shadows.
+static void DrawShadow(int x,int y,int w,int h,int r){
+    if (!gTheme.shadow) return;
+    SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_BLEND);
+    SDL_Color s1{ 0, 0, 0, 60 };
+    SDL_Color s2{ 0, 0, 0, 30 };
+    if (r > 0 && w >= 2*r && h >= 2*r) {
+        FillRectRounded(x, y + 3, w, h, r, s1);
+        FillRectRounded(x, y + 6, w, h, r, s2);
+    } else {
+        FillRectSquare(x, y + 3, w, h, s1);
+        FillRectSquare(x, y + 6, w, h, s2);
+    }
+    SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_NONE);
+}
+
+// Glowing outline helper — kept on standby for future use. The current
+// selection highlight uses a flat outline instead (see DrawAnimatedHighlight).
+[[maybe_unused]] static void DrawGlowRect(int x,int y,int w,int h,int r,SDL_Color core,SDL_Color glow,float pulseT=0.f){
+    SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_BLEND);
+    // breath: 0..1..0 triangle-ish wave; controls extra glow radius + alpha.
+    float breath = 0.5f - 0.5f * cosf(pulseT * 2.f * (float)M_PI);
+    int   extra  = (int)(breath * 3.f);
+    float aMul   = 0.55f + 0.45f * breath;
+    int   layers = 4 + extra;
+    for (int g = layers; g >= 1; g--) {
+        SDL_Color step = glow;
+        int a = (int)glow.a * (layers + 1 - g) / (layers + 2);
+        step.a = (Uint8)(a * aMul);
+        DrawRectRounded(x - g, y - g, w + 2*g, h + 2*g, r + g, step);
+    }
+    // Inner core border — slightly brighter at the breath peak.
+    SDL_Color innerOuter = core;
+    innerOuter.a = (Uint8)(180 + 75 * breath);
+    DrawRectRounded(x,     y,     w,     h,     r,     innerOuter);
+    DrawRectRounded(x + 1, y + 1, w - 2, h - 2, r > 1 ? r - 1 : 1, core);
+    SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_NONE);
+}
+
+// Public primitives — auto-round when the theme asks for it.
+static inline void FillRect(int x,int y,int w,int h,SDL_Color c){
+    int r = gTheme.cornerRadius;
+    if (r > 0 && w >= 2*r && h >= 2*r) FillRectRounded(x, y, w, h, r, c);
+    else                                FillRectSquare(x, y, w, h, c);
+}
+static inline void DrawRect(int x,int y,int w,int h,SDL_Color c){
+    int r = gTheme.cornerRadius;
+    if (r > 0 && w >= 2*r && h >= 2*r) DrawRectRounded(x, y, w, h, r, c);
+    else                                DrawRectSquare(x, y, w, h, c);
+}
+
+// ─── Circles ─────────────────────────────────────────────────────────────────
+// Filled circle via scan-line — one SDL fill-rect per row keeps the SDL call
+// count low and gives clean edges. Outline uses 8-way symmetric midpoint.
+static void FillCircle(int cx, int cy, int r, SDL_Color c) {
+    if (r <= 0) return;
+    SDL_SetRenderDrawColor(gRen, c.r, c.g, c.b, c.a);
+    for (int dy = -r; dy <= r; dy++) {
+        int dx = (int)sqrtf((float)(r*r - dy*dy));
+        SDL_Rect row{ cx - dx, cy + dy, 2*dx + 1, 1 };
+        SDL_RenderFillRect(gRen, &row);
+    }
+}
+static void DrawCircle(int cx, int cy, int r, SDL_Color c) {
+    if (r <= 0) return;
+    SDL_SetRenderDrawColor(gRen, c.r, c.g, c.b, c.a);
+    int x = r, y = 0, err = 1 - r;
+    while (x >= y) {
+        SDL_RenderDrawPoint(gRen, cx + x, cy + y);
+        SDL_RenderDrawPoint(gRen, cx - x, cy + y);
+        SDL_RenderDrawPoint(gRen, cx + x, cy - y);
+        SDL_RenderDrawPoint(gRen, cx - x, cy - y);
+        SDL_RenderDrawPoint(gRen, cx + y, cy + x);
+        SDL_RenderDrawPoint(gRen, cx - y, cy + x);
+        SDL_RenderDrawPoint(gRen, cx + y, cy - x);
+        SDL_RenderDrawPoint(gRen, cx - y, cy - x);
+        y++;
+        if (err <= 0) err += 2*y + 1;
+        else          { x--; err += 2*(y - x) + 1; }
+    }
+}
+// A pleasant 2-px-thick ring — just two stacked circle outlines.
+static void DrawRing(int cx, int cy, int r, SDL_Color c) {
+    if (r <= 0) return;
+    DrawCircle(cx, cy, r,     c);
+    DrawCircle(cx, cy, r - 1, c);
+}
+
+// ─── Motion ────────────────────────────────────────────────────────────────────
+static float  gDtSec       = 1.f/60.f;
+static Uint32 gLastTickMs  = 0;
+static float  gElapsedSec  = 0.f;
+
+// Exponential lerp toward a target rect; settles in ~6 frames @ 60fps.
+// Snaps on first use or on a far jump so screen changes don't slide.
+struct AnimRect {
+    float x=0, y=0, w=0, h=0;
+    bool  ready=false;
+    void Step(int tx, int ty, int tw, int th, float dt) {
+        if (!ready) { x=tx; y=ty; w=tw; h=th; ready=true; return; }
+        // If the target is far away, snap (avoids a long, silly slide across
+        // the screen when changing screens or scrolling a long list).
+        if (fabsf(x - tx) > 280.f || fabsf(y - ty) > 200.f) {
+            x=tx; y=ty; w=tw; h=th; return;
+        }
+        float k = 1.f - expf(-14.f * dt);
+        x += (tx - x) * k;
+        y += (ty - y) * k;
+        w += (tw - w) * k;
+        h += (th - h) * k;
+    }
+    void Snap(int tx, int ty, int tw, int th) {
+        x=tx; y=ty; w=tw; h=th; ready=true;
+    }
+    // Step without the snap-on-far guard; used by the tab underline so the
+    // bar glides all the way across instead of teleporting on big jumps.
+    void StepSmooth(int tx, int ty, int tw, int th, float dt) {
+        if (!ready) { x=tx; y=ty; w=tw; h=th; ready=true; return; }
+        float k = 1.f - expf(-14.f * dt);
+        x += (tx - x) * k;
+        y += (ty - y) * k;
+        w += (tw - w) * k;
+        h += (th - h) * k;
+    }
+    SDL_Rect ToRect() const {
+        return SDL_Rect{ (int)(x+0.5f), (int)(y+0.5f), (int)(w+0.5f), (int)(h+0.5f) };
+    }
+};
+
+// Tab-bar underline animators. One per bar (main row + Mii sub-row); state
+// persists across screens so the underline glides during a tab switch.
+static AnimRect gMainTabBar;
+static AnimRect gMiiSubTabBar;
+
+// N slots so screens with two simultaneous selections (Mii left list + middle
+// field list etc.) can outline both at once.
+static constexpr int    kHighlightSlots = 4;
+static AnimRect gHighlight     [kHighlightSlots];
+static int      gHlOwnerScreen [kHighlightSlots] = { -1, -1, -1, -1 };
+static int      gHlOwnerSub    [kHighlightSlots] = { -1, -1, -1, -1 };
+
+// Drives the focused-cell outline. `slot` lets multiple outlines coexist
+// on one screen (e.g. left mii list + middle field list).
+static void RequestHighlight(int ownerScreen, int ownerSub,
+                             int tx, int ty, int tw, int th, float dt,
+                             int slot = 0) {
+    if (slot < 0 || slot >= kHighlightSlots) slot = 0;
+    if (gHlOwnerScreen[slot] != ownerScreen || gHlOwnerSub[slot] != ownerSub) {
+        gHighlight[slot].Snap(tx, ty, tw, th);
+        gHlOwnerScreen[slot] = ownerScreen;
+        gHlOwnerSub   [slot] = ownerSub;
+    } else {
+        // Smooth even on big jumps so wrap-around (rightmost → leftmost)
+        // glides. Snap-on-screen-change is handled by the owner branch above.
+        gHighlight[slot].StepSmooth(tx, ty, tw, th, dt);
+    }
+}
+
+// ── Tab-bar underline animator ───────────────────────────────────────────────
+// Slot 0 = main 5-tab strip, slot 1 = Mii sub-tab pill row. ownerTag tags
+// the bar so changing bars snaps instead of sliding diagonally.
+static constexpr int kTabUnderlineSlots = 2;
+static AnimRect gTabBar      [kTabUnderlineSlots];
+static int      gTabBarOwner [kTabUnderlineSlots] = { -1, -1 };
+
+static void RequestTabUnderline(int slot, int ownerTag,
+                                int tx, int ty, int tw, int th, float dt) {
+    if (slot < 0 || slot >= kTabUnderlineSlots) slot = 0;
+    if (gTabBarOwner[slot] != ownerTag) {
+        gTabBar[slot].Snap(tx, ty, tw, th);
+        gTabBarOwner[slot] = ownerTag;
+    } else {
+        gTabBar[slot].StepSmooth(tx, ty, tw, th, dt);
+    }
+}
+
+static void DrawTabUnderline(int slot = 0) {
+    if (slot < 0 || slot >= kTabUnderlineSlots) slot = 0;
+    if (!gTabBar[slot].ready) return;
+    SDL_Rect r = gTabBar[slot].ToRect();
+    FillRectSquare(r.x, r.y, r.w, r.h, gTheme.gold);
+}
+
+static void DrawAnimatedHighlight(int slot = 0) {
+    if (slot < 0 || slot >= kHighlightSlots) slot = 0;
+    if (!gHighlight[slot].ready || gTheme.cornerRadius <= 0) return;
+    SDL_Rect r = gHighlight[slot].ToRect();
+    // Clamp radius so short rows don't render as pills.
+    int rr = gTheme.cornerRadius;
+    if (rr * 2 > r.h - 2) rr = std::max(2, (r.h - 2) / 2);
+    if (rr * 2 > r.w - 2) rr = std::max(2, (r.w - 2) / 2);
+    DrawRectRounded(r.x,     r.y,     r.w,     r.h,     rr,                 gTheme.gold);
+    DrawRectRounded(r.x + 1, r.y + 1, r.w - 2, r.h - 2, rr > 1 ? rr - 1 : 1, gTheme.gold);
+}
+
+// Forward-declared so EmitPrevNextHighlight can sit beside the other
+// highlight helpers; full definition / runtime use lives in the main loop.
+static u64 gFrameKDown = 0;   // this frame's merged kDown
+static int gPNDir      = -1;  // -1 unset, 0 left, 1 right
+enum class Screen { AppletWarning, UpdateCheck, UpdateAvailable, UserPick,
+                    BackupPrompt, BackingUp, Mounting, OnSwitch, SaveFeedback,
+                    Error, Settings };
+
+// Animated outline that hops to whichever side of a < / > pair was last pressed.
+static void EmitPrevNextHighlight(int subTag,
+                                  int bxL, int bxR,
+                                  int btnY, int btnW, int btnH) {
+    if (gFrameKDown & (HidNpadButton_Left  | HidNpadButton_StickLLeft  | HidNpadButton_StickRLeft))
+        gPNDir = 0;
+    if (gFrameKDown & (HidNpadButton_Right | HidNpadButton_StickLRight | HidNpadButton_StickRRight))
+        gPNDir = 1;
+    if (gPNDir < 0) return;
+    int hlX = (gPNDir == 0) ? bxL : bxR;
+    RequestHighlight((int)Screen::OnSwitch, subTag, hlX, btnY, btnW, btnH, gDtSec,
+                     /*slot=*/2);
+    DrawAnimatedHighlight(/*slot=*/2);
+}
+
+// Hover pulse — a 1.00 -> 1.03 -> 1.00 scale curve over ~800ms applied to the
+// focused cell rect. Returns the (slightly enlarged) rect to draw into.
+[[maybe_unused]] static SDL_Rect HoverPulse(SDL_Rect base, float timeSec) {
+    float t = sinf(timeSec * (float)M_PI * 2.5f) * 0.5f + 0.5f; // 0..1
+    float s = 1.f + 0.03f * t;
+    int dw = (int)(base.w * (s - 1.f));
+    int dh = (int)(base.h * (s - 1.f));
+    return SDL_Rect{ base.x - dw/2, base.y - dh/2, base.w + dw, base.h + dh };
+}
+
+// Screen fade — black flash that decays after a screen change. Animation only;
+// rendering is unaffected when no transition is active.
+struct ScreenFade {
+    float alpha = 0.f;  // 0..255
+    void Begin() { alpha = 220.f; }
+    void Step(float dt) {
+        if (alpha <= 0.f) return;
+        alpha -= dt * 700.f;  // ~3 frames at 60fps to fully clear
+        if (alpha < 0.f) alpha = 0.f;
+    }
+    void Draw() {
+        if (alpha <= 0.f) return;
+        SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(gRen, 0, 0, 0, (Uint8)alpha);
+        SDL_Rect r{0,0,SCREEN_W,SCREEN_H};
+        SDL_RenderFillRect(gRen, &r);
+        SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_NONE);
+    }
+};
+static ScreenFade gFade;
+
+// Final present wrapper — paints the fade overlay (if active) on top of
+// whatever the current screen rendered, then flips the back buffer.
+static inline void Present() {
+    gFade.Draw();
+    SDL_RenderPresent(gRen);
+}
+
+// ─── Audio (UI sound effects) ────────────────────────────────────────────────
+// SDL2_mixer-backed click/nav cues from romfs:/sfx/{click,nav}.mp3.
+// Init is non-fatal — Play() is a silent no-op when the device or files
+// aren't available.
+#include <SDL2/SDL_mixer.h>
+namespace Audio {
+    enum Sfx { SfxClick, SfxNav };
+    static bool       g_ready = false;
+    static Mix_Chunk* g_click = nullptr;
+    static Mix_Chunk* g_nav   = nullptr;
+
+    static void Init() {
+        if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) return;
+        if ((Mix_Init(MIX_INIT_MP3) & MIX_INIT_MP3) == 0) return;
+        if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 1024) != 0) {
+            Mix_Quit();
+            return;
+        }
+        Mix_AllocateChannels(8);
+        g_click = Mix_LoadWAV("romfs:/sfx/click.mp3");
+        g_nav   = Mix_LoadWAV("romfs:/sfx/nav.mp3");
+        if (g_click) Mix_VolumeChunk(g_click, MIX_MAX_VOLUME * 80 / 100);
+        if (g_nav)   Mix_VolumeChunk(g_nav,   MIX_MAX_VOLUME * 70 / 100);
+        g_ready = true;
+    }
+
+    static void Quit() {
+        if (!g_ready) return;
+        if (g_click) Mix_FreeChunk(g_click);
+        if (g_nav)   Mix_FreeChunk(g_nav);
+        g_click = g_nav = nullptr;
+        Mix_CloseAudio();
+        Mix_Quit();
+        g_ready = false;
+    }
+
+    static void Play(Sfx id) {
+        if (!g_ready) return;
+        Mix_Chunk* c = (id == SfxClick) ? g_click : g_nav;
+        if (!c) return;
+        Mix_PlayChannel(-1, c, 0);
+    }
+}
+
 // ─── Gear / settings icon ─────────────────────────────────────────────────────
-// Draws a polished gear silhouette centered at (cx,cy) with outer radius r.
+// Draw a gear silhouette centered at (cx,cy) with outer radius r.
 // 8 teeth, proper hub hole, clean proportions matching the WebUI SVG gear.
 static void DrawGearIcon(int cx, int cy, int r, SDL_Color col) {
     if (r < 4) return;
@@ -236,8 +742,7 @@ static void DrawGearIcon(int cx, int cy, int r, SDL_Color col) {
 
 
 // ─── Screens ──────────────────────────────────────────────────────────────────
-
-enum class Screen { AppletWarning, UpdateCheck, UpdateAvailable, UserPick, BackupPrompt, BackingUp, Mounting, OnSwitch, SaveFeedback, Error, Settings };
+// (Screen enum was forward-declared earlier so the highlight helper could use it.)
 
 static Screen      gScreen  = Screen::UserPick;
 static std::string gError;
@@ -304,6 +809,8 @@ struct TouchHit { int x,y,w,h; TouchFn fn; int param; };
 static TouchHit gHits[256];
 static int      gHitCount = 0;
 static u64      gSimKDown = 0;
+// gFrameKDown / gPNDir live higher up the file so EmitPrevNextHighlight can
+// reference them — see the forward-declared block near DrawAnimatedHighlight.
 static int      gTouchScale = 1; // multiplier for nudge actions
 
 static void HitClear() { gHitCount = 0; }
@@ -315,11 +822,20 @@ static void HitAdd(int x,int y,int w,int h, TouchFn fn, int param=0) {
 static int gLastTouchFireX = 0;
 static int gLastTouchFireY = 0;
 static void HitFire(int tx, int ty) {
-    for (int i = 0; i < gHitCount; i++) {
+    // Reverse so inner / last-registered hits win over the container they
+    // sit inside (e.g. Settings prev/next arrows over the row hit).
+    for (int i = gHitCount - 1; i >= 0; i--) {
         auto& h = gHits[i];
         if (tx>=h.x && tx<h.x+h.w && ty>=h.y && ty<h.y+h.h) {
             gLastTouchFireX = tx; gLastTouchFireY = ty;
-            h.fn(h.param); break;
+            // Callbacks that go through TSimBtn add to gSimKDown and let
+            // the main-loop audio dispatch pick the sound; pure-state
+            // callbacks (TSelUgc, TSetMode…) leave gSimKDown alone, so
+            // play a click here to keep touch audible.
+            u64 simBefore = gSimKDown;
+            h.fn(h.param);
+            if (gSimKDown == simBefore) Audio::Play(Audio::SfxClick);
+            break;
         }
     }
 }
@@ -327,6 +843,7 @@ static void HitFire(int tx, int ty) {
 // Touch handler helpers
 static void TSimBtn (int btn)   { gSimKDown |= (u64)(uint32_t)btn; }
 static void TSetMode(int mode)  { gOnSwitchMode = (OnSwitchMode)mode; gOnSwitchMsg = ""; }
+
 // Defined after their target globals are declared (forward refs below via lambdas are fine as fn ptrs)
 static void TSelUser (int idx);
 static void TSelUgc  (int idx);
@@ -340,6 +857,7 @@ static void TSelPlayerField(int idx);
 static void TSetSkinTone(int idx);
 static void TSetIslandSize(int val);
 static void TSelMiiStatsMii(int idx);
+static void TSelShareMii(int idx);
 static void TSelMiiStatsField(int idx);
 static void TSelMiiWordsSlot(int idx);
 static void TSelMiiRelation(int idx);
@@ -459,6 +977,10 @@ static int                      gRestoreConfirmKind = 0;
 
 static void TOpenSettings(int)      { gSettingsMsg = ""; gScreen = Screen::Settings; }
 static void TSelSettingsItem(int i) { gSettingsSel = i; }
+// Settings prev/next arrow taps: focus the tapped row before simulating the
+// D-pad press, so the input handler dispatches it to the right row.
+static void TSettingsRowLeft (int row) { gSettingsSel = row; gSimKDown |= HidNpadButton_Left;  }
+static void TSettingsRowRight(int row) { gSettingsSel = row; gSimKDown |= HidNpadButton_Right; }
 static void TSelTexSettingsItem(int i) { gTexSettingsSel = i; }
 static void TRestorePickSel(int i)  { gRestoreSel  = i; }
 static void TRestoreConfirmA(int)   { gSimKDown |= HidNpadButton_A; }
@@ -1009,6 +1531,11 @@ static void TSetIslandSize(int val) {
 }
 static void TSelMiiStatsMii(int idx) {
     if (idx>=0 && idx<(int)gMiis.size()) { gMiiStatsMiiSel=idx; gMiiRelSel=0; gMiiRelScroll=0; }
+}
+// Tap on a TomodachiShare card. Sets gShareSel (NOT gMiiStatsMiiSel — that's
+// the left-side mii list).
+static void TSelShareMii(int idx) {
+    if (idx>=0 && idx<(int)gShareMiis.size()) gShareSel = idx;
 }
 static void TSelMiiStatsField(int idx) { gMiiStatsFieldSel=idx; }
 static void TSelMiiWordsSlot(int idx)  { gMiiWordsSlotSel=idx; gWordUndo.valid=false; }
@@ -1791,9 +2318,7 @@ static void ShareSubmitJob(ShareJobKind kind, const std::string& url, int target
     j.targetMiiIdx = targetMiiIdx;
     j.status       = 0;
     j.done         = false;
-    // ListPage / Detail / Download are user-initiated and should run before
-    // any queued background thumbnail fetches. Drop pending thumbs to keep
-    // the queue snappy.
+    // User-initiated requests jump the queue; drop pending thumb fetches.
     if (kind != ShareJobKind::Thumb) {
         gShareJobQueue.erase(
             std::remove_if(gShareJobQueue.begin(), gShareJobQueue.end(),
@@ -2506,23 +3031,23 @@ static void DrawUpdateCheck() {
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
     SDL_RenderClear(gRen);
     DrawHeader("");
-    DrawTextC("checking for updates...", SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
-    DrawFooter("B  skip");
-    SDL_RenderPresent(gRen);
+    DrawTextC(Lang::T("update.checking"), SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
+    DrawFooter(Lang::T("update.footer.checking"));
+    Present();
 }
 
 static void DrawUpdateAvailable() {
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
     SDL_RenderClear(gRen);
     DrawHeader("");
-    DrawTextC("a new update is available on GitHub!", SCREEN_W/2, SCREEN_H/2-60, COL_GREEN, Font::Lg);
+    DrawTextC(Lang::T("update.available"), SCREEN_W/2, SCREEN_H/2-60, COL_GREEN, Font::Lg);
     DrawTextC("v" APP_VERSION + std::string("  ->  v") + Updater::GetLatestVersion(),
               SCREEN_W/2, SCREEN_H/2-18, COL_TEXT, Font::Md);
-    DrawTextC("download the new TomoToolNX.nro from:", SCREEN_W/2, SCREEN_H/2+18, COL_DIM);
+    DrawTextC(Lang::T("update.download.from"), SCREEN_W/2, SCREEN_H/2+18, COL_DIM);
     DrawTextC("github.com/" GITHUB_REPO "/releases/latest",
               SCREEN_W/2, SCREEN_H/2+42, COL_ACCENT, Font::Md);
-    DrawFooter("A / B  continue    +  quit");
-    SDL_RenderPresent(gRen);
+    DrawFooter(Lang::T("update.footer.available"));
+    Present();
 }
 
 // Parse "BACKUP_ROOT/save_DD-MM-YYYY_HH-MM" into its parts. Returns false if
@@ -2551,16 +3076,15 @@ static void DrawRestorePicker() {
     HitClear();
     SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
     SDL_RenderClear(gRen);
-    DrawHeader("restore backup");
+    DrawHeader(Lang::T("restore.header"));
 
-    // Empty state: a card-like panel instead of a lonely line.
     if (gRestoreList.empty()) {
         const int cW = 520, cH = 180;
         const int cx = (SCREEN_W - cW) / 2;
         const int cy = (SCREEN_H - cH) / 2 - 10;
         FillRect(cx, cy, cW, cH, COL_PANEL);
         DrawRect(cx, cy, cW, cH, COL_BORDER);
-        // Stylised "empty folder" icon centred at the top of the card.
+        // Empty-folder icon.
         int icx = cx + cW/2;
         int icy = cy + 50;
         int fw = 60, fh = 44;
@@ -2568,10 +3092,10 @@ static void DrawRestorePicker() {
         DrawRect(icx-fw/2,    icy-fh/2+6, fw,      fh-6, COL_BORDER);
         FillRect(icx-fw/2,    icy-fh/2,   fw/2-4,  10,   {28,28,28,255});
         DrawRect(icx-fw/2,    icy-fh/2,   fw/2-4,  10,   COL_BORDER);
-        DrawTextC("No backups yet",        SCREEN_W/2, cy + cH - 60, COL_TEXT, Font::Md);
-        DrawTextC("Create one from the backup prompt on the user-select screen.",
+        DrawTextC(Lang::T("restore.empty.title"), SCREEN_W/2, cy + cH - 60, COL_TEXT, Font::Md);
+        DrawTextC(Lang::T("restore.empty.hint"),
                   SCREEN_W/2, cy + cH - 32, COL_DIM, Font::Sm);
-        DrawFooter("B  back");
+        DrawFooter(Lang::T("footer.back"));
         return;
     }
 
@@ -2588,18 +3112,17 @@ static void DrawRestorePicker() {
         DrawRect(listX, sY, listW, sH, COL_BORDER);
         FillRect(listX, sY, 4, sH, COL_GOLD);
         TTF_Font* fsm = GetFont(Font::Sm);
-        char left[80];
-        snprintf(left, sizeof(left), "%d / %d backups",
-                 (int)gRestoreList.size(), gMaxBackups);
+        std::string left = std::to_string(gRestoreList.size()) + " / "
+                         + std::to_string(gMaxBackups) + " " + Lang::T("restore.backups.word");
         int lw=0, lh=0;
-        if (fsm) TTF_SizeUTF8(fsm, left, &lw, &lh);
+        if (fsm) TTF_SizeUTF8(fsm, left.c_str(), &lw, &lh);
         DrawText(left, listX + 16, sY + (sH - lh)/2, COL_TEXT, Font::Sm);
 
-        // Newest backup nicely formatted on the right
         auto top = ParseBackupName(gRestoreList[0]);
         if (top.ok) {
             char r[64];
-            snprintf(r, sizeof(r), "newest:  %s %d, %d  ·  %02d:%02d",
+            snprintf(r, sizeof(r), "%s  %s %d, %d  ·  %02d:%02d",
+                     Lang::T("restore.newest.prefix").c_str(),
                      BackupMonShort(top.mon), top.day, top.year, top.hour, top.min);
             int tw=0, th=0;
             if (fsm) TTF_SizeUTF8(fsm, r, &tw, &th);
@@ -2607,14 +3130,19 @@ static void DrawRestorePicker() {
         }
     }
 
+    int rpSelRowY = listY;
+    bool rpSawSel = false;
     for (int i = 0; i < RVIS; i++) {
         int idx = gRestoreScroll + i;
         if (idx >= (int)gRestoreList.size()) break;
         bool sel = (idx == gRestoreSel);
         int ry = listY + i * (rowH + rowGap);
+        if (sel) { rpSelRowY = ry; rpSawSel = true; }
         HitAdd(listX, ry, listW, rowH, TRestorePickSel, idx);
+        if (sel) DrawShadow(listX, ry, listW, rowH, gTheme.cornerRadius);
         FillRect(listX, ry, listW, rowH, sel ? COL_SEL : COL_PANEL);
-        DrawRect(listX, ry, listW, rowH, sel ? COL_GOLD : COL_BORDER);
+        DrawRect(listX, ry, listW, rowH,
+                 (sel && gTheme.cornerRadius == 0) ? COL_GOLD : COL_BORDER);
         // Gold left edge to anchor the row visually when selected
         FillRect(listX, ry, 4, rowH, sel ? COL_GOLD : SDL_Color{60,60,60,255});
 
@@ -2639,12 +3167,12 @@ static void DrawRestorePicker() {
             DrawText(timeStr, textX, ry + rowH - 24, COL_DIM, Font::Sm);
 
         // ── Right-side: position badge + (when selected) action chips ────
-        // "newest" / "oldest" / "#N" badge so users can tell entries apart at a glance.
-        const char* badge = nullptr;
+        std::string badgeStr;
         char nbuf[16];
-        if (idx == 0) badge = "newest";
-        else if (idx == (int)gRestoreList.size() - 1) badge = "oldest";
-        else { snprintf(nbuf, sizeof(nbuf), "#%d", idx + 1); badge = nbuf; }
+        if (idx == 0) badgeStr = Lang::T("restore.badge.newest");
+        else if (idx == (int)gRestoreList.size() - 1) badgeStr = Lang::T("restore.badge.oldest");
+        else { snprintf(nbuf, sizeof(nbuf), "#%d", idx + 1); badgeStr = nbuf; }
+        const char* badge = badgeStr.c_str();
         TTF_Font* fsm = GetFont(Font::Sm); int bw=0, bh=0;
         if (fsm) TTF_SizeUTF8(fsm, badge, &bw, &bh);
         int badgeW = bw + 16, badgeH = 18;
@@ -2655,7 +3183,6 @@ static void DrawRestorePicker() {
         DrawTextC(badge, badgeX + badgeW/2, badgeY + badgeH/2, badgeCol, Font::Sm);
 
         if (sel) {
-            // Two chip-style action hints stacked under the badge.
             int chipW = 92, chipH = 20, chipGap = 6;
             int chipX2 = listX + listW - chipW - 16;
             int chipX1 = chipX2 - chipW - chipGap;
@@ -2663,13 +3190,19 @@ static void DrawRestorePicker() {
             // A  restore (gold)
             FillRect(chipX1, chipY, chipW, chipH, {32,26,12,255});
             DrawRect(chipX1, chipY, chipW, chipH, COL_GOLD);
-            DrawTextC("A  restore", chipX1 + chipW/2, chipY + chipH/2, COL_GOLD, Font::Sm);
+            DrawTextC("A  " + Lang::T("restore.chip.restore"), chipX1 + chipW/2, chipY + chipH/2, COL_GOLD, Font::Sm);
             // X  delete (red)
             SDL_Color cRed = {220, 90, 90, 255};
             FillRect(chipX2, chipY, chipW, chipH, {40,16,16,255});
             DrawRect(chipX2, chipY, chipW, chipH, cRed);
-            DrawTextC("X  delete", chipX2 + chipW/2, chipY + chipH/2, cRed, Font::Sm);
+            DrawTextC("X  " + Lang::T("restore.chip.delete"), chipX2 + chipW/2, chipY + chipH/2, cRed, Font::Sm);
         }
+    }
+
+    if (rpSawSel) {
+        RequestHighlight((int)Screen::UserPick, /*sub=restore picker*/4,
+                         listX, rpSelRowY, listW, rowH, gDtSec);
+        DrawAnimatedHighlight();
     }
 
     if ((int)gRestoreList.size() > RVIS) {
@@ -2680,7 +3213,7 @@ static void DrawRestorePicker() {
         FillRect(listX + listW + 6, barY, 4, barH, COL_BORDER);
     }
 
-    DrawFooter("Up/Down  navigate    A  restore    X  delete    B  cancel");
+    DrawFooter(Lang::T("restore.footer"));
 
     // ── Confirmation modal ─────────────────────────────────────────────────
     if (gRestoreConfirmKind != 0
@@ -2701,10 +3234,9 @@ static void DrawRestorePicker() {
         DrawRect(mx, my, mW, mH, accent);
         FillRect(mx, my, mW, 4, accent);
 
-        DrawTextC(isDelete ? "Delete this backup?" : "Restore this backup?",
+        DrawTextC(Lang::T(isDelete ? "restore.confirm.delete.title" : "restore.confirm.restore.title"),
                   SCREEN_W/2, my + 36, accent, Font::Lg);
 
-        // Pretty backup name (same massaging as the list row)
         std::string nm = gRestoreList[gRestoreSel];
         size_t sl = nm.rfind('/');
         if (sl != std::string::npos) nm = nm.substr(sl + 1);
@@ -2713,14 +3245,14 @@ static void DrawRestorePicker() {
         DrawTextC(nm, SCREEN_W/2, my + 72, COL_TEXT, Font::Md);
 
         if (isDelete) {
-            DrawTextC("This backup will be permanently removed from the SD card.",
+            DrawTextC(Lang::T("restore.confirm.delete.l1"),
                       SCREEN_W/2, my + 102, COL_DIM, Font::Sm);
-            DrawTextC("This cannot be undone.",
+            DrawTextC(Lang::T("restore.confirm.delete.l2"),
                       SCREEN_W/2, my + 122, COL_DIM, Font::Sm);
         } else {
-            DrawTextC("Your current save will be overwritten with the data",
+            DrawTextC(Lang::T("restore.confirm.restore.l1"),
                       SCREEN_W/2, my + 102, COL_DIM, Font::Sm);
-            DrawTextC("from this backup.",
+            DrawTextC(Lang::T("restore.confirm.restore.l2"),
                       SCREEN_W/2, my + 122, COL_DIM, Font::Sm);
         }
 
@@ -2732,15 +3264,15 @@ static void DrawRestorePicker() {
         HitAdd(bxA, byBtn, bW, bH, TRestoreConfirmA, 0);
         FillRect(bxA, byBtn, bW, bH, COL_SEL);
         DrawRect(bxA, byBtn, bW, bH, accent);
-        DrawTextC(isDelete ? "A  delete" : "A  restore",
+        DrawTextC("A  " + Lang::T(isDelete ? "restore.chip.delete" : "restore.chip.restore"),
                   bxA + bW/2, byBtn + bH/2, accent, Font::Md);
         HitAdd(bxB, byBtn, bW, bH, TRestoreConfirmB, 0);
         FillRect(bxB, byBtn, bW, bH, COL_PANEL);
         DrawRect(bxB, byBtn, bW, bH, COL_BORDER);
-        DrawTextC("B  cancel", bxB + bW/2, byBtn + bH/2, COL_DIM, Font::Md);
+        DrawTextC("B  " + Lang::T("cancel"), bxB + bW/2, byBtn + bH/2, COL_DIM, Font::Md);
     }
 
-    SDL_RenderPresent(gRen);
+    Present();
 }
 
 static void DrawSettings() {
@@ -2748,35 +3280,41 @@ static void DrawSettings() {
     SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
     SDL_RenderClear(gRen);
 
-    if (gShowFileBrowser)    { DrawFileBrowser();    SDL_RenderPresent(gRen); return; }
-    if (gShowRestorePicker)  { DrawRestorePicker();  SDL_RenderPresent(gRen); return; }
+    if (gShowFileBrowser)    { DrawFileBrowser();    Present(); return; }
+    if (gShowRestorePicker)  { DrawRestorePicker();  Present(); return; }
 
-    DrawHeader("settings");
+    DrawHeader(Lang::T("settings.title"));
 
-    struct SettingsItem { const char* label; const char* desc; };
+    struct SettingsItem { const char* labelKey; const char* descKey; };
     static const SettingsItem ITEMS[] = {
-        { "Language",        "app display language — help translate on GitHub" },
-        { "Export Path",     "folder used when exporting textures" },
-        { "Max Backups",     "maximum number of save backups to keep (1-99)" },
-        { "Restore Backup",  "restore a previous save backup for the selected user" },
+        { "settings.item.lang",       "settings.item.lang.desc"    },
+        { "settings.item.export",     "settings.item.export.desc"  },
+        { "settings.item.maxbk",      "settings.item.maxbk.desc"   },
+        { "settings.item.restore",    "settings.item.restore.desc" },
+        { "settings.item.theme",      "settings.item.theme.desc"   },
     };
-    static const int ITEM_COUNT = 4;
+    static const int ITEM_COUNT = 5;
 
     const int listW = 720, listX = (SCREEN_W - listW) / 2;
     const int rowH  = 68,  rowGap = 5;
     int listY = 68;
 
+    int selRowY = listY;
     for (int i = 0; i < ITEM_COUNT; i++) {
         bool sel = (i == gSettingsSel);
         int ry = listY + i * (rowH + rowGap);
+        if (sel) selRowY = ry;
         HitAdd(listX, ry, listW, rowH, TSelSettingsItem, i);
+        if (sel) DrawShadow(listX, ry, listW, rowH, gTheme.cornerRadius);
         FillRect(listX, ry, listW, rowH, sel ? COL_SEL : COL_PANEL);
-        DrawRect(listX, ry, listW, rowH, sel ? COL_GOLD : COL_BORDER);
+        // Switch theme defers the gold outline to the animated highlight below.
+        DrawRect(listX, ry, listW, rowH,
+                 (sel && gTheme.cornerRadius == 0) ? COL_GOLD : COL_BORDER);
 
         SDL_Color labelCol = sel ? COL_TEXT : COL_DIM;
         SDL_Color descCol  = COL_DIM;
-        DrawText(ITEMS[i].label, listX + 16, ry + 10, labelCol, Font::Md);
-        DrawText(ITEMS[i].desc,  listX + 16, ry + 40, descCol,  Font::Sm);
+        DrawText(Lang::T(ITEMS[i].labelKey), listX + 16, ry + 10, labelCol, Font::Md);
+        DrawText(Lang::T(ITEMS[i].descKey),  listX + 16, ry + 40, descCol,  Font::Sm);
 
         if (i == 1) {
             TTF_Font* fsm = GetFont(Font::Sm);
@@ -2789,24 +3327,24 @@ static void DrawSettings() {
                 TTF_SizeUTF8(fsm, disp.c_str(), &vw, &vh);
             }
             DrawText(disp,        listX + listW - vw - 16, ry + 12, sel ? COL_ACCENT : COL_DIM, Font::Sm);
-            DrawText("A  change", listX + listW - 100,     ry + 40, sel ? COL_GOLD   : COL_DIM, Font::Sm);
+            DrawText("A  " + Lang::T("settings.change"), listX + listW - 100,     ry + 40, sel ? COL_GOLD   : COL_DIM, Font::Sm);
         } else if (i == 3) {
             int cnt = BackupService::CountBackups();
-            std::string v = (cnt == 0) ? "none" : std::to_string(cnt) + " available";
+            std::string v = (cnt == 0) ? Lang::T("settings.backups.none") : std::to_string(cnt) + " " + Lang::T("settings.backups.available");
             DrawText(v,          listX + listW - 130, ry + 12, sel ? COL_ACCENT : COL_DIM, Font::Sm);
-            DrawText("A  open",  listX + listW - 100, ry + 40, sel ? COL_GOLD   : COL_DIM, Font::Sm);
+            DrawText("A  " + Lang::T("settings.open"),  listX + listW - 100, ry + 40, sel ? COL_GOLD   : COL_DIM, Font::Sm);
         } else if (i == 2) {
             const int arrowW = 36, numW = 48, ctrlH = 34;
             int ctrlX = listX + listW - arrowW - numW - arrowW - 20;
             int ctrlY = ry + (rowH - ctrlH) / 2;
-            HitAdd(ctrlX, ctrlY, arrowW, ctrlH, TSimBtn, (int)HidNpadButton_Left);
+            HitAdd(ctrlX, ctrlY, arrowW, ctrlH, TSettingsRowLeft, i);
             FillRect(ctrlX, ctrlY, arrowW, ctrlH, COL_PANEL);
             DrawRect(ctrlX, ctrlY, arrowW, ctrlH, sel ? COL_GOLD : COL_BORDER);
             DrawTextC("<", ctrlX + arrowW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
             FillRect(ctrlX + arrowW, ctrlY, numW, ctrlH, COL_PANEL);
             DrawRect(ctrlX + arrowW, ctrlY, numW, ctrlH, sel ? COL_GOLD : COL_BORDER);
             DrawTextC(std::to_string(gMaxBackups), ctrlX + arrowW + numW/2, ctrlY + ctrlH/2, sel ? COL_TEXT : COL_DIM, Font::Md);
-            HitAdd(ctrlX + arrowW + numW, ctrlY, arrowW, ctrlH, TSimBtn, (int)HidNpadButton_Right);
+            HitAdd(ctrlX + arrowW + numW, ctrlY, arrowW, ctrlH, TSettingsRowRight, i);
             FillRect(ctrlX + arrowW + numW, ctrlY, arrowW, ctrlH, COL_PANEL);
             DrawRect(ctrlX + arrowW + numW, ctrlY, arrowW, ctrlH, sel ? COL_GOLD : COL_BORDER);
             DrawTextC(">", ctrlX + arrowW + numW + arrowW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
@@ -2821,23 +3359,45 @@ static void DrawSettings() {
             FillRect(ctrlX, ctrlY, arrowW, ctrlH, COL_PANEL);
             DrawRect(ctrlX, ctrlY, arrowW, ctrlH, sel ? COL_GOLD : COL_BORDER);
             DrawTextC("<", ctrlX + arrowW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
-            HitAdd(ctrlX, ctrlY, arrowW, ctrlH, TSimBtn, (int)HidNpadButton_Left);
+            HitAdd(ctrlX, ctrlY, arrowW, ctrlH, TSettingsRowLeft, i);
             FillRect(ctrlX + arrowW, ctrlY, chipW, ctrlH, COL_PANEL);
             DrawRect(ctrlX + arrowW, ctrlY, chipW, ctrlH, sel ? COL_GOLD : COL_BORDER);
             DrawTextC(curLabel, ctrlX + arrowW + chipW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
             FillRect(ctrlX + arrowW + chipW, ctrlY, arrowW, ctrlH, COL_PANEL);
             DrawRect(ctrlX + arrowW + chipW, ctrlY, arrowW, ctrlH, sel ? COL_GOLD : COL_BORDER);
             DrawTextC(">", ctrlX + arrowW + chipW + arrowW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
-            HitAdd(ctrlX + arrowW + chipW, ctrlY, arrowW, ctrlH, TSimBtn, (int)HidNpadButton_Right);
+            HitAdd(ctrlX + arrowW + chipW, ctrlY, arrowW, ctrlH, TSettingsRowRight, i);
+        } else if (i == 4) {
+            // Theme: < [Current] > stepper. Identical pattern to the language row.
+            std::string curLabel = Lang::T("theme." + ThemeNS::Current());
+            const int arrowW = 36, chipW = 160, ctrlH = 34;
+            int ctrlX = listX + listW - arrowW - chipW - arrowW - 20;
+            int ctrlY = ry + (rowH - ctrlH) / 2;
+            FillRect(ctrlX, ctrlY, arrowW, ctrlH, COL_PANEL);
+            DrawRect(ctrlX, ctrlY, arrowW, ctrlH, sel ? COL_GOLD : COL_BORDER);
+            DrawTextC("<", ctrlX + arrowW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
+            HitAdd(ctrlX, ctrlY, arrowW, ctrlH, TSettingsRowLeft, i);
+            FillRect(ctrlX + arrowW, ctrlY, chipW, ctrlH, COL_PANEL);
+            DrawRect(ctrlX + arrowW, ctrlY, chipW, ctrlH, sel ? COL_GOLD : COL_BORDER);
+            DrawTextC(curLabel, ctrlX + arrowW + chipW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
+            FillRect(ctrlX + arrowW + chipW, ctrlY, arrowW, ctrlH, COL_PANEL);
+            DrawRect(ctrlX + arrowW + chipW, ctrlY, arrowW, ctrlH, sel ? COL_GOLD : COL_BORDER);
+            DrawTextC(">", ctrlX + arrowW + chipW + arrowW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
+            HitAdd(ctrlX + arrowW + chipW, ctrlY, arrowW, ctrlH, TSettingsRowRight, i);
         }
     }
+
+    // Animated selection outline — glides between rows on Switch theme.
+    RequestHighlight((int)Screen::Settings, /*sub*/0,
+                     listX, selRowY, listW, rowH, gDtSec);
+    DrawAnimatedHighlight();
 
     if (!gSettingsMsg.empty())
         DrawTextC(gSettingsMsg, SCREEN_W/2, listY + ITEM_COUNT*(rowH+rowGap) + 10,
                   gSettingsMsgCol, Font::Sm);
 
-    DrawFooter("Up/Down  navigate    Left/Right  adjust    A  action    B  back");
-    SDL_RenderPresent(gRen);
+    DrawFooter(Lang::T("settings.footer.main"));
+    Present();
 }
 
 static void DrawUserPick() {
@@ -2845,10 +3405,10 @@ static void DrawUserPick() {
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
     SDL_RenderClear(gRen);
     DrawHeader("");
-    DrawTextC("select user", SCREEN_W/2, 44, COL_DIM, Font::Md);
+    DrawTextC(Lang::T("userpick.title"), SCREEN_W/2, 44, COL_DIM, Font::Md);
 
     int n = (int)gUsers.size();
-    if (n == 0) { DrawFooter("+  quit"); SDL_RenderPresent(gRen); return; }
+    if (n == 0) { DrawFooter(Lang::T("footer.quit")); Present(); return; }
 
     const int GAP      = 24;
     const int MAX_VIS  = std::min(n, 5);
@@ -2866,17 +3426,24 @@ static void DrawUserPick() {
     int startX = (SCREEN_W - totalW) / 2;
     int startY = 68 + (SCREEN_H - 36 - 68 - CARD_H) / 2;
 
+    int selCardX = startX, selCardY = startY;
     for (int i = 0; i < MAX_VIS; i++) {
         int idx = scroll + i;
         if (idx >= n) break;
         bool sel = (idx == gUserSel);
         int cx = startX + i*(CARD_W + GAP);
+        if (sel) { selCardX = cx; selCardY = startY; }
 
         HitAdd(cx, startY, CARD_W, CARD_H, TSelUser, idx);
 
+        if (sel) DrawShadow(cx, startY, CARD_W, CARD_H, gTheme.cornerRadius);
         FillRect(cx, startY, CARD_W, CARD_H, sel ? COL_SEL : COL_PANEL);
-        DrawRect(cx, startY, CARD_W, CARD_H, sel ? COL_GOLD : COL_BORDER);
-        if (sel) DrawRect(cx+1, startY+1, CARD_W-2, CARD_H-2, COL_GOLD);
+        DrawRect(cx, startY, CARD_W, CARD_H,
+                 (sel && gTheme.cornerRadius == 0) ? COL_GOLD : COL_BORDER);
+        // Legacy "double border" only on the Original theme (the animated
+        // glow does this job on Switch).
+        if (sel && gTheme.cornerRadius == 0)
+            DrawRectSquare(cx+1, startY+1, CARD_W-2, CARD_H-2, COL_GOLD);
 
         int avX = cx + (CARD_W - AV_SIZE)/2;
         int avY = startY + 14;
@@ -2892,6 +3459,11 @@ static void DrawUserPick() {
         DrawTextC(gUsers[idx].nickname, cx+CARD_W/2, avY+AV_SIZE+20,
                   sel ? COL_TEXT : COL_DIM, Font::Sm);
     }
+
+    // Animated selection outline glides between user cards.
+    RequestHighlight((int)Screen::UserPick, /*sub*/0,
+                     selCardX, selCardY, CARD_W, CARD_H, gDtSec);
+    DrawAnimatedHighlight();
 
     if (scroll > 0)
         DrawTextC("<", startX-18, startY+CARD_H/2, COL_DIM, Font::Md);
@@ -2909,8 +3481,8 @@ static void DrawUserPick() {
     DrawRect(sBtnX, sBtnY, sBtnW, sBtnH, COL_BORDER);
     DrawGearIcon(sBtnX + sBtnW/2, sBtnY + sBtnH/2, sBtnH * 30 / 100, COL_DIM);
 
-    DrawFooter("Left/Right  navigate    A  select    X  settings    +  quit");
-    SDL_RenderPresent(gRen);
+    DrawFooter(Lang::T("userpick.footer"));
+    Present();
 }
 
 static void DrawBackupPrompt() {
@@ -2930,42 +3502,46 @@ static void DrawBackupPrompt() {
     HitAdd(x2,cy,cw,ch, TSimBtn, (int)HidNpadButton_B);
 
     int curCount = BackupService::CountBackups();
+    auto sub = [](std::string s, const std::string& tok, const std::string& val) {
+        size_t p = 0;
+        while ((p = s.find(tok, p)) != std::string::npos) { s.replace(p, tok.size(), val); p += val.size(); }
+        return s;
+    };
+    std::string cur = std::to_string(curCount), mx = std::to_string(gMaxBackups);
     if (gBackupFull) {
-        char fullMsg[64];
-        snprintf(fullMsg, sizeof(fullMsg), "%d/%d backups — erase oldest to make room?", curCount, gMaxBackups);
+        std::string fullMsg = sub(sub(Lang::T("backup.full.title"), "{cur}", cur), "{max}", mx);
         DrawTextC(fullMsg, SCREEN_W/2, 44, COL_DIM, Font::Md);
         FillRect(x1,cy,cw,ch,COL_PANEL); DrawRect(x1,cy,cw,ch,COL_GOLD);
-        DrawTextC("[A]",                    x1+cw/2, cy+36,  COL_GOLD, Font::Lg);
-        DrawTextC("erase oldest + backup",  x1+cw/2, cy+86,  COL_GOLD, Font::Md);
-        DrawTextC("removes the oldest backup", x1+cw/2, cy+116, COL_DIM, Font::Sm);
-        DrawFooter("A  erase oldest + backup    B  skip    +  quit");
+        DrawTextC("[A]",                              x1+cw/2, cy+36,  COL_GOLD, Font::Lg);
+        DrawTextC(Lang::T("backup.full.action"),       x1+cw/2, cy+86,  COL_GOLD, Font::Md);
+        DrawTextC(Lang::T("backup.full.hint"),         x1+cw/2, cy+116, COL_DIM,  Font::Sm);
+        DrawFooter(Lang::T("backup.footer.full"));
     } else {
-        DrawTextC("backup save data?", SCREEN_W/2, 44, COL_DIM, Font::Md);
+        DrawTextC(Lang::T("backup.title"), SCREEN_W/2, 44, COL_DIM, Font::Md);
         FillRect(x1,cy,cw,ch,COL_PANEL); DrawRect(x1,cy,cw,ch,COL_ACCENT);
-        DrawTextC("[A]",         x1+cw/2, cy+36,  COL_ACCENT, Font::Lg);
-        DrawTextC("backup now",  x1+cw/2, cy+86,  COL_TEXT,   Font::Md);
-        DrawTextC("creates a timestamped backup", x1+cw/2, cy+116, COL_DIM, Font::Sm);
-        DrawFooter("A  backup    B  skip    +  quit");
+        DrawTextC("[A]",                              x1+cw/2, cy+36,  COL_ACCENT, Font::Lg);
+        DrawTextC(Lang::T("backup.action"),            x1+cw/2, cy+86,  COL_TEXT,   Font::Md);
+        DrawTextC(Lang::T("backup.action.hint"),       x1+cw/2, cy+116, COL_DIM,    Font::Sm);
+        DrawFooter(Lang::T("backup.footer"));
     }
 
     FillRect(x2,cy,cw,ch,COL_PANEL); DrawRect(x2,cy,cw,ch,COL_RED);
-    DrawTextC("[B]",         x2+cw/2, cy+36,  COL_RED,  Font::Lg);
-    DrawTextC("skip backup", x2+cw/2, cy+86,  COL_TEXT, Font::Md);
-    DrawTextC("continue without backup", x2+cw/2, cy+116, COL_DIM, Font::Sm);
+    DrawTextC("[B]",                          x2+cw/2, cy+36,  COL_RED,  Font::Lg);
+    DrawTextC(Lang::T("backup.skip"),          x2+cw/2, cy+86,  COL_TEXT, Font::Md);
+    DrawTextC(Lang::T("backup.skip.hint"),     x2+cw/2, cy+116, COL_DIM,  Font::Sm);
 
     // tip: current / max backups
-    char tipBuf[32];
-    snprintf(tipBuf, sizeof(tipBuf), "%d / %d backups", curCount, gMaxBackups);
-    DrawTextC(tipBuf, SCREEN_W/2, cy+ch+18, COL_DIM, Font::Sm);
+    std::string tip = sub(sub(Lang::T("backup.tip"), "{cur}", cur), "{max}", mx);
+    DrawTextC(tip, SCREEN_W/2, cy+ch+18, COL_DIM, Font::Sm);
 
-    SDL_RenderPresent(gRen);
+    Present();
 }
 
 static void DrawBackingUp() {
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
     SDL_RenderClear(gRen);
     DrawHeader("");
-    DrawTextC("backing up save data...", SCREEN_W/2, SCREEN_H/2-30, COL_DIM, Font::Md);
+    DrawTextC(Lang::T("backup.progress.title"), SCREEN_W/2, SCREEN_H/2-30, COL_DIM, Font::Md);
     float prog = BackupService::BackupProgress();
     int bw=1000, bh=10, bx=SCREEN_W/2-bw/2, by=SCREEN_H/2;
     FillRect(bx,by,bw,bh,COL_PANEL);
@@ -2973,15 +3549,15 @@ static void DrawBackingUp() {
     FillRect(bx,by,(int)(bw*prog),bh,COL_ACCENT);
     char pct[16]; snprintf(pct,sizeof(pct),"%d%%",(int)(prog*100));
     DrawTextC(pct, SCREEN_W/2, by+bh+18, COL_DIM);
-    DrawTextC("do not turn off the console", SCREEN_W/2, by+bh+42, COL_DIM);
-    SDL_RenderPresent(gRen);
+    DrawTextC(Lang::T("backup.progress.warn"), SCREEN_W/2, by+bh+42, COL_DIM);
+    Present();
 }
 
 static void DrawMounting() {
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
     SDL_RenderClear(gRen);
-    DrawTextC("mounting save...", SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
-    SDL_RenderPresent(gRen);
+    DrawTextC(Lang::T("mounting.title"), SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
+    Present();
 }
 
 static const int LIST_X=12, LIST_W=380, LIST_Y=64, LIST_H=SCREEN_H-96, ITEM_H=28;
@@ -3028,9 +3604,41 @@ static void TUgcClearSearch(int) {
 
 static const char* CONFIG_PATH = "/switch/TomoToolNX/config.ini";
 
+// Map the Switch's system locale to one we ship; unknown → "en".
+static std::string DetectSystemLanguage() {
+    std::string code = "en";
+    if (R_SUCCEEDED(setInitialize())) {
+        u64 langCode = 0;
+        SetLanguage lang;
+        if (R_SUCCEEDED(setGetSystemLanguage(&langCode)) &&
+            R_SUCCEEDED(setMakeLanguage(langCode, &lang))) {
+            switch (lang) {
+                case SetLanguage_FR:
+                case SetLanguage_FRCA:  code = "fr"; break;
+                case SetLanguage_ES:
+                case SetLanguage_ES419: code = "es"; break;
+                case SetLanguage_DE:    code = "de"; break;
+                case SetLanguage_RU:    code = "ru"; break;
+                case SetLanguage_ZHCN:
+                case SetLanguage_ZHTW:
+                case SetLanguage_ZHHANS:
+                case SetLanguage_ZHHANT: code = "zh"; break;
+                default:                 code = "en"; break;
+            }
+        }
+        setExit();
+    }
+    return code;
+}
+
 static void LoadConfig() {
+    bool langFromConfig = false;
     FILE* f = fopen(CONFIG_PATH, "r");
-    if (!f) return;
+    if (!f) {
+        // First launch: seed locale from the Switch's system language.
+        Lang::SetCurrent(DetectSystemLanguage());
+        return;
+    }
     char line[512];
     while (fgets(line, sizeof(line), f)) {
         std::string s(line);
@@ -3068,9 +3676,17 @@ static void LoadConfig() {
         }
         if (key == "language") {
             Lang::SetCurrent(val);
+            langFromConfig = true;
+        }
+        if (key == "theme") {
+            ThemeNS::SetCurrent(val);
         }
     }
     fclose(f);
+    // Pre-i18n configs have no language= line; treat as first launch.
+    if (!langFromConfig) {
+        Lang::SetCurrent(DetectSystemLanguage());
+    }
 }
 
 static void SaveConfig() {
@@ -3094,6 +3710,7 @@ static void SaveConfig() {
         fprintf(f, "matte=%02x%02x%02x\n", gMatte.r, gMatte.g, gMatte.b);
     }
     fprintf(f, "language=%s\n", Lang::Current().c_str());
+    fprintf(f, "theme=%s\n",    ThemeNS::Current().c_str());
     fclose(f);
 }
 
@@ -3102,36 +3719,45 @@ static void DrawFileBrowser() {
     FillRect(40,36,SCREEN_W-80,SCREEN_H-66,COL_PANEL);
     DrawRect(40,36,SCREEN_W-80,SCREEN_H-66,COL_BORDER);
     if (gBrowseForExportDir)
-        DrawTextC("select export folder", SCREEN_W/2, 52, COL_GOLD, Font::Md);
+        DrawTextC(Lang::T("browse.title.export"), SCREEN_W/2, 52, COL_GOLD, Font::Md);
     else
-        DrawTextC(gBrowseForMii ? "select .ltd" : "select PNG or .ltd", SCREEN_W/2, 52, COL_DIM, Font::Md);
+        DrawTextC(Lang::T(gBrowseForMii ? "browse.title.ltd" : "browse.title.png_ltd"), SCREEN_W/2, 52, COL_DIM, Font::Md);
     DrawTextC(gBrowseCurPath, SCREEN_W/2, 72, COL_DIM);
     if (gBrowseForExportDir)
-        DrawTextC("current: "+gExportPath, SCREEN_W/2, 90, COL_DIM);
+        DrawTextC(Lang::T("browse.current") + ": " + gExportPath, SCREEN_W/2, 90, COL_DIM);
     if (gBrowseEntries.empty()) {
-        DrawTextC("empty folder", SCREEN_W/2, SCREEN_H/2, COL_DIM);
+        DrawTextC(Lang::T("browse.empty"), SCREEN_W/2, SCREEN_H/2, COL_DIM);
     } else {
         int py = gBrowseForExportDir ? 106 : 88, ph=26;
         int pvis=(SCREEN_H-(gBrowseForExportDir?166:148))/ph;
         TTF_Font* f=GetFont(Font::Sm); int fh=0,fw=0;
         if(f) TTF_SizeUTF8(f,"A",&fw,&fh);
+        int selRowY = py;
+        bool sawSel = false;
         for (int i=0;i<pvis;i++){
             int idx=gBrowseScroll+i;
             if (idx>=(int)gBrowseEntries.size()) break;
             bool isSel=(idx==gBrowseSel);
             auto& entry=gBrowseEntries[idx];
-            HitAdd(52,py+i*ph,SCREEN_W-104,ph-2, TSelBrowse, idx);
-            FillRect(52,py+i*ph,SCREEN_W-104,ph-2, isSel?COL_SEL:COL_PANEL2);
-            SDL_Color border = COL_GOLD;
-            if (isSel) DrawRect(52,py+i*ph,SCREEN_W-104,ph-2,border);
+            int ry = py+i*ph;
+            if (isSel) { selRowY = ry; sawSel = true; }
+            HitAdd(52,ry,SCREEN_W-104,ph-2, TSelBrowse, idx);
+            FillRect(52,ry,SCREEN_W-104,ph-2, isSel?COL_SEL:COL_PANEL2);
+            if (isSel && gTheme.cornerRadius == 0)
+                DrawRectSquare(52,ry,SCREEN_W-104,ph-2,COL_GOLD);
             std::string label = (entry.isDir && entry.name!="[..]") ? "/"+entry.name : entry.name;
-            DrawText(label, 60, py+i*ph+(ph-2-fh)/2, isSel?COL_TEXT:COL_DIM);
+            DrawText(label, 60, ry+(ph-2-fh)/2, isSel?COL_TEXT:COL_DIM);
+        }
+        if (sawSel) {
+            RequestHighlight((int)Screen::OnSwitch, /*sub=file browser*/7,
+                             52, selRowY, SCREEN_W-104, ph-2, gDtSec);
+            DrawAnimatedHighlight();
         }
     }
     if (gBrowseForExportDir)
-        DrawFooter("Up/Down  navigate    A  open folder    Y  set as export folder    X  cancel    B  back");
+        DrawFooter(Lang::T("browse.footer.export"));
     else
-        DrawFooter("Up/Down  navigate    A  open / select    B  back    X  cancel");
+        DrawFooter(Lang::T("browse.footer.pick"));
 }
 
 // ─── Texture encoding settings tab ───────────────────────────────────────────
@@ -3141,9 +3767,9 @@ static void DrawTexSettings() {
     SDL_RenderClear(gRen);
     DrawHeader(Lang::T("settings.header"));
 
-    // Tab bar (same as DrawOnSwitch, with gear tab selected)
+    // Tab bar (same as DrawOnSwitch, with gear tab selected) — underline style.
     {
-        int tw=118, th=22, gap=4, gearTw=32;
+        int tw=118, th=28, gap=4, gearTw=36;
         int totalW=tw*5+gap*5+gearTw, tx=SCREEN_W/2-totalW/2, ty=28;
         struct { std::string label; OnSwitchMode mode; } tabs[]={
             {Lang::T("tab.webui"),    OnSwitchMode::WebUI},
@@ -3151,22 +3777,20 @@ static void DrawTexSettings() {
             {Lang::T("tab.mii"),      OnSwitchMode::MiiStats},
             {Lang::T("tab.player"),   OnSwitchMode::Player},
             {Lang::T("tab.map"),      OnSwitchMode::Map}};
+        // None of the 5 base tabs are "selected" on this screen — the gear is.
         for (auto& t : tabs) {
-            bool sel=gOnSwitchMode==t.mode;
             HitAdd(tx,ty,tw,th,TSetMode,(int)t.mode);
-            FillRect(tx,ty,tw,th,sel?COL_SEL:COL_PANEL);
-            DrawRect(tx,ty,tw,th,sel?COL_GOLD:COL_BORDER);
-            DrawTextC(t.label,tx+tw/2,ty+th/2,sel?COL_GOLD:COL_DIM);
+            DrawTextC(t.label,tx+tw/2,ty+th/2,COL_DIM);
             tx+=tw+gap;
         }
-        {
-            bool sel=true; // always selected here
-            HitAdd(tx,ty,gearTw,th,TSetMode,(int)OnSwitchMode::TexSettings);
-            FillRect(tx,ty,gearTw,th,COL_SEL);
-            DrawRect(tx,ty,gearTw,th,COL_GOLD);
-            DrawGearIcon(tx+gearTw/2,ty+th/2,th*38/100,COL_GOLD);
-            (void)sel;
-        }
+        // Gear represents the texture-settings tab.
+        HitAdd(tx,ty,gearTw,th,TSetMode,(int)OnSwitchMode::TexSettings);
+        DrawGearIcon(tx+gearTw/2,ty+th/2,th*38/100,COL_GOLD);
+        // Underline slides from wherever it last sat (e.g. "Textures") to
+        // beneath the gear, since the owner tag matches the other tab bars.
+        RequestTabUnderline(0, /*owner=main tab bar*/100,
+                            tx + (gearTw-24)/2, ty + th + 2, 24, 3, gDtSec);
+        DrawTabUnderline(0);
     }
 
     // Content area — four compact rows (Encoder, BC1 mode, Fit, Background),
@@ -3269,7 +3893,7 @@ static void DrawTexSettings() {
     }
 
     DrawFooter(Lang::T("settings.footer"));
-    SDL_RenderPresent(gRen);
+    Present();
 }
 
 static void DrawOnSwitch() {
@@ -3280,10 +3904,10 @@ static void DrawOnSwitch() {
     // Header with subtitle
     std::string subtitle;
     switch(gOnSwitchMode){
-        case OnSwitchMode::UGC:      subtitle="textures"; break;
-        case OnSwitchMode::Player:   subtitle="player"; break;
-        case OnSwitchMode::MiiStats: subtitle="mii"; break;
-        default:                     subtitle="webui"; break;
+        case OnSwitchMode::UGC:      subtitle=Lang::T("tab.textures"); break;
+        case OnSwitchMode::Player:   subtitle=Lang::T("tab.player"); break;
+        case OnSwitchMode::MiiStats: subtitle=Lang::T("tab.mii"); break;
+        default:                     subtitle=Lang::T("tab.webui"); break;
     }
     DrawHeader(subtitle);
 
@@ -3298,20 +3922,26 @@ static void DrawOnSwitch() {
             {Lang::T("tab.player"),   OnSwitchMode::Player},
             {Lang::T("tab.map"),      OnSwitchMode::Map},
         };
+        int ulX = tx, ulY = ty + th + 2;
+        bool ulHave = false;
         for (auto& t : tabs) {
             bool sel = gOnSwitchMode==t.mode;
             HitAdd(tx,ty,tw,th, TSetMode, (int)t.mode);
-            FillRect(tx,ty,tw,th, sel?COL_SEL:COL_PANEL);
-            DrawRect(tx,ty,tw,th, sel?COL_GOLD:COL_BORDER);
             DrawTextC(t.label, tx+tw/2, ty+th/2, sel?COL_GOLD:COL_DIM);
+            if (sel) { ulX = tx + (tw-72)/2; ulHave = true; }
             tx+=tw+gap;
+        }
+        if (ulHave) {
+            RequestTabUnderline(/*slot*/0, /*owner=main tab bar*/100,
+                                ulX, ulY, 72, 3, gDtSec);
+            DrawTabUnderline(/*slot*/0);
         }
     }
 
     // ── File browser (overlay) ───────────────────────────────────────────────
     if (gShowFileBrowser) {
         DrawFileBrowser();
-        SDL_RenderPresent(gRen); return;
+        Present(); return;
     }
 
     // ── UGC tab ──────────────────────────────────────────────────────────────
@@ -3329,7 +3959,7 @@ static void DrawOnSwitch() {
         TTF_Font* fsm0 = GetFont(Font::Sm);
         int sh = 0;
         if (searchActive) {
-            std::string lbl = std::string("Filter:  ") + gUgcFilter;
+            std::string lbl = Lang::T("ugc.filter") + ":  " + gUgcFilter;
             int tw0=0; if (fsm0) TTF_SizeUTF8(fsm0, lbl.c_str(), &tw0, &sh);
             DrawText(lbl, sbX+8, sbY+(SEARCH_H-sh)/2, COL_ACCENT);
             // Clear (✕) button
@@ -3337,8 +3967,8 @@ static void DrawOnSwitch() {
             DrawRect(sbX+sbW-clearW, sbY, clearW, SEARCH_H, COL_BORDER);
             DrawTextC("X", sbX+sbW-clearW/2, sbY+SEARCH_H/2, COL_DIM, Font::Md);
         } else {
-            const char* placeholder = "Tap or  -  to search...";
-            int tw0=0; if (fsm0) TTF_SizeUTF8(fsm0, placeholder, &tw0, &sh);
+            std::string placeholder = Lang::T("ugc.search.placeholder");
+            int tw0=0; if (fsm0) TTF_SizeUTF8(fsm0, placeholder.c_str(), &tw0, &sh);
             DrawText(placeholder, sbX+8, sbY+(SEARCH_H-sh)/2, COL_DIM);
         }
 
@@ -3357,23 +3987,33 @@ static void DrawOnSwitch() {
         if (totalFiltered > 0 && gEntryScroll > totalFiltered - LIST_VISIBLE)
             gEntryScroll = std::max(0, totalFiltered - LIST_VISIBLE);
 
+        int selRowY = LIST_TOP_Y;
+        bool sawSel = false;
         for (int i = 0; i < LIST_VISIBLE; i++) {
             int filtPos = gEntryScroll + i;
             if (filtPos >= totalFiltered) break;
             int realIdx = gFilteredEntries[filtPos];
             bool sel = (realIdx == gEntrySel);
             int ry = LIST_TOP_Y + i*ITEM_H;
+            if (sel) { selRowY = ry; sawSel = true; }
             HitAdd(LIST_X, ry, LIST_W, ITEM_H-1, TSelUgc, realIdx);
             FillRect(LIST_X, ry, LIST_W, ITEM_H-1, sel?COL_SEL:COL_BG);
-            if (sel) DrawRect(LIST_X, ry, LIST_W, ITEM_H-1, COL_GOLD);
+            if (sel && gTheme.cornerRadius == 0)
+                DrawRectSquare(LIST_X, ry, LIST_W, ITEM_H-1, COL_GOLD);
             std::string dn = MiiManager::GetUgcName(gEntries[realIdx].stem);
             if (dn.empty()) dn = FormatStem(gEntries[realIdx].stem);
             TTF_Font* f = GetFont(Font::Sm); int fw=0,fh=0; if(f)TTF_SizeUTF8(f,dn.c_str(),&fw,&fh);
             DrawText(dn, LIST_X+6, ry+(ITEM_H-fh)/2, sel?COL_TEXT:COL_DIM);
         }
 
+        if (sawSel) {
+            RequestHighlight((int)Screen::OnSwitch, /*sub=ugc list*/1,
+                             LIST_X, selRowY, LIST_W, ITEM_H-1, gDtSec);
+            DrawAnimatedHighlight();
+        }
+
         if (totalFiltered == 0 && !gEntries.empty()) {
-            DrawTextC("no matches", LIST_X+LIST_W/2, LIST_TOP_Y + LIST_VIS_H/2, COL_DIM, Font::Md);
+            DrawTextC(Lang::T("ugc.no.matches"), LIST_X+LIST_W/2, LIST_TOP_Y + LIST_VIS_H/2, COL_DIM, Font::Md);
         }
 
         if (totalFiltered > LIST_VISIBLE) {
@@ -3400,7 +4040,7 @@ static void DrawOnSwitch() {
                 SDL_Rect dst{PREVIEW_X+(PREVIEW_W-dw)/2, imgY+(imgH-dh)/2, dw, dh};
                 SDL_RenderCopy(gRen,gPreviewTex,nullptr,&dst);
             } else {
-                DrawTextC("no preview", PREVIEW_X+PREVIEW_W/2, imgY+imgH/2, COL_BORDER);
+                DrawTextC(Lang::T("ugc.no.preview"), PREVIEW_X+PREVIEW_W/2, imgY+imgH/2, COL_BORDER);
             }
             if (!gEntries.empty()) {
                 int cx   = PREVIEW_X + PREVIEW_W/2;
@@ -3414,20 +4054,20 @@ static void DrawOnSwitch() {
                 // A: import
                 FillRect(bx0,             btnY, btnW, kBtnH, COL_PANEL);
                 DrawRect(bx0,             btnY, btnW, kBtnH, COL_ACCENT);
-                DrawTextC("A  import", bx0+btnW/2, btnY+kBtnH/2, COL_ACCENT, Font::Md);
+                DrawTextC("A  " + Lang::T("ugc.import"), bx0+btnW/2, btnY+kBtnH/2, COL_ACCENT, Font::Md);
                 // Y: export PNG
                 FillRect(bx0+btnW+btnGap, btnY, btnW, kBtnH, COL_PANEL);
                 DrawRect(bx0+btnW+btnGap, btnY, btnW, kBtnH, COL_GOLD);
-                DrawTextC("Y  export pic", bx0+btnW+btnGap+btnW/2, btnY+kBtnH/2, COL_GOLD, Font::Md);
+                DrawTextC("Y  " + Lang::T("ugc.exportpic"), bx0+btnW+btnGap+btnW/2, btnY+kBtnH/2, COL_GOLD, Font::Md);
                 // export .ltd (touch)
                 FillRect(bxLtd,           btnY, btnW, kBtnH, COL_PANEL);
                 DrawRect(bxLtd,           btnY, btnW, kBtnH, COL_GOLD);
-                DrawTextC("export .ltd", bxLtd+btnW/2, btnY+kBtnH/2, COL_GOLD, Font::Md);
+                DrawTextC(Lang::T("ugc.exportltd"), bxLtd+btnW/2, btnY+kBtnH/2, COL_GOLD, Font::Md);
                 HitAdd(bxLtd, btnY, btnW, kBtnH, TDoUgcExportLtd, 0);
                 // X: remove BG (separated by gap)
                 FillRect(bxBg,            btnY, btnW, kBtnH, COL_SEL);
                 DrawRect(bxBg,            btnY, btnW, kBtnH, {90,140,200,255});
-                DrawTextC("X  remove BG", bxBg+btnW/2, btnY+kBtnH/2, {90,140,200,255}, Font::Md);
+                DrawTextC("X  " + Lang::T("ugc.removebg"), bxBg+btnW/2, btnY+kBtnH/2, {90,140,200,255}, Font::Md);
                 // Gear: open encoding settings tab (touch only, small square)
                 FillRect(bxGear, btnY, gearW, kBtnH, COL_PANEL);
                 DrawRect(bxGear, btnY, gearW, kBtnH, COL_BORDER);
@@ -3435,7 +4075,7 @@ static void DrawOnSwitch() {
                 HitAdd(bxGear, btnY, gearW, kBtnH, TSetMode, (int)OnSwitchMode::TexSettings);
             }
         }
-        DrawFooter("ZL/ZR  scroll    Up/Down  select    A  import    Y  export pic    export .ltd  (touch)    X  remove BG    -  search    L/R  tab    B/+  back");
+        DrawFooter(Lang::T("ugc.footer"));
     }
 
     // ── WebUI tab ─────────────────────────────────────────────────────────────
@@ -3453,7 +4093,7 @@ static void DrawOnSwitch() {
         int logBoxH = contentH;
         FillRect(margin,contentY,logBoxW,logBoxH,COL_PANEL);
         DrawRect(margin,contentY,logBoxW,logBoxH,COL_BORDER);
-        DrawText("activity log", margin+8, contentY+6, COL_DIM);
+        DrawText(Lang::T("webui.log.title"), margin+8, contentY+6, COL_DIM);
         {
             int logY=contentY+26, logMaxY=contentY+logBoxH-10, lineH=20;
             int maxLines=(logMaxY-logY)/lineH;
@@ -3464,7 +4104,7 @@ static void DrawOnSwitch() {
                 logY+=lineH;
             }
             if (gLog.empty())
-                DrawTextC("no activity yet", margin+logBoxW/2, contentY+logBoxH/2, COL_BORDER);
+                DrawTextC(Lang::T("webui.log.empty"), margin+logBoxW/2, contentY+logBoxH/2, COL_BORDER);
         }
 
         // Right half — URL top, WiFi status under it, QR code at bottom
@@ -3494,23 +4134,25 @@ static void DrawOnSwitch() {
             // WiFi status below URL box with comfortable gap
             int statusY = urlY + urlBoxH + 16;
             int iw=0;
-            if(fsm) TTF_SizeUTF8(fsm,wifiActive?"Active":"Inactive",&iw,&lh);
+            std::string activeS = Lang::T("webui.active");
+            std::string inactiveS = Lang::T("webui.inactive");
+            if(fsm) TTF_SizeUTF8(fsm, (wifiActive?activeS:inactiveS).c_str(),&iw,&lh);
             int totalStatusW=lw+iw;
             int sxBase=rightX+(rightW-totalStatusW)/2;
             DrawText("WiFi : ", sxBase, statusY, COL_DIM);
-            DrawText("Active", sxBase+lw, statusY, COL_GREEN);
+            DrawText(activeS, sxBase+lw, statusY, COL_GREEN);
 
             // MTP status below WiFi status
             {
                 bool mtpOn = MtpServer::IsSessionOpen();
-                const char* mtpVal = mtpOn ? "Active" : "Inactive";
+                std::string mtpVal = mtpOn ? activeS : inactiveS;
                 SDL_Color mtpCol = mtpOn ? COL_GREEN : COL_DIM;
                 int lineH = (lh > 0) ? lh : 20;
                 int mtpY = statusY + lineH + 8;
                 int mw=0, mw2=0, mh=0;
                 TTF_Font* fss = GetFont(Font::Sm);
                 if(fss) TTF_SizeUTF8(fss, "MTP  : ", &mw, &mh);
-                if(fss) TTF_SizeUTF8(fss, mtpVal, &mw2, &mh);
+                if(fss) TTF_SizeUTF8(fss, mtpVal.c_str(), &mw2, &mh);
                 int mxBase = rightX + (rightW - (mw + mw2)) / 2;
                 DrawText("MTP  : ", mxBase, mtpY, COL_DIM, Font::Sm);
                 DrawText(mtpVal, mxBase + mw, mtpY, mtpCol, Font::Sm);
@@ -3541,29 +4183,31 @@ static void DrawOnSwitch() {
             TTF_Font* fsm=GetFont(Font::Sm); int lw=0,lh=0;
             if(fsm) TTF_SizeUTF8(fsm,"WiFi : ",&lw,&lh);
             int cy2 = contentY+contentH/2-lh;
+            std::string activeS = Lang::T("webui.active");
+            std::string inactiveS = Lang::T("webui.inactive");
             DrawText("WiFi : ",  rightX+(rightW-lw)/2-20, cy2, COL_DIM);
-            DrawText("Inactive", rightX+(rightW-lw)/2-20+lw, cy2, COL_RED);
+            DrawText(inactiveS, rightX+(rightW-lw)/2-20+lw, cy2, COL_RED);
 
             // MTP status below
-                        {
+            {
                 bool mtpOn = MtpServer::IsSessionOpen();
-                const char* mtpVal = mtpOn ? "Active" : "Inactive";
+                std::string mtpVal = mtpOn ? activeS : inactiveS;
                 SDL_Color mtpCol = mtpOn ? COL_GREEN : COL_DIM;
                 int lineH = (lh > 0) ? lh : 20;
                 int mw=0, mw2=0, mh=0;
                 TTF_Font* fss = GetFont(Font::Sm);
                 if(fss) TTF_SizeUTF8(fss, "MTP  : ", &mw, &mh);
-                if(fss) TTF_SizeUTF8(fss, mtpVal, &mw2, &mh);
+                if(fss) TTF_SizeUTF8(fss, mtpVal.c_str(), &mw2, &mh);
                 int mxBase = rightX + (rightW - (mw + mw2)) / 2;
                 DrawText("MTP  : ", mxBase, cy2 + lineH + 8, COL_DIM, Font::Sm);
                 DrawText(mtpVal, mxBase + mw, cy2 + lineH + 8, mtpCol, Font::Sm);
             }
-                    }
+        }
 
-        DrawFooter("L/R  tab    X  restart server    B/+  back");
+        DrawFooter(Lang::T("webui.footer"));
     }
 
-    SDL_RenderPresent(gRen);
+    Present();
 }
 
 // ─── Wishes bulk operations ──────────────────────────────────────────────────
@@ -3712,11 +4356,22 @@ static const int SE_DETAIL_W = SCREEN_W - SE_DETAIL_X - 8;
 static const int SE_TOP_Y    = LIST_Y;
 static const int SE_ROW_H    = 52;
 
+// i18n key = prefix + label with spaces stripped (e.g. "Boot Count" → "player.field.BootCount").
+static std::string FieldKey(const char* prefix, const char* label) {
+    std::string k = prefix;
+    for (const char* p = label; *p; p++) if (*p != ' ') k += *p;
+    return Lang::T(k);
+}
+static std::string MiiLabelT   (const char* label) { return FieldKey("mii.field.",    label); }
+static std::string MiiDescT    (const char* label) { return FieldKey("mii.desc.",     label); }
+static std::string PlayerLabelT(const char* label) { return FieldKey("player.field.", label); }
+static std::string PlayerDescT (const char* label) { return FieldKey("player.desc.",  label); }
+
 static void DrawPlayer() {
     HitClear();
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
     SDL_RenderClear(gRen);
-    DrawHeader("player");
+    DrawHeader(Lang::T("tab.player"));
 
     // Tab bar (same as DrawOnSwitch)
     {
@@ -3726,13 +4381,18 @@ static void DrawPlayer() {
             {Lang::T("tab.webui"),OnSwitchMode::WebUI},{Lang::T("tab.textures"),OnSwitchMode::UGC},
             {Lang::T("tab.mii"),OnSwitchMode::MiiStats},{Lang::T("tab.player"),OnSwitchMode::Player},
             {Lang::T("tab.map"),OnSwitchMode::Map}};
+        int ulX = tx, ulY = ty + th + 2;
+        bool ulHave = false;
         for (auto& t : tabs) {
             bool sel=gOnSwitchMode==t.mode;
             HitAdd(tx,ty,tw,th,TSetMode,(int)t.mode);
-            FillRect(tx,ty,tw,th,sel?COL_SEL:COL_PANEL);
-            DrawRect(tx,ty,tw,th,sel?COL_GOLD:COL_BORDER);
             DrawTextC(t.label,tx+tw/2,ty+th/2,sel?COL_GOLD:COL_DIM);
+            if (sel) { ulX = tx + (tw-72)/2; ulHave = true; }
             tx+=tw+gap;
+        }
+        if (ulHave) {
+            RequestTabUnderline(0, 100, ulX, ulY, 72, 3, gDtSec);
+            DrawTabUnderline(0);
         }
     }
 
@@ -3741,15 +4401,15 @@ static void DrawPlayer() {
         // doesn't sit on "loading..." forever when the parser actually failed.
         if (!gPlayerMsg.empty()) {
             DrawTextC(gPlayerMsg, SCREEN_W/2, SCREEN_H/2 - 14, COL_RED, Font::Md);
-            DrawTextC("Player.sav couldn't be parsed — restore from a backup or",
+            DrawTextC(Lang::T("player.parse.fail.l1"),
                       SCREEN_W/2, SCREEN_H/2 + 18, COL_DIM, Font::Sm);
-            DrawTextC("re-open Tomodachi Life once to let the game rewrite it.",
+            DrawTextC(Lang::T("player.parse.fail.l2"),
                       SCREEN_W/2, SCREEN_H/2 + 38, COL_DIM, Font::Sm);
         } else {
-            DrawTextC("loading current player save...", SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
+            DrawTextC(Lang::T("player.loading"), SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
         }
-        DrawFooter("B  back");
-        SDL_RenderPresent(gRen);
+        DrawFooter(Lang::T("footer.back"));
+        Present();
         return;
     }
 
@@ -3765,18 +4425,23 @@ static void DrawPlayer() {
     if (gPlayerScroll < 0) gPlayerScroll = 0;
 
     TTF_Font* fsm_pl = GetFont(Font::Sm);
+    int plSelRowY = SE_TOP_Y;
+    bool plSawSel = false;
     for (int i = gPlayerScroll; i < PLAYER_FIELD_COUNT && i < gPlayerScroll + plVis; i++) {
         bool sel = (i == gPlayerFieldSel);
         int ry = SE_TOP_Y + (i - gPlayerScroll) * PL_ROW_H;
+        if (sel) { plSelRowY = ry; plSawSel = true; }
         HitAdd(SE_LIST_X, ry, SE_LIST_W, PL_ROW_H-1, TSelPlayerField, i);
         FillRect(SE_LIST_X, ry, SE_LIST_W, PL_ROW_H-1, sel?COL_SEL:COL_BG);
-        if (sel) DrawRect(SE_LIST_X, ry, SE_LIST_W, PL_ROW_H-1, COL_GOLD);
+        if (sel && gTheme.cornerRadius == 0)
+            DrawRectSquare(SE_LIST_X, ry, SE_LIST_W, PL_ROW_H-1, COL_GOLD);
 
         const auto& fd = PLAYER_FIELDS[i];
         uint32_t fh = PFHash(fd);
+        std::string labelTr = PlayerLabelT(fd.label);
         int lw=0,lh=0;
-        if(fsm_pl) TTF_SizeUTF8(fsm_pl, fd.label, &lw, &lh);
-        DrawText(fd.label, SE_LIST_X+8, ry+(PL_ROW_H-lh)/2, sel?COL_TEXT:COL_DIM);
+        if(fsm_pl) TTF_SizeUTF8(fsm_pl, labelTr.c_str(), &lw, &lh);
+        DrawText(labelTr, SE_LIST_X+8, ry+(PL_ROW_H-lh)/2, sel?COL_TEXT:COL_DIM);
 
         std::string val;
         if (fd.isStr) {
@@ -3809,6 +4474,12 @@ static void DrawPlayer() {
         DrawText(val, SE_LIST_X+SE_LIST_W-vw-8, ry+(PL_ROW_H-vh)/2, sel?COL_ACCENT:COL_DIM);
     }
 
+    if (plSawSel) {
+        RequestHighlight((int)Screen::OnSwitch, /*sub=player field list*/2,
+                         SE_LIST_X, plSelRowY, SE_LIST_W, PL_ROW_H-1, gDtSec);
+        DrawAnimatedHighlight();
+    }
+
     // Right panel: edit controls for selected field
     FillRect(SE_DETAIL_X, SE_TOP_Y, SE_DETAIL_W, SCREEN_H-SE_TOP_Y-32, {8,8,8,255});
     DrawRect(SE_DETAIL_X, SE_TOP_Y, SE_DETAIL_W, SCREEN_H-SE_TOP_Y-32, COL_BORDER);
@@ -3818,27 +4489,27 @@ static void DrawPlayer() {
     int cx = SE_DETAIL_X + SE_DETAIL_W/2;
     int midY = SE_TOP_Y + (SCREEN_H-SE_TOP_Y-32)/2 - 36;
 
-    DrawTextC(fd.label, cx, midY-102, COL_DIM, Font::Md);
-    DrawTextC(fd.desc,  cx, midY-76,  COL_DIM, Font::Sm);
+    DrawTextC(PlayerLabelT(fd.label), cx, midY-102, COL_DIM, Font::Md);
+    DrawTextC(PlayerDescT(fd.label),  cx, midY-76,  COL_DIM, Font::Sm);
 
     if (fd.isStr) {
         std::string val = SaveEditor::GetWStr32(gPlayerSav, ph);
-        DrawTextC(val.empty() ? "(empty)" : val, cx, midY-40, COL_TEXT, Font::Lg);
+        DrawTextC(val.empty() ? Lang::T("empty") : val, cx, midY-40, COL_TEXT, Font::Lg);
         int bw=260, bh=40, bx=cx-bw/2, by=midY+10;
         HitAdd(bx,by,bw,bh, TPlayerKbd, 0);
         FillRect(bx,by,bw,bh,COL_SEL); DrawRect(bx,by,bw,bh,COL_ACCENT);
-        DrawTextC("A  edit with keyboard", cx, by+bh/2, COL_ACCENT, Font::Md);
+        DrawTextC("A  " + Lang::T("player.kbd.edit"), cx, by+bh/2, COL_ACCENT, Font::Md);
         const char* howName = (strcmp(fd.fieldName,"Player.Name")==0)       ? "Player.HowToCallName"
                             : (strcmp(fd.fieldName,"Player.IslandName")==0)  ? "Player.HowToCallIslandName"
                             : nullptr;
         if (howName) {
             std::string how = SaveEditor::GetWStr32(gPlayerSav, SaveEditor::Hash(howName));
             const std::string& dispHow = how.empty() ? val : how;
-            DrawTextC(dispHow.empty()?"(empty)":dispHow.c_str(), cx, by+bh+16, COL_TEXT, Font::Sm);
+            DrawTextC(dispHow.empty()? Lang::T("empty") : dispHow, cx, by+bh+16, COL_TEXT, Font::Sm);
             int pbX=cx-bw/2, pbY=by+bh+32;
             HitAdd(pbX,pbY,bw,bh,TSimBtn,(int)HidNpadButton_X);
             FillRect(pbX,pbY,bw,bh,COL_SEL); DrawRect(pbX,pbY,bw,bh,COL_ACCENT);
-            DrawTextC("X  edit pronunciation",cx,pbY+bh/2,COL_ACCENT,Font::Md);
+            DrawTextC("X  " + Lang::T("player.edit.pron"),cx,pbY+bh/2,COL_ACCENT,Font::Md);
             // Language section
             bool isNameField = strcmp(fd.fieldName,"Player.Name")==0;
             const char* langFieldName = isNameField ? "Player.NameRegionLanguageID"
@@ -3853,18 +4524,20 @@ static void DrawPlayer() {
             int lbxL=cx-lbGap/2-lbW, lbxR=cx+lbGap/2, lbY=langY+22;
             HitAdd(lbxL,lbY,lbW,lbH,TSimBtn,(int)HidNpadButton_Left);
             FillRect(lbxL,lbY,lbW,lbH,COL_PANEL); DrawRect(lbxL,lbY,lbW,lbH,COL_BORDER);
-            DrawTextC("< Prev",lbxL+lbW/2,lbY+lbH/2,COL_DIM);
+            DrawTextC("< " + Lang::T("prev"),lbxL+lbW/2,lbY+lbH/2,COL_DIM);
             HitAdd(lbxR,lbY,lbW,lbH,TSimBtn,(int)HidNpadButton_Right);
             FillRect(lbxR,lbY,lbW,lbH,COL_PANEL); DrawRect(lbxR,lbY,lbW,lbH,COL_BORDER);
-            DrawTextC("Next >",lbxR+lbW/2,lbY+lbH/2,COL_DIM);
-            DrawTextC("Left/Right  cycle language", cx, lbY+lbH+14, COL_DIM, Font::Sm);
+            DrawTextC(Lang::T("next") + " >",lbxR+lbW/2,lbY+lbH/2,COL_DIM);
+            DrawTextC(Lang::T("player.cycle.lang"), cx, lbY+lbH+14, COL_DIM, Font::Sm);
+            EmitPrevNextHighlight(/*sub=player lang*/112 + (isNameField?0:1),
+                                  lbxL, lbxR, lbY, lbW, lbH);
             bool canUndoLang = isNameField ? gNameLangUndoValid : gIslandLangUndoValid;
             void (*undoLangFn)(int) = isNameField ? TUndoNameLang : TUndoIslandLang;
             int ubW=100, ubH=44, ubX=cx-ubW/2, ubY=lbY+lbH+36;
             HitAdd(ubX,ubY,ubW,ubH,undoLangFn,0);
             FillRect(ubX,ubY,ubW,ubH,COL_PANEL);
             DrawRect(ubX,ubY,ubW,ubH, canUndoLang?COL_GOLD:COL_BORDER);
-            DrawTextC("Undo",ubX+ubW/2,ubY+ubH/2, canUndoLang?COL_GOLD:COL_DIM, Font::Md);
+            DrawTextC(Lang::T("undo"),ubX+ubW/2,ubY+ubH/2, canUndoLang?COL_GOLD:COL_DIM, Font::Md);
         }
     } else if (fd.isEnum) {
         uint32_t ev = SaveEditor::GetEnum(gPlayerSav, ph);
@@ -3874,11 +4547,12 @@ static void DrawPlayer() {
         int bxL=cx-btnGap/2-btnW, bxR=cx+btnGap/2, btnY=midY+22;
         HitAdd(bxL,btnY,btnW,btnH, TSimBtn, (int)HidNpadButton_Left);
         FillRect(bxL,btnY,btnW,btnH,COL_PANEL); DrawRect(bxL,btnY,btnW,btnH,COL_BORDER);
-        DrawTextC("< Prev", bxL+btnW/2, btnY+btnH/2, COL_DIM);
+        DrawTextC("< " + Lang::T("prev"), bxL+btnW/2, btnY+btnH/2, COL_DIM);
         HitAdd(bxR,btnY,btnW,btnH, TSimBtn, (int)HidNpadButton_Right);
         FillRect(bxR,btnY,btnW,btnH,COL_PANEL); DrawRect(bxR,btnY,btnW,btnH,COL_BORDER);
-        DrawTextC("Next >", bxR+btnW/2, btnY+btnH/2, COL_DIM);
-        DrawTextC("Left/Right  cycle currency", cx, btnY+btnH+14, COL_DIM);
+        DrawTextC(Lang::T("next") + " >", bxR+btnW/2, btnY+btnH/2, COL_DIM);
+        DrawTextC(Lang::T("player.cycle.currency"), cx, btnY+btnH+14, COL_DIM);
+        EmitPrevNextHighlight(/*sub=player currency*/110, bxL, bxR, btnY, btnW, btnH);
     } else if (fd.isSkinTone) {
         static const SDL_Color SKIN_COLS[] = {
             {246,217,189,255},{236,193,157,255},{210,160,122,255},
@@ -3888,31 +4562,48 @@ static void DrawPlayer() {
         int sw=66, sh=66, sgap=12;
         int totalSW = 6*(sw+sgap)-sgap;
         int sbx = cx - totalSW/2, sby = midY-30;
+        int toneSelX = sbx; bool toneSawSel = false;
         for (int si=0; si<6; si++) {
             bool ssel = ((uint32_t)si == cur);
+            if (ssel) { toneSelX = sbx; toneSawSel = true; }
             HitAdd(sbx, sby, sw, sh, TSetSkinTone, si);
             FillRect(sbx, sby, sw, sh, SKIN_COLS[si]);
-            DrawRect(sbx, sby, sw, sh, ssel ? SDL_Color{255,255,255,255} : SDL_Color{80,80,80,255});
-            if (ssel) DrawRect(sbx+2, sby+2, sw-4, sh-4, SDL_Color{255,255,255,255});
+            DrawRect(sbx, sby, sw, sh,
+                     (ssel && gTheme.cornerRadius == 0) ? SDL_Color{255,255,255,255} : SDL_Color{80,80,80,255});
+            if (ssel && gTheme.cornerRadius == 0)
+                DrawRectSquare(sbx+2, sby+2, sw-4, sh-4, SDL_Color{255,255,255,255});
             sbx += sw+sgap;
         }
-        DrawTextC("Left/Right  cycle tone", cx, sby+sh+14, COL_DIM, Font::Sm);
+        DrawTextC(Lang::T("player.cycle.tone"), cx, sby+sh+14, COL_DIM, Font::Sm);
+        if (toneSawSel) {
+            RequestHighlight((int)Screen::OnSwitch, /*sub=player skin tone*/21,
+                             toneSelX, sby, sw, sh, gDtSec, /*slot=*/1);
+            DrawAnimatedHighlight(/*slot=*/1);
+        }
     } else if (fd.isIslandSz) {
         static const char* SZ_LABELS[] = {"50 x 36","70 x 50","90 x 64","120 x 80"};
         uint32_t cur = SaveEditor::GetAnyScalar(gPlayerSav, ph, 0);
-        DrawTextC("Other sizes will corrupt the save file!", cx, midY-46, COL_RED, Font::Sm);
+        DrawTextC(Lang::T("player.islandsize.warn"), cx, midY-46, COL_RED, Font::Sm);
         int bw=140, bh=44, bgap=12;
         int totalBW = 4*(bw+bgap)-bgap;
         int bbx = cx - totalBW/2, bby = midY-16;
+        int szSelX = bbx; bool szSawSel = false;
         for (int pi=0; pi<4; pi++) {
             bool psel = (cur == (uint32_t)(pi+1));
+            if (psel) { szSelX = bbx; szSawSel = true; }
             HitAdd(bbx, bby, bw, bh, TSetIslandSize, pi+1);
             FillRect(bbx, bby, bw, bh, psel?COL_SEL:COL_PANEL);
-            DrawRect(bbx, bby, bw, bh, psel?COL_GOLD:COL_BORDER);
+            DrawRect(bbx, bby, bw, bh,
+                     (psel && gTheme.cornerRadius == 0) ? COL_GOLD : COL_BORDER);
             DrawTextC(SZ_LABELS[pi], bbx+bw/2, bby+bh/2, psel?COL_GOLD:COL_DIM);
             bbx += bw+bgap;
         }
-        DrawTextC("Left/Right  cycle size", cx, bby+bh+14, COL_DIM, Font::Sm);
+        DrawTextC(Lang::T("player.cycle.size"), cx, bby+bh+14, COL_DIM, Font::Sm);
+        if (szSawSel) {
+            RequestHighlight((int)Screen::OnSwitch, /*sub=player island size*/22,
+                             szSelX, bby, bw, bh, gDtSec, /*slot=*/1);
+            DrawAnimatedHighlight(/*slot=*/1);
+        }
     } else if (fd.isRegion) {
         uint32_t ev = SaveEditor::GetEnum(gPlayerSav, ph);
         const char* rlabel = "Unknown";
@@ -3924,11 +4615,12 @@ static void DrawPlayer() {
         int bxL=cx-btnGap/2-btnW, bxR=cx+btnGap/2, btnY=midY+22;
         HitAdd(bxL,btnY,btnW,btnH, TSimBtn, (int)HidNpadButton_Left);
         FillRect(bxL,btnY,btnW,btnH,COL_PANEL); DrawRect(bxL,btnY,btnW,btnH,COL_BORDER);
-        DrawTextC("< Prev", bxL+btnW/2, btnY+btnH/2, COL_DIM);
+        DrawTextC("< " + Lang::T("prev"), bxL+btnW/2, btnY+btnH/2, COL_DIM);
         HitAdd(bxR,btnY,btnW,btnH, TSimBtn, (int)HidNpadButton_Right);
         FillRect(bxR,btnY,btnW,btnH,COL_PANEL); DrawRect(bxR,btnY,btnW,btnH,COL_BORDER);
-        DrawTextC("Next >", bxR+btnW/2, btnY+btnH/2, COL_DIM);
-        DrawTextC("Left/Right  cycle region", cx, btnY+btnH+14, COL_DIM);
+        DrawTextC(Lang::T("next") + " >", bxR+btnW/2, btnY+btnH/2, COL_DIM);
+        DrawTextC(Lang::T("player.cycle.region"), cx, btnY+btnH+14, COL_DIM);
+        EmitPrevNextHighlight(/*sub=player region*/114, bxL, bxR, btnY, btnW, btnH);
     } else {
         // Generic numeric: UInt, Int, RawEnum
         uint32_t rawV = fd.isUInt ? SaveEditor::GetUInt(gPlayerSav, ph) : SaveEditor::GetAnyScalar(gPlayerSav, ph);
@@ -3939,9 +4631,9 @@ static void DrawPlayer() {
         // value so the user has the liberated-count context without having to
         // glance at the bulk-action panel below.
         if (fd.rawHash == 0xa32f7e47u && WishesAvailable()) {
-            char info[64];
-            snprintf(info, sizeof(info), "currently liberated: %d / %d",
-                     WishesLiberatedCount(), WishesData::WISH_COUNT);
+            std::string info = Lang::T("player.wishes.liberated") + ": "
+                             + std::to_string(WishesLiberatedCount()) + " / "
+                             + std::to_string(WishesData::WISH_COUNT);
             DrawTextC(info, cx, midY-12, COL_DIM, Font::Sm);
         }
 
@@ -3951,23 +4643,34 @@ static void DrawPlayer() {
         int bx = cx - totalBW/2;
         int by = midY+10;
         int btnIdx = 0;
+        int pStepFocX = bx, pStepFocY = by; bool pStepFoc = false;
         for (int s : STEPS) {
             bool focused = (gPlayerBtnSel == btnIdx);
+            if (focused) { pStepFocX = bx; pStepFocY = by; pStepFoc = true; }
             HitAdd(bx,by,bw,bh, TAdjust, -s);
             FillRect(bx,by,bw,bh, focused?COL_SEL:COL_PANEL);
-            DrawRect(bx,by,bw,bh, focused?COL_GOLD:COL_RED);
+            DrawRect(bx,by,bw,bh,
+                     (focused && gTheme.cornerRadius == 0) ? COL_GOLD : COL_RED);
             DrawTextC("-"+std::to_string(s), bx+bw/2, by+bh/2, focused?COL_GOLD:COL_RED, Font::Md);
             bx += bw+gap; btnIdx++;
         }
         bx += 20;
         for (int j = 3; j >= 0; j--) {
             bool focused = (gPlayerBtnSel == btnIdx);
+            if (focused) { pStepFocX = bx; pStepFocY = by; pStepFoc = true; }
             int s = STEPS[j];
             HitAdd(bx,by,bw,bh, TAdjust, s);
             FillRect(bx,by,bw,bh, focused?COL_SEL:COL_PANEL);
-            DrawRect(bx,by,bw,bh, focused?COL_GOLD:COL_GREEN);
+            DrawRect(bx,by,bw,bh,
+                     (focused && gTheme.cornerRadius == 0) ? COL_GOLD : COL_GREEN);
             DrawTextC("+"+std::to_string(s), bx+bw/2, by+bh/2, focused?COL_GOLD:COL_GREEN, Font::Md);
             bx += bw+gap; btnIdx++;
+        }
+        if (pStepFoc) {
+            RequestHighlight((int)Screen::OnSwitch, /*sub=player steppers*/20,
+                             pStepFocX, pStepFocY, bw, bh, gDtSec,
+                             /*slot=*/1);
+            DrawAnimatedHighlight(/*slot=*/1);
         }
     }
     // Undo button for all non-string fields
@@ -3977,7 +4680,7 @@ static void DrawPlayer() {
         HitAdd(ubX, ubY, ubW, ubH, TUndoPlayer, 0);
         FillRect(ubX, ubY, ubW, ubH, COL_PANEL);
         DrawRect(ubX, ubY, ubW, ubH, canUndo ? COL_GOLD : COL_BORDER);
-        DrawTextC("Undo", ubX+ubW/2, ubY+ubH/2, canUndo ? COL_GOLD : COL_DIM, Font::Md);
+        DrawTextC(Lang::T("undo"), ubX+ubW/2, ubY+ubH/2, canUndo ? COL_GOLD : COL_DIM, Font::Md);
 
         // Wishes field only: two extra TOUCH-ONLY buttons under Undo for the
         // bulk Unlock / Reset operations. No controller binding so they can't
@@ -3994,7 +4697,7 @@ static void DrawPlayer() {
             int wbX2 = wbX1 + wbW + wbGap;
 
             // Header label for the section
-            DrawTextC("Bulk wish actions  (touch)", cx, wbY - 16, COL_DIM, Font::Sm);
+            DrawTextC(Lang::T("player.wishes.bulk"), cx, wbY - 16, COL_DIM, Font::Sm);
 
             // Unlock all
             SDL_Color uFill   = unlockArmed ? SDL_Color{90, 38, 18, 255}  : COL_PANEL;
@@ -4003,8 +4706,8 @@ static void DrawPlayer() {
             FillRect(wbX1, wbY, wbW, wbH, uFill);
             DrawRect(wbX1, wbY, wbW, wbH, uBorder);
             HitAdd(wbX1, wbY, wbW, wbH, TWishesUnlockTap, 0);
-            DrawTextC(unlockArmed ? "tap again to UNLOCK all 268"
-                                  : "Unlock All Wishes (268)",
+            DrawTextC(unlockArmed ? Lang::T("player.wishes.unlock.confirm")
+                                  : Lang::T("player.wishes.unlock"),
                       wbX1 + wbW/2, wbY + wbH/2, uText, Font::Sm);
 
             // Reset liberated
@@ -4014,8 +4717,8 @@ static void DrawPlayer() {
             FillRect(wbX2, wbY, wbW, wbH, rFill);
             DrawRect(wbX2, wbY, wbW, wbH, rBorder);
             HitAdd(wbX2, wbY, wbW, wbH, TWishesResetTap, 0);
-            DrawTextC(resetArmed ? "tap again to RESET liberated"
-                                 : "Reset Liberated Wishes",
+            DrawTextC(resetArmed ? Lang::T("player.wishes.reset.confirm")
+                                 : Lang::T("player.wishes.reset"),
                       wbX2 + wbW/2, wbY + wbH/2, rText, Font::Sm);
 
             // Armed countdown bar + transient status message
@@ -4041,11 +4744,9 @@ static void DrawPlayer() {
 
     {
         bool hasPron = fd.isStr && (strcmp(fd.fieldName,"Player.Name")==0 || strcmp(fd.fieldName,"Player.IslandName")==0);
-        DrawFooter(hasPron
-            ? "ZL/ZR  field    A  name    X  pronunciation    Left/Right  language    L/R  tab    B/+  back"
-            : "ZL/ZR  field    Left/Right  value    A  edit    X  undo    L/R  tab    B/+  back");
+        DrawFooter(Lang::T(hasPron ? "player.footer.pron" : "player.footer.value"));
     }
-    SDL_RenderPresent(gRen);
+    Present();
 }
 
 // ─── Mii stats editor ─────────────────────────────────────────────────────────
@@ -4424,7 +5125,7 @@ static void DrawMap() {
 
     if (gMapMsgFrames > 0 && --gMapMsgFrames == 0) gMapMsg.clear();
 
-    DrawHeader("map");
+    DrawHeader(Lang::T("tab.map"));
     // Tab bar
     {
         int tw=130, th=22, gap=4;
@@ -4433,13 +5134,18 @@ static void DrawMap() {
             {Lang::T("tab.webui"),OnSwitchMode::WebUI},{Lang::T("tab.textures"),OnSwitchMode::UGC},
             {Lang::T("tab.mii"),OnSwitchMode::MiiStats},{Lang::T("tab.player"),OnSwitchMode::Player},
             {Lang::T("tab.map"),OnSwitchMode::Map}};
+        int ulX = tx, ulY = ty + th + 2;
+        bool ulHave = false;
         for (auto& t : tabs) {
             bool sel = gOnSwitchMode==t.mode;
             HitAdd(tx,ty,tw,th,TSetMode,(int)t.mode);
-            FillRect(tx,ty,tw,th,sel?COL_SEL:COL_PANEL);
-            DrawRect(tx,ty,tw,th,sel?COL_GOLD:COL_BORDER);
             DrawTextC(t.label,tx+tw/2,ty+th/2,sel?COL_GOLD:COL_DIM);
+            if (sel) { ulX = tx + (tw-72)/2; ulHave = true; }
             tx+=tw+gap;
+        }
+        if (ulHave) {
+            RequestTabUnderline(0, 100, ulX, ulY, 72, 3, gDtSec);
+            DrawTabUnderline(0);
         }
     }
 
@@ -4448,8 +5154,8 @@ static void DrawMap() {
         SaveEditor::Load(SAVE_MAP_SAV, gMapSav, err);
         if (!gMapSav.loaded) {
             DrawTextC(Lang::T("map.loading"), SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
-            DrawFooter("B  back");
-            SDL_RenderPresent(gRen);
+            DrawFooter(Lang::T("footer.back"));
+            Present();
             return;
         }
     }
@@ -4531,8 +5237,8 @@ static void DrawMap() {
     int iy = MAP_INS_Y + 8;
     if (gMapMode == MapMode::Picker) {
         MapRebuildPicker();
-        DrawText("pick an actor", MAP_INS_X + 12, iy, COL_GOLD, Font::Md); iy += 28;
-        DrawText("filter: " + (gMapPickerFilter.empty() ? std::string("(any)") : gMapPickerFilter),
+        DrawText(Lang::T("map.picker.title"), MAP_INS_X + 12, iy, COL_GOLD, Font::Md); iy += 28;
+        DrawText(Lang::T("map.picker.filter") + ": " + (gMapPickerFilter.empty() ? Lang::T("map.picker.any") : gMapPickerFilter),
                  MAP_INS_X + 12, iy, COL_DIM, Font::Sm); iy += 22;
 
         const int rowH = 22;
@@ -4541,6 +5247,8 @@ static void DrawMap() {
         if (gMapPickerSel < gMapPickerScroll) gMapPickerScroll = gMapPickerSel;
         if (gMapPickerSel >= gMapPickerScroll + visible)
             gMapPickerScroll = gMapPickerSel - visible + 1;
+        int mpSelY = iy;
+        bool mpSawSel = false;
         for (int i = 0; i < visible; i++) {
             int idx = gMapPickerScroll + i;
             if (idx >= (int)gMapPickerActors.size()) break;
@@ -4548,11 +5256,21 @@ static void DrawMap() {
             const MapData::ActorInfo* info = MapData::ActorLookup(a);
             int ry = iy + i * rowH;
             bool sel = (idx == gMapPickerSel);
+            if (sel) { mpSelY = ry; mpSawSel = true; }
             FillRect(MAP_INS_X + 6, ry, MAP_INS_W - 12, rowH - 2, sel ? COL_SEL : COL_PANEL);
-            if (sel) DrawRect(MAP_INS_X + 6, ry, MAP_INS_W - 12, rowH - 2, COL_GOLD);
+            if (sel && gTheme.cornerRadius == 0)
+                DrawRectSquare(MAP_INS_X + 6, ry, MAP_INS_W - 12, rowH - 2, COL_GOLD);
             FillRect(MAP_INS_X + 12, ry + 5, 10, 10, MAP_GROUP_SDL_COL[info ? info->group : 6]);
-            DrawText(MapActorDisplayLabel(info), MAP_INS_X + 28, ry + 1, sel ? COL_GOLD : COL_TEXT);
+            std::string lbl = MapActorDisplayLabel(info);
+            int lw=0, lh=0;
+            if (TTF_Font* fsm = GetFont(Font::Sm)) TTF_SizeUTF8(fsm, lbl.c_str(), &lw, &lh);
+            DrawText(lbl, MAP_INS_X + 28, ry + (rowH - 2 - lh)/2, sel ? COL_GOLD : COL_TEXT);
             HitAdd(MAP_INS_X + 6, ry, MAP_INS_W - 12, rowH - 2, TMapPickerSelect, idx);
+        }
+        if (mpSawSel) {
+            RequestHighlight((int)Screen::OnSwitch, /*sub=map actor picker*/40,
+                             MAP_INS_X + 6, mpSelY, MAP_INS_W - 12, rowH - 2, gDtSec);
+            DrawAnimatedHighlight();
         }
 
         if ((int)gMapPickerActors.size() > visible) {
@@ -4573,7 +5291,7 @@ static void DrawMap() {
                  MAP_GROUP_SDL_COL[info ? info->group : 6]);
         DrawText(MapActorDisplayLabel(info), MAP_INS_X + 30, iy, COL_GOLD, Font::Md);
         iy += 24;
-        DrawText("slot #" + std::to_string(gMapSelSlot), MAP_INS_X + 12, iy, COL_DIM, Font::Sm);
+        DrawText(Lang::T("map.slot") + " #" + std::to_string(gMapSelSlot), MAP_INS_X + 12, iy, COL_DIM, Font::Sm);
         iy += 22;
 
         int xVal = SaveEditor::GetIntAt(gMapSav, hX, gMapSelSlot, 0);
@@ -4582,12 +5300,12 @@ static void DrawMap() {
         int lVal = SaveEditor::GetIntAt(gMapSav, hL, gMapSelSlot, -1);
 
         // Field rows with -/+ nudge buttons
-        struct Row { const char* label; int field; std::string value; };
+        struct Row { std::string label; int field; std::string value; };
         Row rows[] = {
-            {"position X", 0, std::to_string(xVal)},
-            {"position Y", 1, std::to_string(yVal)},
-            {"rotation",   2, std::to_string(((rVal % 360) + 360) % 360) + "°"},
-            {"linked map", 3, lVal >= 0 ? std::to_string(lVal) : "(none)"},
+            {Lang::T("map.row.posX"),    0, std::to_string(xVal)},
+            {Lang::T("map.row.posY"),    1, std::to_string(yVal)},
+            {Lang::T("map.row.rotation"),2, std::to_string(((rVal % 360) + 360) % 360) + "°"},
+            {Lang::T("map.row.linked"),  3, lVal >= 0 ? std::to_string(lVal) : Lang::T("none.paren")},
         };
         int rowsCount = (info && info->group == 0 /* house */) ? 4
                        : (info && info->group == 1 /* facility */) ? 4
@@ -4636,7 +5354,7 @@ static void DrawMap() {
         // Change-actor button
         FillRect(MAP_INS_X + 12, iy, MAP_INS_W - 24, 28, COL_PANEL2);
         DrawRect(MAP_INS_X + 12, iy, MAP_INS_W - 24, 28, COL_BORDER);
-        DrawTextC("add new actor", MAP_INS_X + MAP_INS_W/2, iy + 14, COL_TEXT, Font::Sm);
+        DrawTextC(Lang::T("map.add.actor"), MAP_INS_X + MAP_INS_W/2, iy + 14, COL_TEXT, Font::Sm);
         HitAdd(MAP_INS_X + 12, iy, MAP_INS_W - 24, 28, TMapBtn, (int)HidNpadButton_Y);
         iy += 36;
 
@@ -4645,33 +5363,33 @@ static void DrawMap() {
                  gMapDelConfirm ? COL_RED : COL_PANEL2);
         DrawRect(MAP_INS_X + 12, iy, MAP_INS_W - 24, 28,
                  gMapDelConfirm ? COL_RED : COL_BORDER);
-        DrawTextC(gMapDelConfirm ? "tap again to delete" : "delete (X)",
+        DrawTextC(Lang::T(gMapDelConfirm ? "map.delete.confirm.tap" : "map.delete.btn"),
                   MAP_INS_X + MAP_INS_W/2, iy + 14,
                   gMapDelConfirm ? COL_BG : COL_RED, Font::Sm);
         HitAdd(MAP_INS_X + 12, iy, MAP_INS_W - 24, 28, TMapBtn, (int)HidNpadButton_X);
     } else if (gMapMode == MapMode::Place) {
-        DrawText("place mode", MAP_INS_X + 12, iy, COL_GOLD, Font::Md); iy += 28;
+        DrawText(Lang::T("map.place.title"), MAP_INS_X + 12, iy, COL_GOLD, Font::Md); iy += 28;
         DrawText(Lang::T("map.place.prompt"), MAP_INS_X + 12, iy, COL_DIM, Font::Sm); iy += 22;
         const MapData::ActorInfo* info = MapData::ActorLookup(gMapPlaceActor);
         if (info) {
-            DrawText(std::string("actor: ") + MapActorDisplayLabel(info), MAP_INS_X + 12, iy, COL_TEXT, Font::Sm);
+            DrawText(Lang::T("map.actor") + ": " + MapActorDisplayLabel(info), MAP_INS_X + 12, iy, COL_TEXT, Font::Sm);
             iy += 22;
         }
-        DrawText("cursor: " + std::to_string(gMapCursorX) + ", " + std::to_string(gMapCursorY),
+        DrawText(Lang::T("map.cursor") + ": " + std::to_string(gMapCursorX) + ", " + std::to_string(gMapCursorY),
                  MAP_INS_X + 12, iy, COL_DIM, Font::Sm);
     } else {
-        DrawText("Map viewer", MAP_INS_X + 12, iy, COL_GOLD, Font::Md); iy += 28;
-        DrawText("Move the cursor with the D-pad or sticks.",
+        DrawText(Lang::T("map.viewer.title"), MAP_INS_X + 12, iy, COL_GOLD, Font::Md); iy += 28;
+        DrawText(Lang::T("map.viewer.l1"),
                  MAP_INS_X + 12, iy, COL_TEXT, Font::Sm); iy += 20;
-        DrawText("Tap or press A on an object to inspect.",
+        DrawText(Lang::T("map.viewer.l2"),
                  MAP_INS_X + 12, iy, COL_DIM, Font::Sm); iy += 20;
-        DrawText("Press Y to place a new object.",
+        DrawText(Lang::T("map.viewer.l3"),
                  MAP_INS_X + 12, iy, COL_DIM, Font::Sm); iy += 20;
-        DrawText("B exits — you'll get a save / discard",
+        DrawText(Lang::T("map.viewer.l4"),
                  MAP_INS_X + 12, iy, COL_DIM, Font::Sm); iy += 18;
-        DrawText("prompt if needed.",
+        DrawText(Lang::T("map.viewer.l5"),
                  MAP_INS_X + 12, iy, COL_DIM, Font::Sm); iy += 22;
-        DrawText("objects: " + std::to_string(MapObjectCount()) + " slots",
+        DrawText(Lang::T("map.objects") + ": " + std::to_string(MapObjectCount()) + " " + Lang::T("map.slots"),
                  MAP_INS_X + 12, iy, COL_DIM, Font::Sm); iy += 18;
         if (gMapDirty) {
             DrawText(Lang::T("map.dirty"), MAP_INS_X + 12, iy, COL_GOLD, Font::Sm); iy += 18;
@@ -4690,7 +5408,7 @@ static void DrawMap() {
         gMapMode == MapMode::Place   ? "map.footer.place"   :
                                        "map.footer.idle";
     DrawFooter(Lang::T(footerKey));
-    SDL_RenderPresent(gRen);
+    Present();
 }
 
 static void DrawMiiStats() {
@@ -4701,8 +5419,8 @@ static void DrawMiiStats() {
     }
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
     SDL_RenderClear(gRen);
-    if (gShowFileBrowser) { DrawFileBrowser(); SDL_RenderPresent(gRen); return; }
-    DrawHeader("mii stats");
+    if (gShowFileBrowser) { DrawFileBrowser(); Present(); return; }
+    DrawHeader(Lang::T("mii.header"));
 
     // Tab bar
     {
@@ -4712,13 +5430,18 @@ static void DrawMiiStats() {
             {Lang::T("tab.webui"),OnSwitchMode::WebUI},{Lang::T("tab.textures"),OnSwitchMode::UGC},
             {Lang::T("tab.mii"),OnSwitchMode::MiiStats},{Lang::T("tab.player"),OnSwitchMode::Player},
             {Lang::T("tab.map"),OnSwitchMode::Map}};
+        int ulX = tx, ulY = ty + th + 2;
+        bool ulHave = false;
         for (auto& t : tabs) {
             bool sel=gOnSwitchMode==t.mode;
             HitAdd(tx,ty,tw,th,TSetMode,(int)t.mode);
-            FillRect(tx,ty,tw,th,sel?COL_SEL:COL_PANEL);
-            DrawRect(tx,ty,tw,th,sel?COL_GOLD:COL_BORDER);
             DrawTextC(t.label,tx+tw/2,ty+th/2,sel?COL_GOLD:COL_DIM);
+            if (sel) { ulX = tx + (tw-72)/2; ulHave = true; }
             tx+=tw+gap;
+        }
+        if (ulHave) {
+            RequestTabUnderline(0, 100, ulX, ulY, 72, 3, gDtSec);
+            DrawTabUnderline(0);
         }
     }
 
@@ -4729,15 +5452,15 @@ static void DrawMiiStats() {
         // showing it the app looks frozen when the save itself is the problem.
         if (!gMiiStatsMsg.empty()) {
             DrawTextC(gMiiStatsMsg, SCREEN_W/2, SCREEN_H/2 - 14, COL_RED, Font::Md);
-            DrawTextC("Mii.sav couldn't be parsed — restore from a backup or",
+            DrawTextC(Lang::T("mii.parse.fail.l1"),
                       SCREEN_W/2, SCREEN_H/2 + 18, COL_DIM, Font::Sm);
-            DrawTextC("re-open Tomodachi Life once to let the game rewrite it.",
+            DrawTextC(Lang::T("mii.parse.fail.l2"),
                       SCREEN_W/2, SCREEN_H/2 + 38, COL_DIM, Font::Sm);
         } else {
-            DrawTextC("loading current mii save...", SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
+            DrawTextC(Lang::T("mii.loading"), SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
         }
-        DrawFooter("B  back");
-        SDL_RenderPresent(gRen);
+        DrawFooter(Lang::T("footer.back"));
+        Present();
         return;
     }
 
@@ -4746,17 +5469,27 @@ static void DrawMiiStats() {
     int mseVis   = mseListH / ITEM_H;
     FillRect(SE_LIST_X-4, SE_TOP_Y, MSE_LIST_W+8, mseListH, COL_PANEL);
     DrawRect(SE_LIST_X-4, SE_TOP_Y, MSE_LIST_W+8, mseListH, COL_BORDER);
+    int leftSelY = SE_TOP_Y + LIST_PAD_TOP;
+    bool leftSawSel = false;
     for (int i = 0; i < mseVis; i++) {
         int idx = gMiiStatsScroll + i;
         if (idx >= (int)gMiis.size()) break;
         bool sel = (idx == gMiiStatsMiiSel);
         int ry = SE_TOP_Y + LIST_PAD_TOP + i * ITEM_H;
+        if (sel) { leftSelY = ry; leftSawSel = true; }
         HitAdd(SE_LIST_X, ry, MSE_LIST_W, ITEM_H-1, TSelMiiStatsMii, idx);
         FillRect(SE_LIST_X, ry, MSE_LIST_W, ITEM_H-1, sel?COL_SEL:COL_BG);
-        if (sel) DrawRect(SE_LIST_X, ry, MSE_LIST_W, ITEM_H-1, COL_GOLD);
+        if (sel && gTheme.cornerRadius == 0)
+            DrawRectSquare(SE_LIST_X, ry, MSE_LIST_W, ITEM_H-1, COL_GOLD);
         TTF_Font* fsm=GetFont(Font::Sm); int fw=0,fh=0;
         if(fsm) TTF_SizeUTF8(fsm,gMiis[idx].name.c_str(),&fw,&fh);
         DrawText(gMiis[idx].name, SE_LIST_X+6, ry+(ITEM_H-fh)/2, sel?COL_TEXT:COL_DIM);
+    }
+    if (leftSawSel) {
+        RequestHighlight((int)Screen::OnSwitch, /*sub=mii left list*/33,
+                         SE_LIST_X, leftSelY, MSE_LIST_W, ITEM_H-1, gDtSec,
+                         /*slot=*/1);
+        DrawAnimatedHighlight(/*slot=*/1);
     }
     if ((int)gMiis.size() > mseVis) {
         int barH = mseListH * mseVis / (int)gMiis.size();
@@ -4764,7 +5497,7 @@ static void DrawMiiStats() {
         FillRect(SE_LIST_X+MSE_LIST_W+2, barY, 4, barH, COL_BORDER);
     }
     if (gMiis.empty()) {
-        DrawTextC("no miis", SE_LIST_X+MSE_LIST_W/2, SE_TOP_Y+80, COL_DIM);
+        DrawTextC(Lang::T("mii.no.miis"), SE_LIST_X+MSE_LIST_W/2, SE_TOP_Y+80, COL_DIM);
     }
 
     // Middle: field list for selected mii (hidden in Social/Belongings — panel expands)
@@ -4785,13 +5518,17 @@ static void DrawMiiStats() {
             static const uint32_t H_WTXT_L  = SaveEditor::Hash("Mii.MiiMisc.WordInfo.WordArray.WordText");
             static const uint32_t H_WINV_L  = SaveEditor::Hash("Invalid");
             TTF_Font* fsm = GetFont(Font::Sm);
+            int mwSelY = SE_TOP_Y + 2;
+            bool mwSawSel = false;
             for (int i = 0; i < 12; i++) {
                 bool sel = (i == gMiiWordsSlotSel);
                 int ry = SE_TOP_Y + 2 + i * 34;
                 if (ry + 34 > SCREEN_H - 32) break;
+                if (sel) { mwSelY = ry; mwSawSel = true; }
                 HitAdd(midX+1, ry, midW-2, 33, TSelMiiWordsSlot, i);
                 FillRect(midX+1, ry, midW-2, 33, sel?COL_SEL:COL_BG);
-                if (sel) DrawRect(midX+1, ry, midW-2, 33, COL_GOLD);
+                if (sel && gTheme.cornerRadius == 0)
+                    DrawRectSquare(midX+1, ry, midW-2, 33, COL_GOLD);
                 int wIdx = miiSlotIdx * 12 + i;
                 uint32_t kh = SaveEditor::GetAnyEnumAt(gMiiSav, H_WKIND_L, wIdx, H_WINV_L);
                 bool filled = (kh != H_WINV_L);
@@ -4811,6 +5548,11 @@ static void DrawMiiStats() {
                 std::string disp = filled ? (wt.empty()?"—":FitNodeName(wt,fsm,availW)) : "—";
                 DrawText(disp, midX+8+nw+4, ry+(33-nh)/2, sel?(filled?COL_TEXT:COL_DIM):(filled?COL_DIM:COL_DIM));
             }
+            if (mwSawSel) {
+                RequestHighlight((int)Screen::OnSwitch, /*sub=mii words*/30,
+                                 midX+1, mwSelY, midW-2, 33, gDtSec);
+                DrawAnimatedHighlight();
+            }
         } else if (gMiiStatsSubTab == MiiStatsSubTab::Relations) {
             // Relations list: pairs involving this Mii
             static const uint32_t H_IDA_ML   = 0xf7420afbu;
@@ -4820,6 +5562,8 @@ static void DrawMiiStats() {
             int pairCount = SaveEditor::ArraySize(gMiiSav, H_IDA_ML);
             TTF_Font* fsm2 = GetFont(Font::Sm);
             int visRow = 0, filtRow = 0;
+            int mrSelY = SE_TOP_Y + 2;
+            bool mrSawSel = false;
             gMiiRelPairIdx = -1;
             for (int pi = 0; pi < pairCount; pi++) {
                 int a = SaveEditor::GetIntAt(gMiiSav, H_IDA_ML, pi);
@@ -4836,9 +5580,11 @@ static void DrawMiiStats() {
                 if (filtRow >= gMiiRelScroll) {
                     int ry = SE_TOP_Y + 2 + visRow * 34;
                     if (ry + 34 <= SCREEN_H - 32) {
+                        if (sel) { mrSelY = ry; mrSawSel = true; }
                         HitAdd(midX+1, ry, midW-2, 33, TSelMiiRelation, filtRow);
                         FillRect(midX+1, ry, midW-2, 33, sel?COL_SEL:COL_BG);
-                        if (sel) DrawRect(midX+1, ry, midW-2, 33, COL_GOLD);
+                        if (sel && gTheme.cornerRadius == 0)
+                            DrawRectSquare(midX+1, ry, midW-2, 33, COL_GOLD);
                         // Type label right-aligned (colored)
                         const char* tName = RelTypeName(myType);
                         int tw=0,th=0;
@@ -4859,23 +5605,33 @@ static void DrawMiiStats() {
             gMiiRelCount = filtRow;
             if (filtRow > 0 && gMiiRelSel >= filtRow) gMiiRelSel = filtRow-1;
             if (filtRow == 0)
-                DrawTextC("no relations", midX+midW/2, SE_TOP_Y+80, COL_DIM);
+                DrawTextC(Lang::T("mii.no.relations"), midX+midW/2, SE_TOP_Y+80, COL_DIM);
+            if (mrSawSel) {
+                RequestHighlight((int)Screen::OnSwitch, /*sub=mii relations*/31,
+                                 midX+1, mrSelY, midW-2, 33, gDtSec);
+                DrawAnimatedHighlight();
+            }
         } else if (!midHidden) {
             // Stats fields list (only when the middle panel is visible)
+            int msSelY = SE_TOP_Y + 2;
+            bool msSawSel = false;
             for (int i = 0; i < MII_STATS_FIELD_COUNT; i++) {
                 bool sel = (i == gMiiStatsFieldSel);
                 int ry = SE_TOP_Y + 2 + i * 34;
                 if (ry + 34 > SCREEN_H - 32) break;
+                if (sel) { msSelY = ry; msSawSel = true; }
                 HitAdd(midX+1, ry, midW-2, 33, TSelMiiStatsField, i);
                 FillRect(midX+1, ry, midW-2, 33, sel?COL_SEL:COL_BG);
                 const auto& fd = MII_STATS_FIELDS[i];
                 SDL_Color borderCol = fd.isAction ? COL_GOLD : COL_GOLD;
-                if (sel) DrawRect(midX+1, ry, midW-2, 33, borderCol);
+                if (sel && gTheme.cornerRadius == 0)
+                    DrawRectSquare(midX+1, ry, midW-2, 33, borderCol);
                 TTF_Font* fsm=GetFont(Font::Sm); int lw=0,lh=0,vw=0,vh=0;
-                if(fsm) TTF_SizeUTF8(fsm,fd.label,&lw,&lh);
+                std::string fdLabel = MiiLabelT(fd.label);
+                if(fsm) TTF_SizeUTF8(fsm,fdLabel.c_str(),&lw,&lh);
                 if (fd.isAction) {
                     SDL_Color lCol = sel ? COL_GOLD : SDL_Color{160,120,60,255};
-                    DrawText(fd.label, midX+8, ry+(33-lh)/2, lCol);
+                    DrawText(fdLabel, midX+8, ry+(33-lh)/2, lCol);
                     const char* arrow = "▶";
                     int aw=0,ah=0;
                     if(fsm) TTF_SizeUTF8(fsm,arrow,&aw,&ah);
@@ -4895,9 +5651,14 @@ static void DrawMiiStats() {
                         val = std::to_string(v + fd.dispOffset);
                     }
                     if(fsm) TTF_SizeUTF8(fsm,val.c_str(),&vw,&vh);
-                    DrawText(fd.label, midX+8, ry+(33-lh)/2, sel?COL_TEXT:COL_DIM);
+                    DrawText(fdLabel, midX+8, ry+(33-lh)/2, sel?COL_TEXT:COL_DIM);
                     DrawText(val, midX+midW-vw-8, ry+(33-vh)/2, sel?COL_ACCENT:COL_DIM);
                 }
+            }
+            if (msSawSel) {
+                RequestHighlight((int)Screen::OnSwitch, /*sub=mii stats*/32,
+                                 midX+1, msSelY, midW-2, 33, gDtSec);
+                DrawAnimatedHighlight();
             }
         }
     }
@@ -4916,15 +5677,21 @@ static void DrawMiiStats() {
     // on the Stats sub-tab, not from the pill bar.
     {
         int stW=76, stH=22, stGap=4, stX=editX+8, stY=SE_TOP_Y+6;
-        const char* stLabels[] = {"Stats","Items","Habits","Words","Relations","Housing","Social"};
+        const char* stKeys[] = {"subtab.stats","subtab.items","subtab.habits","subtab.words","subtab.relations","subtab.housing","subtab.social"};
+        int sulX = stX, sulY = stY + stH + 2;
+        bool sulHave = false;
         for (int ti=0; ti<MII_SUBTAB_COUNT; ti++) {
             bool sSel = ((int)gMiiStatsSubTab == ti);
             int sx = stX + ti*(stW+stGap);
             // Hit area is taller than the visual so it's easier to tap on touchscreen
             HitAdd(sx, stY-4, stW, stH+8, TSetSocialView, ti);
-            FillRect(sx, stY, stW, stH, sSel?COL_SEL:COL_PANEL);
-            DrawRect(sx, stY, stW, stH, sSel?COL_GOLD:COL_BORDER);
-            DrawTextC(stLabels[ti], sx+stW/2, stY+stH/2, sSel?COL_GOLD:COL_DIM);
+            DrawTextC(Lang::T(stKeys[ti]), sx+stW/2, stY+stH/2, sSel?COL_GOLD:COL_DIM);
+            if (sSel) { sulX = sx + (stW-44)/2; sulHave = true; }
+        }
+        if (sulHave) {
+            RequestTabUnderline(/*slot*/1, /*owner=mii subtabs*/101,
+                                sulX, sulY, 44, 3, gDtSec);
+            DrawTabUnderline(/*slot*/1);
         }
     }
 
@@ -4947,29 +5714,36 @@ static void DrawMiiStats() {
                 int gcy = panelTop + panelH/2;
                 int N   = (int)gMiis.size();
                 if (N == 0) {
-                    DrawTextC("no miis", gcx, gcy, COL_DIM, Font::Md);
+                    DrawTextC(Lang::T("mii.no.miis"), gcx, gcy, COL_DIM, Font::Md);
                 } else {
-                    // Adaptive node size: shrinks as count grows
-                    int nW = N<=8?80 : N<=14?70 : N<=22?60 : N<=34?50 : N<=50?44 : 40;
-                    int nH = N<=14?28 : N<=28?24 : N<=50?20 : 18;
+                    // True-circle nodes with comfortable minimum size. Label
+                    // widths (NOT circle widths) drive ring capacity so names
+                    // stay readable, and we paginate with "+N more" when the
+                    // panel really can't fit everyone.
+                    int nodeR = N<=8?26 : N<=16?22 : N<=28?20 : 18;
+                    int lblGap = 3, lblH = 14;
+                    int lblW   = 96;  // generous label width; FitNodeName clips with ellipsis
+                    int slotH  = 2*nodeR + lblGap + lblH;
 
-                    // Build concentric rings (inner→outer) until all nodes placed
-                    int maxR = std::min(panelW/2 - nW/2 - 4, panelH/2 - nH/2 - 4);
-                    int Rcur = std::max(nH * 4, 70);
+                    int maxR = std::min(panelW/2 - lblW/2 - 8, panelH/2 - slotH/2 - 8);
+                    int Rcur = std::max(nodeR * 4 + 8, 80);
 
                     struct GRing { int R, first, count; };
                     std::vector<GRing> grings;
                     int placed = 0;
                     while (placed < N && Rcur <= maxR) {
-                        float s = (float)(nW + 6) / (2.f * (float)Rcur);
+                        // Spacing must clear BOTH the circle and the wider
+                        // label; otherwise neighbours' names overlap.
+                        int spacing = std::max(2*nodeR + 12, lblW + 8);
+                        float s = (float)spacing / (2.f * (float)Rcur);
                         int cap = (s >= 1.f) ? 1 : (int)((float)M_PI / asinf(s));
                         cap = std::max(1, std::min(cap, N - placed));
                         grings.push_back({Rcur, placed, cap});
                         placed += cap;
-                        Rcur += nH + 8;
+                        Rcur += slotH + 8;
                     }
+                    int hidden = N - placed;
 
-                    // Pre-compute node positions indexed by mii list order
                     std::vector<int> nx_(N, -9999), ny_(N, -9999);
                     for (auto& gr : grings) {
                         for (int i = 0; i < gr.count; i++) {
@@ -4980,7 +5754,8 @@ static void DrawMiiStats() {
                         }
                     }
 
-                    // Edges first — colored, semi-transparent
+                    // Edges (under nodes), semi-transparent rel-type tint.
+                    SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_BLEND);
                     for (int i = 0; i < pairCount; i++) {
                         int sa = SaveEditor::GetIntAt(gMiiSav, H_ID_A, i);
                         int sb = SaveEditor::GetIntAt(gMiiSav, H_ID_B, i);
@@ -4995,27 +5770,40 @@ static void DrawMiiStats() {
                         SDL_SetRenderDrawColor(gRen, lc.r, lc.g, lc.b, 100);
                         SDL_RenderDrawLine(gRen, nx_[ai], ny_[ai], nx_[bi], ny_[bi]);
                     }
+                    SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_NONE);
 
-                    // Nodes on top of edges
+                    // Nodes: circle + label below. Selected mii gets a gold
+                    // halo and bold gold label so it pops without the circle
+                    // size changing (avoids layout shift on select).
                     TTF_Font* fsm = GetFont(Font::Sm);
                     for (int i = 0; i < N; i++) {
                         if (nx_[i] < -9990) continue;
                         bool isSel = (i == gMiiStatsMiiSel);
-                        std::string raw = SaveEditor::GetWStr32At(gMiiSav, H_NAME, gMiis[i].slot-1);
-                        std::string name = FitNodeName(raw, fsm, nW - 8);
                         SDL_Color fill   = isSel ? COL_ACCENT : COL_PANEL2;
                         SDL_Color border = isSel ? COL_GOLD   : COL_BORDER;
-                        SDL_Color text   = isSel ? SDL_Color{10,10,10,255} : COL_TEXT;
-                        FillRect(nx_[i]-nW/2+2, ny_[i]-nH/2+2, nW, nH, {0,0,0,110});
-                        HitAdd(nx_[i]-nW/2, ny_[i]-nH/2, nW, nH, TSelMiiStatsMii, i);
-                        FillRect(nx_[i]-nW/2, ny_[i]-nH/2, nW, nH, fill);
-                        if (isSel) FillRect(nx_[i]-nW/2, ny_[i]-nH/2, nW, 2, COL_GOLD);
-                        DrawRect(nx_[i]-nW/2, ny_[i]-nH/2, nW, nH, border);
-                        DrawTextC(name, nx_[i], ny_[i], text, Font::Sm);
+
+                        HitAdd(nx_[i] - lblW/2, ny_[i] - nodeR - 4,
+                               lblW, 2*nodeR + lblGap + lblH + 8,
+                               TSelMiiStatsMii, i);
+
+                        FillCircle(nx_[i], ny_[i], nodeR, fill);
+                        DrawCircle(nx_[i], ny_[i], nodeR, border);
+                        if (isSel) DrawRing(nx_[i], ny_[i], nodeR + 2, COL_GOLD);
+
+                        std::string raw  = SaveEditor::GetWStr32At(gMiiSav, H_NAME, gMiis[i].slot-1);
+                        std::string name = FitNodeName(raw, fsm, lblW - 4);
+                        DrawTextC(name, nx_[i], ny_[i] + nodeR + lblGap + lblH/2,
+                                  isSel ? COL_GOLD : COL_TEXT, Font::Sm);
                     }
 
-                    // Dim center label showing total count
-                    DrawTextC(std::to_string(N) + " miis", gcx, gcy, COL_DIM, Font::Sm);
+                    // Center count chip + overflow notice.
+                    DrawTextC(std::to_string(N) + " " + Lang::T("mii.miis.word"),
+                              gcx, gcy, COL_DIM, Font::Sm);
+                    if (hidden > 0) {
+                        std::string hstr = "+" + std::to_string(hidden) + " " + Lang::T("more");
+                        DrawTextC(hstr, panelX + panelW - 60, panelTop + panelH - 16,
+                                  COL_DIM, Font::Sm);
+                    }
                 }
             } else {
                 // ── Focus graph: multi-ring radial, handles up to 70 connections ─
@@ -5040,39 +5828,44 @@ static void DrawMiiStats() {
                 int gcy = panelTop + panelH/2;
 
                 if (rows.empty()) {
-                    DrawTextC("no relationships", gcx, gcy, COL_DIM, Font::Md);
+                    DrawTextC(Lang::T("mii.no.relationships"), gcx, gcy, COL_DIM, Font::Md);
                 } else {
-                    int n   = (int)rows.size();
-                    int cnW = 120, cnH = 44;
+                    int n = (int)rows.size();
 
-                    // Adaptive node size: shrinks gracefully as connections grow
-                    int nW = n<=6?94 : n<=12?80 : n<=22?68 : n<=38?56 : 46;
-                    int nH = n<=12?44 : n<=26?36 : 28;
+                    // Center circle is big; satellites stay at a comfortable
+                    // minimum so names below them are legible. Label width is
+                    // budgeted independently of the circle so a short name in
+                    // a tiny circle still has room to render in full.
+                    int cRad  = 38;
+                    int nodeR = n<=6?28 : n<=14?24 : n<=24?22 : 20;
+                    int lblGap = 4, lblH = 14;
+                    int lblW   = 120;        // wider so most names fit in full
+                    int slotH  = 2*nodeR + lblGap + lblH;       // single name line only
 
-                    // Build concentric rings (inner→outer), each ring non-overlapping
-                    // Inner ring clears the center node with a margin
-                    int maxR = std::min(panelW/2 - nW/2 - 6, panelH/2 - nH/2 - 6);
-                    int Rcur = std::max(cnW/2 + nW/2 + 16, 80);
+                    int maxR = std::min(panelW/2 - lblW/2 - 8, panelH/2 - slotH/2 - 8);
+                    int Rcur = std::max(cRad + nodeR + 40, 110);
 
                     struct SRing { int R, first, count; };
                     std::vector<SRing> rings;
                     int placed = 0;
                     while (placed < n && Rcur <= maxR) {
-                        float s = (float)(nW + 8) / (2.f * (float)Rcur);
+                        int spacing = std::max(2*nodeR + 12, lblW + 10);
+                        float s = (float)spacing / (2.f * (float)Rcur);
                         int cap = (s >= 1.f) ? 1 : (int)((float)M_PI / asinf(s));
                         cap = std::max(1, std::min(cap, n - placed));
                         rings.push_back({Rcur, placed, cap});
                         placed += cap;
-                        Rcur += nH + 10;
+                        Rcur += slotH + 14;
                     }
                     int hidden = n - placed;
 
                     TTF_Font* fsm = GetFont(Font::Sm);
                     TTF_Font* fmd = GetFont(Font::Md);
                     std::string cName = SaveEditor::GetWStr32At(gMiiSav, H_NAME, miiSlotIdx);
-                    std::string cFit  = FitNodeName(cName.empty()?"?":cName, fmd, cnW - 14);
+                    std::string cFit  = FitNodeName(cName.empty()?"?":cName, fmd, 200);
 
-                    // 1. Edges (drawn under everything)
+                    // 1. Edges — drawn under everything else.
+                    SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_BLEND);
                     for (auto& ring : rings) {
                         for (int i = 0; i < ring.count; i++) {
                             const SRow& row = rows[ring.first + i];
@@ -5084,39 +5877,42 @@ static void DrawMiiStats() {
                             SDL_RenderDrawLine(gRen, gcx, gcy, nx, ny);
                         }
                     }
+                    SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_NONE);
 
-                    // 2. Center node
-                    FillRect(gcx-cnW/2+2, gcy-cnH/2+2, cnW, cnH, {0,0,0,110});
-                    FillRect(gcx-cnW/2, gcy-cnH/2, cnW, cnH, COL_ACCENT);
-                    DrawRect(gcx-cnW/2, gcy-cnH/2, cnW, cnH, COL_TEXT);
-                    DrawTextC(cFit, gcx, gcy, {10,10,10,255}, Font::Md);
+                    // 2. Center — big accent circle, gold halo, focused mii's
+                    //    name below in Font::Md so it reads as the subject.
+                    FillCircle(gcx, gcy, cRad,     COL_ACCENT);
+                    DrawCircle(gcx, gcy, cRad,     COL_TEXT);
+                    DrawRing  (gcx, gcy, cRad + 2, COL_GOLD);
+                    DrawTextC(cFit, gcx, gcy + cRad + lblGap + 9,
+                              COL_GOLD, Font::Md);
 
-                    // 3. Satellite nodes (name + rel type, two lines when tall enough)
+                    // 3. Satellites: filled disc with a 2-px thick ring in the
+                    //    relationship-type color (the same color as the spoke
+                    //    edge to the centre). The ring + edge together carry
+                    //    the rel-type signal, so we don't repeat it in text —
+                    //    that's what made the previous layout feel crowded.
                     for (auto& ring : rings) {
                         for (int i = 0; i < ring.count; i++) {
                             const SRow& row = rows[ring.first + i];
                             SDL_Color lc = RelTypeColor(row.outT);
-                            const char* relLbl = RelTypeName(row.outT);
                             float angle = -(float)M_PI/2.f + (2.f*(float)M_PI*i)/ring.count;
                             int nx = gcx + (int)((float)ring.R * cosf(angle));
                             int ny = gcy + (int)((float)ring.R * sinf(angle));
+
+                            FillCircle(nx, ny, nodeR,     COL_PANEL2);
+                            DrawRing  (nx, ny, nodeR,     lc);
+                            DrawRing  (nx, ny, nodeR - 1, lc);   // double-stroke ⇒ thicker
+
                             std::string nn   = SaveEditor::GetWStr32At(gMiiSav, H_NAME, row.other);
-                            std::string nFit = FitNodeName(nn.empty()?"?":nn, fsm, nW - (nH>=36?16:8));
-                            FillRect(nx-nW/2+2, ny-nH/2+2, nW, nH, {0,0,0,110});
-                            FillRect(nx-nW/2,   ny-nH/2,   nW, nH, COL_PANEL2);
-                            FillRect(nx-nW/2,   ny-nH/2,   3,  nH, lc);
-                            DrawRect(nx-nW/2,   ny-nH/2,   nW, nH, lc);
-                            if (nH >= 36) {
-                                DrawTextC(nFit,                 nx+2, ny - nH/4, COL_TEXT, Font::Sm);
-                                DrawTextC(relLbl ? relLbl : "?", nx+2, ny + nH/4, lc, Font::Sm);
-                            } else {
-                                DrawTextC(nFit, nx+2, ny, COL_TEXT, Font::Sm);
-                            }
+                            std::string nFit = FitNodeName(nn.empty()?"?":nn, fsm, lblW - 4);
+                            DrawTextC(nFit, nx, ny + nodeR + lblGap + lblH/2,
+                                      COL_TEXT, Font::Sm);
                         }
                     }
 
                     if (hidden > 0) {
-                        std::string hstr = "+" + std::to_string(hidden) + " more";
+                        std::string hstr = "+" + std::to_string(hidden) + " " + Lang::T("more");
                         DrawTextC(hstr, panelX + panelW - 60, panelTop + panelH - 16, COL_DIM, Font::Sm);
                     }
                 }
@@ -5135,12 +5931,12 @@ static void DrawMiiStats() {
             const char* kindLbl = WordKindLabel(curKind);
             int cx2 = editX + editW/2;
             // Slot header
-            DrawTextC("Slot " + std::to_string(gMiiWordsSlotSel+1) + " / 12",
+            DrawTextC(Lang::T("words.slot") + " " + std::to_string(gMiiWordsSlotSel+1) + " / 12",
                       cx2, panelTop+16, COL_DIM, Font::Sm);
             // Kind section
             SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
             SDL_RenderDrawLine(gRen, editX+12, panelTop+32, editX+editW-12, panelTop+32);
-            DrawTextC("Kind", cx2, panelTop+50, COL_DIM, Font::Sm);
+            DrawTextC(Lang::T("words.kind"), cx2, panelTop+50, COL_DIM, Font::Sm);
             DrawTextC(isFilled?(kindLbl?kindLbl:"?"):"—",
                       cx2, panelTop+84, isFilled?COL_TEXT:COL_DIM, Font::Lg);
             {
@@ -5152,30 +5948,31 @@ static void DrawMiiStats() {
                 HitAdd(bxR,bY,bW,bH,TSimBtn,(int)HidNpadButton_Right);
                 FillRect(bxR,bY,bW,bH,COL_PANEL); DrawRect(bxR,bY,bW,bH,COL_BORDER);
                 DrawTextC(">",bxR+bW/2,bY+bH/2,COL_DIM,Font::Md);
+                EmitPrevNextHighlight(/*sub=mii words kind*/121, bxL, bxR, bY, bW, bH);
             }
             // Text section
             SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
             SDL_RenderDrawLine(gRen, editX+12, panelTop+182, editX+editW-12, panelTop+182);
-            DrawTextC("Word Text", cx2, panelTop+200, COL_DIM, Font::Sm);
-            std::string dispTxt = curText.empty() ? "(none)" : curText;
+            DrawTextC(Lang::T("words.text"), cx2, panelTop+200, COL_DIM, Font::Sm);
+            std::string dispTxt = curText.empty() ? Lang::T("none.paren") : curText;
             DrawTextC(dispTxt, cx2, panelTop+232, (isFilled&&!curText.empty())?COL_TEXT:COL_DIM, Font::Md);
             {
                 int bW=240,bH=42,bX=cx2-bW/2,bY=panelTop+262;
                 HitAdd(bX,bY,bW,bH,TSimBtn,(int)HidNpadButton_A);
                 FillRect(bX,bY,bW,bH,COL_SEL); DrawRect(bX,bY,bW,bH,COL_ACCENT);
-                DrawTextC("A  Edit Text",cx2,bY+bH/2,COL_ACCENT,Font::Sm);
+                DrawTextC("A  " + Lang::T("words.edit.text"),cx2,bY+bH/2,COL_ACCENT,Font::Sm);
             }
             // Pronunciation section
             SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
             SDL_RenderDrawLine(gRen, editX+12, panelTop+334, editX+editW-12, panelTop+334);
-            DrawTextC("Pronunciation  (optional)", cx2, panelTop+352, COL_DIM, Font::Sm);
-            std::string dispHow = curHow.empty() ? "(same as text)" : curHow;
+            DrawTextC(Lang::T("words.pron"), cx2, panelTop+352, COL_DIM, Font::Sm);
+            std::string dispHow = curHow.empty() ? Lang::T("words.same.as.text") : curHow;
             DrawTextC(dispHow, cx2, panelTop+384, !curHow.empty()?COL_TEXT:COL_DIM, Font::Sm);
             {
                 int bW=240,bH=42,bX=cx2-bW/2,bY=panelTop+410;
                 HitAdd(bX,bY,bW,bH,TSimBtn,(int)HidNpadButton_X);
                 FillRect(bX,bY,bW,bH,COL_SEL); DrawRect(bX,bY,bW,bH,COL_ACCENT);
-                DrawTextC("X  Edit Pronunciation",cx2,bY+bH/2,COL_ACCENT,Font::Sm);
+                DrawTextC("X  " + Lang::T("words.edit.pron"),cx2,bY+bH/2,COL_ACCENT,Font::Sm);
             }
             // Undo button
             {
@@ -5184,7 +5981,7 @@ static void DrawMiiStats() {
                 HitAdd(ubX,ubY,ubW,ubH,TUndoWords,0);
                 FillRect(ubX,ubY,ubW,ubH,COL_PANEL);
                 DrawRect(ubX,ubY,ubW,ubH,canUndo?COL_GOLD:COL_BORDER);
-                DrawTextC("-  Undo",cx2,ubY+ubH/2,canUndo?COL_GOLD:COL_DIM,Font::Md);
+                DrawTextC("-  " + Lang::T("undo"),cx2,ubY+ubH/2,canUndo?COL_GOLD:COL_DIM,Font::Md);
             }
             if (!gMiiStatsMsg.empty())
                 DrawTextC(gMiiStatsMsg, cx2, panelTop+554, gMiiStatsMsgCol);
@@ -5197,7 +5994,7 @@ static void DrawMiiStats() {
             static const uint32_t H_MNAME_RP = 0x2499bfdau;
             int cx2 = editX + editW/2;
             if (gMiiRelPairIdx < 0) {
-                DrawTextC("no relations", cx2, panelTop + panelH/2, COL_DIM, Font::Md);
+                DrawTextC(Lang::T("mii.no.relations"), cx2, panelTop + panelH/2, COL_DIM, Font::Md);
             } else {
                 int myDir  = gMiiRelSelfA ? gMiiRelPairIdx*2   : gMiiRelPairIdx*2+1;
                 int otDir  = gMiiRelSelfA ? gMiiRelPairIdx*2+1 : gMiiRelPairIdx*2;
@@ -5209,11 +6006,11 @@ static void DrawMiiStats() {
                                          : SaveEditor::GetIntAt(gMiiSav, H_IDA_RP, gMiiRelPairIdx);
                 std::string oName = SaveEditor::GetWStr32At(gMiiSav, H_MNAME_RP, other < 0 ? 0 : other);
                 // Header: other Mii name
-                DrawTextC(oName.empty()?"(unknown)":oName, cx2, panelTop+18, COL_TEXT, Font::Md);
+                DrawTextC(oName.empty()? Lang::T("unknown.paren") :oName, cx2, panelTop+18, COL_TEXT, Font::Md);
                 SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
                 SDL_RenderDrawLine(gRen, editX+12, panelTop+42, editX+editW-12, panelTop+42);
                 // Your relationship type
-                DrawTextC("Your type", cx2, panelTop+62, COL_DIM, Font::Sm);
+                DrawTextC(Lang::T("rel.your.type"), cx2, panelTop+62, COL_DIM, Font::Sm);
                 SDL_Color myTC = RelTypeColor(myType);
                 const char* myTN = RelTypeName(myType);
                 DrawTextC(myTN?myTN:"?", cx2, panelTop+102, myTC, Font::Lg);
@@ -5222,10 +6019,11 @@ static void DrawMiiStats() {
                     int bxL=cx2-bGap/2-bW, bxR=cx2+bGap/2, bY=panelTop+144;
                     HitAdd(bxL,bY,bW,bH,TSimBtn,(int)HidNpadButton_Left);
                     FillRect(bxL,bY,bW,bH,COL_PANEL); DrawRect(bxL,bY,bW,bH,COL_BORDER);
-                    DrawTextC("< Type",bxL+bW/2,bY+bH/2,COL_DIM);
+                    DrawTextC("< " + Lang::T("rel.type"),bxL+bW/2,bY+bH/2,COL_DIM);
                     HitAdd(bxR,bY,bW,bH,TSimBtn,(int)HidNpadButton_Right);
                     FillRect(bxR,bY,bW,bH,COL_PANEL); DrawRect(bxR,bY,bW,bH,COL_BORDER);
-                    DrawTextC("Type >",bxR+bW/2,bY+bH/2,COL_DIM);
+                    DrawTextC(Lang::T("rel.type") + " >",bxR+bW/2,bY+bH/2,COL_DIM);
+                    EmitPrevNextHighlight(/*sub=mii rel type*/122, bxL, bxR, bY, bW, bH);
                     // When the current relationship is Unknown, expose a
                     // "Batch Know" shortcut that flips every Unknown relation
                     // this Mii has into Know with natural game values.
@@ -5236,22 +6034,22 @@ static void DrawMiiStats() {
                             HitAdd(bxB,bY,bkW,bH,TRelBatchKnow,0);
                             FillRect(bxB,bY,bkW,bH,COL_PANEL);
                             DrawRect(bxB,bY,bkW,bH,COL_GREEN);
-                            DrawTextC("Batch Know",bxB+bkW/2,bY+bH/2,COL_GREEN);
+                            DrawTextC(Lang::T("rel.batch.know"),bxB+bkW/2,bY+bH/2,COL_GREEN);
                         }
                     }
                 }
                 // Their type (auto-counterpart, read-only display)
                 SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
                 SDL_RenderDrawLine(gRen, editX+12, panelTop+222, editX+editW-12, panelTop+222);
-                DrawTextC("Their type  (auto)", cx2, panelTop+244, COL_DIM, Font::Sm);
+                DrawTextC(Lang::T("rel.their.type"), cx2, panelTop+244, COL_DIM, Font::Sm);
                 SDL_Color otTC = RelTypeColor(otType);
                 const char* otTN = RelTypeName(otType);
                 DrawTextC(otTN?otTN:"?", cx2, panelTop+282, otTC, Font::Md);
                 // Meter
                 SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
                 SDL_RenderDrawLine(gRen, editX+12, panelTop+336, editX+editW-12, panelTop+336);
-                DrawTextC("Meter", cx2, panelTop+358, COL_DIM, Font::Sm);
-                std::string mStr = fixed ? "100 (fixed)" : std::to_string(myMeter);
+                DrawTextC(Lang::T("rel.meter"), cx2, panelTop+358, COL_DIM, Font::Sm);
+                std::string mStr = fixed ? ("100 (" + Lang::T("rel.fixed") + ")") : std::to_string(myMeter);
                 DrawTextC(mStr, cx2, panelTop+398, fixed?COL_DIM:COL_TEXT, Font::Lg);
                 if (!fixed) {
                     static const int MSTEPS[] = {10, 1};
@@ -5273,7 +6071,7 @@ static void DrawMiiStats() {
                         DrawTextC("+"+std::to_string(s),bx+bW/2,bY+bH/2,COL_GREEN,Font::Sm);
                         bx+=bW+bGap;
                     }
-                    DrawTextC("both directions set together", cx2, panelTop+514, COL_DIM, Font::Sm);
+                    DrawTextC(Lang::T("rel.both.directions"), cx2, panelTop+514, COL_DIM, Font::Sm);
                 }
                 // ── Since (TypeSetTime) ───────────────────────────────────
                 {
@@ -5289,13 +6087,13 @@ static void DrawMiiStats() {
                         snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d",
                                  ti->tm_year+1900, ti->tm_mon+1, ti->tm_mday);
                     }
-                    DrawTextC("Since", cx2, sinceY+14, COL_DIM, Font::Sm);
+                    DrawTextC(Lang::T("rel.since"), cx2, sinceY+14, COL_DIM, Font::Sm);
                     int rowH = 30, rowW = 150;
                     int rowY = sinceY+28, rowX = cx2 - rowW/2;
                     HitAdd(rowX, rowY, rowW, rowH, TRelDateKbd, gMiiRelPairIdx);
                     FillRect(rowX, rowY, rowW, rowH, COL_PANEL);
                     DrawRect(rowX, rowY, rowW, rowH, COL_BORDER);
-                    DrawTextC(dateBuf[0] ? dateBuf : "(not set)", rowX+rowW/2, rowY+rowH/2,
+                    DrawTextC(dateBuf[0] ? std::string(dateBuf) : Lang::T("not.set"), rowX+rowW/2, rowY+rowH/2,
                               dateBuf[0] ? COL_TEXT : COL_DIM, Font::Sm);
                 }
             }
@@ -5325,26 +6123,30 @@ static void DrawMiiStats() {
                 FillRect(panelX+2, panelTop, panelW-4, PK_HDR_H, {28,28,28,255});
                 DrawRect(panelX+2, panelTop, panelW-4, PK_HDR_H, COL_BORDER);
                 std::string hdrStr = std::string("  ") + slotName;
-                if (!gBlFilter.empty()) hdrStr += "  —  filter: \"" + gBlFilter + "\"";
-                else                    hdrStr += "  —  select item";
+                if (!gBlFilter.empty()) hdrStr += "  —  " + Lang::T("bl.filter") + ": \"" + gBlFilter + "\"";
+                else                    hdrStr += "  —  " + Lang::T("bl.select.item");
                 int hw=0,hh=0; if(fsm) TTF_SizeUTF8(fsm, hdrStr.c_str(), &hw, &hh);
                 DrawText(hdrStr, panelX+10, panelTop+(PK_HDR_H-hh)/2,
                          gBlFilter.empty() ? COL_GOLD : COL_ACCENT);
                 std::string cntStr = gBlFilter.empty()
-                    ? (std::to_string(total) + " items")
-                    : (std::to_string(total) + " of " + std::to_string(totalAll) + " items");
+                    ? (std::to_string(total) + " " + Lang::T("items"))
+                    : (std::to_string(total) + " " + Lang::T("of") + " " + std::to_string(totalAll) + " " + Lang::T("items"));
                 int cw=0,cntH=0; if(fsm) TTF_SizeUTF8(fsm, cntStr.c_str(), &cw, &cntH);
                 DrawText(cntStr, panelX+panelW-cw-14, panelTop+(PK_HDR_H-cntH)/2, COL_DIM);
 
                 // Item list (uses filtered indices)
+                int bpSelY = listTop;
+                bool bpSawSel = false;
                 for (int i = 0; i < pkVis; i++) {
                     int filtIdx = gBlPickerScroll + i;
                     if (filtIdx >= total) break;
                     int idx = gBlFiltered[filtIdx];
                     bool sel = (filtIdx == gBlPickerSel);
                     int ry = listTop + i * PK_ROW_H;
+                    if (sel) { bpSelY = ry; bpSawSel = true; }
                     FillRect(panelX+2, ry, panelW-4, PK_ROW_H-1, sel?COL_SEL:COL_BG);
-                    if (sel) DrawRect(panelX+2, ry, panelW-4, PK_ROW_H-1, COL_GOLD);
+                    if (sel && gTheme.cornerRadius == 0)
+                        DrawRectSquare(panelX+2, ry, panelW-4, PK_ROW_H-1, COL_GOLD);
                     // Big "select" button on the left — same size as in the main belongings list
                     const int SEL_W = 18;
                     int selBoxX = panelX + 8;
@@ -5360,7 +6162,7 @@ static void DrawMiiStats() {
 
                 // No-results hint
                 if (total == 0) {
-                    DrawTextC("no matches — press X to clear filter",
+                    DrawTextC(Lang::T("bl.no.matches"),
                               panelX+panelW/2, listTop+listH/2, COL_DIM, Font::Md);
                 }
 
@@ -5378,6 +6180,12 @@ static void DrawMiiStats() {
                     ? "A  confirm    -  search    B  cancel"
                     : "A  confirm    -  edit filter    X  clear filter    B  cancel";
                 DrawTextC(foot, panelX+panelW/2, footY+PK_FOOT_H/2, COL_DIM, Font::Sm);
+
+                if (bpSawSel) {
+                    RequestHighlight((int)Screen::OnSwitch, /*sub=bl picker*/34,
+                                     panelX+2, bpSelY, panelW-4, PK_ROW_H-1, gDtSec);
+                    DrawAnimatedHighlight();
+                }
             } else {
                 // ── Card-grid belongings (mirrors the WebUI layout) ──────────────
                 // Sections: WORN OUTFIT (4 cloth cards × 2 rows + a wide Coord
@@ -5420,12 +6228,18 @@ static void DrawMiiStats() {
                     yc += HEAD_H + 4;
                 };
 
+                // Capture the rect of the currently-selected belongings card or
+                // action button so the animated outline can glide over it.
+                int blSelX = 0, blSelY = 0, blSelW = 0, blSelH = 0;
+                bool blSawSel = false;
                 auto drawSlotCard = [&](int sel, int x, int y, int w, int h,
                                         const char* slotLbl, const char* itemLbl,
                                         const std::string& extra, bool dimItem) {
                     bool selFlag = (sel == gBlSel);
+                    if (selFlag) { blSelX = x; blSelY = y; blSelW = w; blSelH = h; blSawSel = true; }
                     FillRect(x, y, w, h, selFlag ? COL_SEL : COL_PANEL);
-                    DrawRect(x, y, w, h, selFlag ? COL_GOLD : COL_BORDER);
+                    DrawRect(x, y, w, h,
+                             (selFlag && gTheme.cornerRadius == 0) ? COL_GOLD : COL_BORDER);
                     // Slot prefix (dim, top-left).
                     DrawText(slotLbl, x + 8, y + 4, COL_DIM, Font::Sm);
                     // Item name — fit to card width, ellipsised if needed.
@@ -5514,13 +6328,21 @@ static void DrawMiiStats() {
                         int cx = contentX + a * (cardW + CARD_GAP);
                         int cy = yc;
                         bool selFlag = (sel == gBlSel);
+                        if (selFlag) { blSelX = cx; blSelY = cy; blSelW = cardW; blSelH = ACT_H; blSawSel = true; }
                         SDL_Color border = selFlag ? COL_GOLD : (a < 2 ? COL_ACCENT : SDL_Color{180,140,90,255});
                         FillRect(cx, cy, cardW, ACT_H, selFlag ? COL_SEL : COL_PANEL);
-                        DrawRect(cx, cy, cardW, ACT_H, border);
+                        DrawRect(cx, cy, cardW, ACT_H,
+                                 (selFlag && gTheme.cornerRadius == 0) ? COL_GOLD : border);
                         DrawTextC(labels[a], cx + cardW/2, cy + ACT_H/2 - 2,
                                   selFlag ? COL_GOLD : border, Font::Sm);
                         HitAdd(cx, cy, cardW, ACT_H, TBLSel, sel);
                     }
+                }
+
+                if (blSawSel) {
+                    RequestHighlight((int)Screen::OnSwitch, /*sub=bl cards*/35,
+                                     blSelX, blSelY, blSelW, blSelH, gDtSec);
+                    DrawAnimatedHighlight();
                 }
             }
             if (!gMiiStatsMsg.empty())
@@ -5537,9 +6359,12 @@ static void DrawMiiStats() {
             int catStripY = panelTop;
             int catX0 = panelX + 8;
             int catW  = (panelW - 16 - (HABIT_CAT_COUNT-1)*CAT_GAP) / HABIT_CAT_COUNT;
+            int catSelX = catX0;
+            bool catSawSel = false;
             for (int c = 0; c < HABIT_CAT_COUNT; c++) {
                 int cx = catX0 + c*(catW+CAT_GAP);
                 bool sel = (c == gHabitCatSel);
+                if (sel) { catSelX = cx; catSawSel = true; }
                 // Indicator: gold dot if any habit is currently active in this category
                 bool catHasActive = false;
                 for (int i = 0; i < HABIT_COUNT; i++) {
@@ -5550,7 +6375,8 @@ static void DrawMiiStats() {
                 }
                 HitAdd(cx, catStripY, catW, CAT_H, TSelHabitCat, c);
                 FillRect(cx, catStripY, catW, CAT_H, sel?COL_SEL:COL_PANEL);
-                DrawRect(cx, catStripY, catW, CAT_H, sel?COL_GOLD:COL_BORDER);
+                DrawRect(cx, catStripY, catW, CAT_H,
+                         (sel && gTheme.cornerRadius == 0) ? COL_GOLD : COL_BORDER);
                 DrawTextC(HABIT_CAT_LABEL[c], cx+catW/2, catStripY+CAT_H/2,
                           sel?COL_GOLD:(catHasActive?COL_ACCENT:COL_DIM), Font::Sm);
                 if (catHasActive) {
@@ -5572,26 +6398,33 @@ static void DrawMiiStats() {
             }
             if (gHabitItemSel >= (int)items.size()) gHabitItemSel = std::max(0,(int)items.size()-1);
 
+            int hbSelY = listTop;
+            bool hbSawSel = false;
             for (int i = 0; i < visRows && i + gHabitScroll < (int)items.size(); i++) {
                 int idx = items[i + gHabitScroll];
                 bool selRow = (i + gHabitScroll == gHabitItemSel);
                 int ry = listTop + i*ROW_H;
+                if (selRow) { hbSelY = ry; hbSawSel = true; }
                 bool isOwn     = SaveEditor::GetBoolAt(gMiiSav, gHabitHashes[idx].isOwn,     miiSlotIdx, false);
                 bool isChecked = SaveEditor::GetBoolAt(gMiiSav, gHabitHashes[idx].isChecked, miiSlotIdx, false);
 
                 // Row backdrop (no hit — the two boxes on the left are the only tap targets)
                 FillRect(panelX+8, ry, panelW-16, ROW_H-2, selRow?COL_SEL:COL_BG);
-                if (selRow) DrawRect(panelX+8, ry, panelW-16, ROW_H-2, COL_GOLD);
+                if (selRow && gTheme.cornerRadius == 0)
+                    DrawRectSquare(panelX+8, ry, panelW-16, ROW_H-2, COL_GOLD);
 
-                // Big touch zones — 50px wide, full row height — with the visible 22×22 box centered.
-                int rcy = ry + ROW_H/2;
+                // Big touch zones — 50px wide, full row height — with the
+                // visible 22×22 box centered. Visible row height is ROW_H-2
+                // so the centering math is based on that, not ROW_H itself.
+                const int VIS_H   = ROW_H - 2;
+                int rcy = ry + VIS_H/2;
                 const int BOX_VIS = 22;          // visible box edge
                 const int HIT_W   = 50;          // touch hit width per box
 
                 // Active (gold) box
                 int aZoneX = panelX + 8;
                 int aBoxX  = aZoneX + (HIT_W - BOX_VIS)/2;
-                HitAdd(aZoneX, ry, HIT_W, ROW_H-2, TSelHabitItem, i + gHabitScroll);
+                HitAdd(aZoneX, ry, HIT_W, VIS_H, TSelHabitItem, i + gHabitScroll);
                 FillRect(aBoxX, rcy-BOX_VIS/2, BOX_VIS, BOX_VIS, isChecked?COL_GOLD:COL_PANEL);
                 DrawRect(aBoxX, rcy-BOX_VIS/2, BOX_VIS, BOX_VIS, isChecked?COL_GOLD:COL_BORDER);
                 if (isChecked) FillRect(aBoxX+6, rcy-5, 10, 10, {10,10,10,255});
@@ -5600,14 +6433,21 @@ static void DrawMiiStats() {
                 const SDL_Color C_OWN = {90,140,200,255};
                 int oZoneX = aZoneX + HIT_W + 4;
                 int oBoxX  = oZoneX + (HIT_W - BOX_VIS)/2;
-                HitAdd(oZoneX, ry, HIT_W, ROW_H-2, TToggleHabitOwn, i + gHabitScroll);
+                HitAdd(oZoneX, ry, HIT_W, VIS_H, TToggleHabitOwn, i + gHabitScroll);
                 FillRect(oBoxX, rcy-BOX_VIS/2, BOX_VIS, BOX_VIS, isOwn?C_OWN:COL_PANEL);
                 DrawRect(oBoxX, rcy-BOX_VIS/2, BOX_VIS, BOX_VIS, isOwn?C_OWN:COL_BORDER);
                 if (isOwn) FillRect(oBoxX+6, rcy-5, 10, 10, {10,10,10,255});
 
-                // Label
+                // Label — Font::Sm renders into a surface a few pixels taller
+                // than its cap height because of ascent/descent leading; nudge
+                // up so the visual baseline sits on the row's centerline.
                 SDL_Color lblCol = isChecked ? COL_GOLD : (isOwn ? COL_TEXT : COL_DIM);
-                DrawText(HABITS[idx].label, oZoneX + HIT_W + 8, ry+(ROW_H-14)/2-2, lblCol, Font::Sm);
+                int lblW = 0, lblH = 0;
+                SDL_Texture* lblTex = GetTextTexture(HABITS[idx].label, Font::Sm, lblCol, lblW, lblH);
+                if (lblTex) {
+                    SDL_Rect dst{ oZoneX + HIT_W + 8, rcy - lblH/2, lblW, lblH };
+                    SDL_RenderCopy(gRen, lblTex, nullptr, &dst);
+                }
                 // Label area hit — tapping the text also toggles active (same as the gold checkbox)
                 int lblHitX = oZoneX + HIT_W;
                 int lblHitW = (panelX + panelW - 8) - lblHitX;
@@ -5616,7 +6456,19 @@ static void DrawMiiStats() {
             }
 
             if (items.empty()) {
-                DrawTextC("no habits in this category", panelX+panelW/2, listTop+listH/2, COL_DIM, Font::Md);
+                DrawTextC(Lang::T("habits.empty"), panelX+panelW/2, listTop+listH/2, COL_DIM, Font::Md);
+            }
+
+            if (catSawSel) {
+                RequestHighlight((int)Screen::OnSwitch, /*sub=habits cats*/37,
+                                 catSelX, catStripY, catW, CAT_H, gDtSec,
+                                 /*slot=*/2);
+                DrawAnimatedHighlight(/*slot=*/2);
+            }
+            if (hbSawSel) {
+                RequestHighlight((int)Screen::OnSwitch, /*sub=habits items*/36,
+                                 panelX+8, hbSelY, panelW-16, ROW_H-2, gDtSec);
+                DrawAnimatedHighlight();
             }
 
             // Scrollbar
@@ -5627,7 +6479,7 @@ static void DrawMiiStats() {
             }
 
             // Footer hint inside panel
-            const char* hint = "A  toggle active    X  toggle owned    -  clear category    Left/Right  switch category";
+            std::string hint = Lang::T("habits.hint");
             DrawTextC(hint, panelX+panelW/2, panelTop+panelH-14, COL_DIM, Font::Sm);
 
             (void)fmd;
@@ -5649,9 +6501,9 @@ static void DrawMiiStats() {
                 SaveEditor::Load(SAVE_MAP_SAV, gMapSav, mapErr);
             }
             if (!HousingAvailable()) {
-                DrawTextC("Housing data unavailable in this save.",
+                DrawTextC(Lang::T("housing.unavailable"),
                           panelX+panelW/2, panelTop+panelH/2-10, COL_DIM, Font::Md);
-                DrawTextC("(Mii.Location.HouseMapId / RoomIndex not found)",
+                DrawTextC(Lang::T("housing.unavailable.detail"),
                           panelX+panelW/2, panelTop+panelH/2+14, COL_DIM, Font::Sm);
             } else {
                 // Drop the pick if the previously-picked mii vanished.
@@ -5744,18 +6596,17 @@ static void DrawMiiStats() {
                 SDL_Color statusCol;
                 if (gHousingPicked >= 0) {
                     std::string nm = SaveEditor::GetWStr32At(gMiiSav, HASH_MII_NAME, gHousingPicked);
-                    if (nm.empty()) nm = "(slot " + std::to_string(gHousingPicked+1) + ")";
-                    statusLine = "Moving: " + nm;
-                    subLine    = "Tap a room to drop. The current occupant will be swapped.";
+                    if (nm.empty()) nm = "(" + Lang::T("housing.slot.short") + " " + std::to_string(gHousingPicked+1) + ")";
+                    statusLine = Lang::T("housing.moving") + ": " + nm;
+                    subLine    = Lang::T("housing.moving.hint");
                     statusCol  = COL_GOLD;
                 } else {
                     int housed = (int)gMiis.size() - (int)unhoused.size();
-                    char sbuf[120];
-                    snprintf(sbuf, sizeof(sbuf),
-                             "%d miis  ·  %d housed  ·  %d unhoused  ·  %d house%s",
-                             (int)gMiis.size(), housed, (int)unhoused.size(),
-                             (int)cards.size(), cards.size()==1?"":"s");
-                    statusLine = "Tap a Mii to pick them up, then tap a room.";
+                    std::string sbuf = std::to_string(gMiis.size()) + " " + Lang::T("mii.miis.word") + "  ·  "
+                                     + std::to_string(housed) + " " + Lang::T("housing.housed") + "  ·  "
+                                     + std::to_string(unhoused.size()) + " " + Lang::T("housing.unhoused.lower") + "  ·  "
+                                     + std::to_string(cards.size()) + " " + Lang::T(cards.size()==1?"housing.house":"housing.houses");
+                    statusLine = Lang::T("housing.idle.hint");
                     subLine    = sbuf;
                     statusCol  = COL_TEXT;
                 }
@@ -5776,12 +6627,14 @@ static void DrawMiiStats() {
                     btnX -= 8;
                 };
                 if (gHousingPicked >= 0) {
-                    abButton("Cancel (B)",   120, COL_BORDER, COL_DIM, 2);
-                    abButton("Evict (-)",    110, {200,90,90,255}, {230,130,130,255}, 1);
+                    std::string cancelL = Lang::T("housing.cancel") + " (B)";
+                    std::string evictL  = Lang::T("housing.evict") + " (-)";
+                    abButton(cancelL.c_str(),   120, COL_BORDER, COL_DIM, 2);
+                    abButton(evictL.c_str(),    110, {200,90,90,255}, {230,130,130,255}, 1);
                 }
                 // No "New House" button: houses are placed in-game and listed
-                // here read-only. The action bar simply shows status + counts
-                // when nothing is picked.
+                // here read-only. When nothing is picked the action bar just
+                // shows status + counts.
 
                 // ── Scrolling content area ──────────────────────────────────
                 SDL_Rect clip = { contentX, contentTopY, contentW, contentH };
@@ -5795,14 +6648,14 @@ static void DrawMiiStats() {
                 };
                 auto fitName = [&](int miiSlotIdx) -> std::string {
                     std::string nm = SaveEditor::GetWStr32At(gMiiSav, HASH_MII_NAME, miiSlotIdx);
-                    if (nm.empty()) nm = "(slot " + std::to_string(miiSlotIdx+1) + ")";
+                    if (nm.empty()) nm = "(" + Lang::T("housing.slot.short") + " " + std::to_string(miiSlotIdx+1) + ")";
                     return nm;
                 };
 
                 // ── Section: Unhoused chips ─────────────────────────────────
-                sectionLabel("UNHOUSED");
+                sectionLabel(Lang::T("housing.unhoused").c_str());
                 if (unhoused.empty()) {
-                    DrawText("(all miis are housed)", contentX, yc, COL_DIM, Font::Sm);
+                    DrawText(Lang::T("housing.all.housed"), contentX, yc, COL_DIM, Font::Sm);
                     yc += 24;
                 } else {
                     const int chipH = 34, chipGap = 8;
@@ -5828,9 +6681,9 @@ static void DrawMiiStats() {
                 yc += 8;
 
                 // ── Section: Houses (card grid) ─────────────────────────────
-                sectionLabel("HOUSES");
+                sectionLabel(Lang::T("housing.houses").c_str());
                 if (cards.empty()) {
-                    DrawText("(no houses on this island — place one in-game first)",
+                    DrawText(Lang::T("housing.no.houses"),
                              contentX, yc, COL_DIM, Font::Sm);
                     yc += 24;
                 } else {
@@ -5861,9 +6714,9 @@ static void DrawMiiStats() {
                             // Header: house name (gold) + count + vacate button.
                             FillRect(cxL+1, yc+1, cardW-2, HEAD_H, {38,38,38,255});
                             std::string hn = HouseNameForId(c.houseId);
-                            char title[96];
-                            if (!hn.empty()) snprintf(title, sizeof(title), "%s  #%d", hn.c_str(), c.houseId);
-                            else             snprintf(title, sizeof(title), "House #%d", c.houseId);
+                            std::string title = hn.empty()
+                                ? (Lang::T("housing.house") + " #" + std::to_string(c.houseId))
+                                : (hn + "  #" + std::to_string(c.houseId));
                             DrawText(title, cxL + 10, yc + (HEAD_H-14)/2 - 2, COL_GOLD, Font::Sm);
 
                             // Resident count + delete + vacate buttons (right side of head).
@@ -5881,14 +6734,14 @@ static void DrawMiiStats() {
                             FillRect(delX, btnY, delW, btnH2, {26,26,26,255});
                             DrawRect(delX, btnY, delW, btnH2, delFocused ? COL_ACCENT : COL_RED);
                             if (delFocused) DrawRect(delX+1, btnY+1, delW-2, btnH2-2, COL_ACCENT);
-                            DrawTextC("delete", delX + delW/2, btnY + btnH2/2 - 2, COL_RED, Font::Sm);
+                            DrawTextC(Lang::T("housing.delete"), delX + delW/2, btnY + btnH2/2 - 2, COL_RED, Font::Sm);
                             addNav(6, -1, c.houseId, -1, -1, delX, btnY, delW, btnH2, false);
                             // Vacate button
                             bool vacFocused = (gHousingNavSel == (int)gHousingNav.size());
                             FillRect(vacX, btnY, vacW, btnH2, {40,16,16,255});
                             DrawRect(vacX, btnY, vacW, btnH2, vacFocused ? COL_ACCENT : COL_RED);
                             if (vacFocused) DrawRect(vacX+1, btnY+1, vacW-2, btnH2-2, COL_ACCENT);
-                            DrawTextC("vacate", vacX + vacW/2, btnY + btnH2/2 - 2, COL_RED, Font::Sm);
+                            DrawTextC(Lang::T("housing.vacate"), vacX + vacW/2, btnY + btnH2/2 - 2, COL_RED, Font::Sm);
                             addNav(4, -1, c.houseId, -1, -1, vacX, btnY, vacW, btnH2, false);
                             int cw=0, cwh=0; if (fsm) TTF_SizeUTF8(fsm, cntBuf, &cw, &cwh);
                             DrawText(cntBuf, delX - cw - 8, yc + (HEAD_H-cwh)/2, COL_DIM, Font::Sm);
@@ -5910,9 +6763,9 @@ static void DrawMiiStats() {
                                     if (focused) slotBd = COL_ACCENT;
                                     FillRect(slotXL, by, slotW, SLOT_H, slotBg);
                                     DrawRect(slotXL, by, slotW, SLOT_H, slotBd);
-                                    char rbuf[16]; snprintf(rbuf, sizeof(rbuf), "room %d", r);
+                                    std::string rbuf = Lang::T("housing.room") + " " + std::to_string(r);
                                     DrawText(rbuf, slotXL + 8, by + (SLOT_H-14)/2 - 5, COL_DIM, Font::Sm);
-                                    DrawText(dropTarget ? "drop here" : "(empty)",
+                                    DrawText(Lang::T(dropTarget ? "housing.drop.here" : "housing.empty.paren"),
                                              slotXL + 80, by + (SLOT_H-14)/2 - 5,
                                              dropTarget ? COL_GOLD : COL_DIM, Font::Sm);
                                     addNav(2, -1, c.houseId, r, -1, slotXL, by, slotW, SLOT_H, false);
@@ -5928,7 +6781,7 @@ static void DrawMiiStats() {
                                         if (focused && !picked) slotBd = COL_ACCENT;
                                         FillRect(slotXL, by, slotW, SLOT_H, slotBg);
                                         DrawRect(slotXL, by, slotW, SLOT_H, slotBd);
-                                        char rbuf[16]; snprintf(rbuf, sizeof(rbuf), "room %d", r);
+                                        std::string rbuf = Lang::T("housing.room") + " " + std::to_string(r);
                                         DrawText(rbuf, slotXL + 8, by + (SLOT_H-14)/2 - 5, COL_DIM, Font::Sm);
                                         std::string nm = fitName(miiIdx);
                                         SDL_Color nc = picked ? COL_GOLD :
@@ -5946,7 +6799,7 @@ static void DrawMiiStats() {
                             SDL_Color addBd = focusedAdd ? COL_ACCENT : COL_BORDER;
                             FillRect(slotXL, addY, slotW, ADD_H, {26,26,26,255});
                             DrawRect(slotXL, addY, slotW, ADD_H, addBd);
-                            const char* addLbl = (gHousingPicked >= 0) ? "drop here" : "add resident";
+                            std::string addLbl = Lang::T((gHousingPicked >= 0) ? "housing.drop.here" : "housing.add.resident");
                             SDL_Color addCol = (gHousingPicked >= 0) ? COL_GOLD : COL_DIM;
                             DrawTextC(addLbl, slotXL + slotW/2, addY + ADD_H/2, addCol, Font::Sm);
                             addNav(3, -1, c.houseId, std::max(c.maxRoom + 1, 0), -1,
@@ -5979,10 +6832,23 @@ static void DrawMiiStats() {
                 // "Focus-follow scroll (pre-render)" block above). No need to
                 // re-adjust here.
 
+                // Sliding selection outline — uses the focused HousingNavItem's
+                // rect (built fresh every frame, so it tracks scroll/layout
+                // changes correctly). Clipped to the visible content area so
+                // it doesn't bleed onto the sticky action bar or footer.
+                if (gHousingNavSel >= 0 && gHousingNavSel < (int)gHousingNav.size()) {
+                    const auto& f = gHousingNav[gHousingNavSel];
+                    bool visible = (f.kind == 5) ||
+                                   (f.y >= contentTopY && f.y + f.h <= contentBotY);
+                    if (visible) {
+                        RequestHighlight((int)Screen::OnSwitch, /*sub=mii housing*/38,
+                                         f.x, f.y, f.w, f.h, gDtSec);
+                        DrawAnimatedHighlight();
+                    }
+                }
+
                 // Footer hint
-                const char* hint = (gHousingPicked >= 0)
-                    ? "A  drop / pick    -  evict picked    B  cancel pick    L/R  tab"
-                    : "A  pick mii / drop    Y  subtab    L/R  tab    B/+  back";
+                std::string hint = Lang::T(gHousingPicked >= 0 ? "housing.footer.picked" : "housing.footer.idle");
                 DrawTextC(hint, panelX+panelW/2, panelTop+panelH-14, COL_DIM, Font::Sm);
                 if (gMiiStatsMsgFrames > 0 && !gMiiStatsMsg.empty()) {
                     DrawTextC(gMiiStatsMsg, panelX+panelW/2, panelTop+panelH-30, gMiiStatsMsgCol, Font::Sm);
@@ -5997,103 +6863,155 @@ static void DrawMiiStats() {
             FillRect(panelX+2, panelTop, panelW-4, summaryH, {26,26,26,255});
             DrawRect(panelX+2, panelTop, panelW-4, summaryH, COL_BORDER);
             std::string hdr;
-            if (!gShareQuery.empty()) hdr = "search: \"" + gShareQuery + "\"  ·  ";
-            char hbuf[80];
-            snprintf(hbuf, sizeof(hbuf), "%d miis  ·  page %d / %d  ·  sort: %s%s",
-                     gShareTotal, gSharePage, gShareLastPage,
-                     gShareSort==1?"likes":(gShareSort==2?"oldest":"newest"),
-                     gShareFromSavOnly?"  ·  importable only":"");
-            hdr += hbuf;
+            if (!gShareQuery.empty()) hdr = Lang::T("share.search") + ": \"" + gShareQuery + "\"  ·  ";
+            std::string sortKey = gShareSort==1?"share.sort.likes":(gShareSort==2?"share.sort.oldest":"share.sort.newest");
+            hdr += std::to_string(gShareTotal) + " " + Lang::T("mii.miis.word") + "  ·  "
+                 + Lang::T("share.page") + " " + std::to_string(gSharePage) + " / " + std::to_string(gShareLastPage)
+                 + "  ·  " + Lang::T("share.sort") + ": " + Lang::T(sortKey)
+                 + (gShareFromSavOnly ? ("  ·  " + Lang::T("share.importable.only")) : std::string(""));
             DrawTextC(hdr, panelX+panelW/2, panelTop+summaryH/2, COL_DIM, Font::Sm);
 
             const int LIST_TOP = panelTop + summaryH + 4;
             const int FOOT_H   = 26;
             const int LIST_H   = panelH - summaryH - 4 - FOOT_H;
-            const int ROW_H    = 64;
-            const int VIS      = std::max(1, LIST_H / ROW_H);
+            // 3-column card grid; rows + height adapt to panelH so the grid
+            // fills the panel.
+            const int COLS     = 3;
+            const int CARD_GAP = 8;
+            const int CARD_W   = (panelW - 16 - (COLS - 1) * CARD_GAP) / COLS;
+            int VIS_ROWS = 3;
+            int CARD_H   = (LIST_H - VIS_ROWS * CARD_GAP - 4) / VIS_ROWS;
+            if (CARD_H < 140) { VIS_ROWS = 2; CARD_H = (LIST_H - VIS_ROWS * CARD_GAP - 4) / VIS_ROWS; }
+            if (CARD_H > 210) CARD_H = 210;
+            if (CARD_H <  90) CARD_H =  90;  // floor so thumb math never goes negative
+            const int VIS      = COLS * VIS_ROWS;
             int N = (int)gShareMiis.size();
 
-            // Status / loading message (top of list, replaces list when empty)
+            // Status / loading message (replaces grid when empty).
             if (N == 0) {
                 if (gShareStatusFrames > 0)
                     DrawTextC(gShareStatusMsg, panelX+panelW/2, LIST_TOP + LIST_H/2,
                               gShareStatusCol, Font::Md);
                 else
-                    DrawTextC("Press Y to cycle into Browse — fetching first page…",
+                    DrawTextC(Lang::T("share.fetching"),
                               panelX+panelW/2, LIST_TOP + LIST_H/2, COL_DIM, Font::Sm);
             } else {
                 if (gShareSel < 0) gShareSel = 0;
                 if (gShareSel >= N) gShareSel = N - 1;
-                if (gShareSel < gShareScroll) gShareScroll = gShareSel;
-                if (gShareSel >= gShareScroll + VIS) gShareScroll = gShareSel - VIS + 1;
-                if (gShareScroll < 0) gShareScroll = 0;
-                if (gShareScroll > std::max(0, N - VIS)) gShareScroll = std::max(0, N - VIS);
+                // Scroll by ROW so the focused card is always on-screen.
+                int focusedRow = gShareSel / COLS;
+                int firstVisRow = gShareScroll / COLS;
+                if (focusedRow < firstVisRow)              firstVisRow = focusedRow;
+                if (focusedRow >= firstVisRow + VIS_ROWS)  firstVisRow = focusedRow - VIS_ROWS + 1;
+                if (firstVisRow < 0) firstVisRow = 0;
+                gShareScroll = firstVisRow * COLS;
 
-                for (int i = 0; i < VIS && i + gShareScroll < N; i++) {
-                    int idx = i + gShareScroll;
+                int shSelX = panelX + 8, shSelY = LIST_TOP;
+                bool shSawSel = false;
+                auto fitForCard = [&](const std::string& s, Font f, int maxW) -> std::string {
+                    TTF_Font* fnt = GetFont(f); if (!fnt || s.empty()) return s;
+                    int w=0, h=0; TTF_SizeUTF8(fnt, s.c_str(), &w, &h);
+                    if (w <= maxW) return s;
+                    std::string t = s; t.append("…");
+                    while (!t.empty()) {
+                        size_t ell = t.size() - std::string("…").size();
+                        size_t b = ell;
+                        if (b == 0) break;
+                        b--;
+                        while (b > 0 && ((unsigned char)t[b] & 0xC0) == 0x80) b--;
+                        t.erase(b, ell - b);
+                        TTF_SizeUTF8(fnt, t.c_str(), &w, &h);
+                        if (w <= maxW) return t;
+                    }
+                    return s;
+                };
+                for (int v = 0; v < VIS && v + gShareScroll < N; v++) {
+                    int idx = v + gShareScroll;
                     auto& m = gShareMiis[idx];
-                    int ry = LIST_TOP + i * ROW_H;
+                    int col = v % COLS;
+                    int row = v / COLS;
+                    int cx = panelX + 8 + col * (CARD_W + CARD_GAP);
+                    int cy = LIST_TOP    + row * (CARD_H + CARD_GAP);
                     bool sel = (idx == gShareSel);
-                    FillRect(panelX+8, ry, panelW-16, ROW_H-4, sel?COL_SEL:COL_BG);
-                    DrawRect(panelX+8, ry, panelW-16, ROW_H-4, sel?COL_GOLD:COL_BORDER);
-                    HitAdd(panelX+8, ry, panelW-16, ROW_H-4, TSelMiiStatsMii, idx);
+                    if (sel) { shSelX = cx; shSelY = cy; shSawSel = true; }
 
-                    // Lazy-request thumb when row first becomes visible.
+                    if (sel) DrawShadow(cx, cy, CARD_W, CARD_H, gTheme.cornerRadius);
+                    FillRect(cx, cy, CARD_W, CARD_H, sel ? COL_SEL : COL_PANEL);
+                    DrawRect(cx, cy, CARD_W, CARD_H,
+                             (sel && gTheme.cornerRadius == 0) ? COL_GOLD : COL_BORDER);
+                    HitAdd  (cx, cy, CARD_W, CARD_H, TSelShareMii, idx);
+
+                    // Fetch thumb only when its card is on-screen.
                     if (!m.thumbRequested) ShareRequestThumb(idx);
 
-                    // Thumb
-                    int thumbSize = ROW_H - 12;
-                    int thumbX = panelX + 12;
-                    int thumbY = ry + 6;
-                    FillRect(thumbX, thumbY, thumbSize, thumbSize, COL_PANEL);
+                    // Square thumb, centered. TEXT_RESERVED is the vertical
+                    // budget below the thumb for name + author/likes.
+                    const int TEXT_RESERVED = 56;
+                    int thumbPad  = 8;
+                    int thumbSize = std::min(CARD_W - 2*thumbPad, CARD_H - TEXT_RESERVED);
+                    int thumbX    = cx + (CARD_W - thumbSize) / 2;
+                    int thumbY    = cy + thumbPad;
+                    FillRect(thumbX, thumbY, thumbSize, thumbSize, COL_BG);
                     DrawRect(thumbX, thumbY, thumbSize, thumbSize, COL_BORDER);
                     if (m.thumb) {
                         SDL_Rect dst = { thumbX, thumbY, thumbSize, thumbSize };
                         SDL_RenderCopy(gRen, m.thumb, nullptr, &dst);
                     } else {
-                        DrawTextC("…", thumbX+thumbSize/2, thumbY+thumbSize/2, COL_DIM, Font::Sm);
+                        DrawTextC("…", thumbX + thumbSize/2, thumbY + thumbSize/2,
+                                  COL_DIM, Font::Md);
                     }
-                    // Name + author (clipped with "…" if they overflow the row).
-                    int textX = thumbX + thumbSize + 10;
-                    int textMaxW = (panelX + panelW - 16) - textX - 6;
-                    auto fit = [&](const std::string& s, Font f) -> std::string {
-                        TTF_Font* fnt = GetFont(f); if (!fnt || s.empty()) return s;
-                        int w=0, h=0; TTF_SizeUTF8(fnt, s.c_str(), &w, &h);
-                        if (w <= textMaxW) return s;
-                        // Trim from the end and append an ellipsis until it fits.
-                        std::string t = s; t.append("…");
-                        while (!t.empty()) {
-                            // Drop one UTF-8 char before the trailing "…".
-                            size_t ell = t.size() - std::string("…").size();
-                            // Walk back to the start of the previous UTF-8 sequence.
-                            size_t b = ell;
-                            if (b == 0) break;
-                            b--;
-                            while (b > 0 && ((unsigned char)t[b] & 0xC0) == 0x80) b--;
-                            t.erase(b, ell - b);
-                            TTF_SizeUTF8(fnt, t.c_str(), &w, &h);
-                            if (w <= textMaxW) return t;
-                        }
-                        return s;
-                    };
-                    DrawText(fit(m.name.empty()?"(unnamed)":m.name, Font::Md),
-                             textX, ry+1, sel?COL_GOLD:COL_TEXT, Font::Md);
-                    std::string sub = "by " + (m.author.empty()?"?":m.author);
-                    DrawText(fit(sub, Font::Sm), textX, ry+22, COL_DIM, Font::Sm);
-                    std::string meta = m.platform + (m.platform.empty()?"":"  ·  ")
-                                     + std::to_string(m.likes) + " likes";
-                    DrawText(fit(meta, Font::Sm), textX, ry+38, COL_DIM, Font::Sm);
+
+                    // Two lines under the thumb: name (centered), then
+                    // "by Author" (left) + "N likes" (right) on one row.
+                    int textY    = thumbY + thumbSize + 6;
+                    int textMaxW = CARD_W - 12;
+                    std::string nm = fitForCard(m.name.empty() ? Lang::T("share.unnamed") : m.name,
+                                                Font::Md, textMaxW);
+                    DrawTextC(nm, cx + CARD_W/2, textY + 9,
+                              sel ? COL_GOLD : COL_TEXT, Font::Md);
+
+                    // Right-aligned likes chip — go through the text cache
+                    // so we get its width for the right-edge offset.
+                    std::string likesStr = std::to_string(m.likes) + " " + Lang::T("share.likes");
+                    int likesW = 0, likesH = 0;
+                    SDL_Texture* likesTex = GetTextTexture(likesStr, Font::Sm, COL_ACCENT, likesW, likesH);
+
+                    // Author fills whatever's left of the row, truncated.
+                    const int padX = 8;
+                    int subMaxW = CARD_W - 2*padX - likesW - 6;
+                    if (subMaxW < 24) subMaxW = 24;
+                    std::string sub = fitForCard(Lang::T("share.by") + " " +
+                                                 (m.author.empty()?"?":m.author),
+                                                 Font::Sm, subMaxW);
+                    int subRowY = textY + 30;
+                    int subW = 0, subH = 0;
+                    SDL_Texture* subTex = GetTextTexture(sub, Font::Sm, COL_DIM, subW, subH);
+                    if (subTex) {
+                        SDL_Rect dst{ cx + padX, subRowY - subH/2, subW, subH };
+                        SDL_RenderCopy(gRen, subTex, nullptr, &dst);
+                    }
+                    if (likesTex) {
+                        SDL_Rect dst{ cx + CARD_W - padX - likesW, subRowY - likesH/2,
+                                      likesW, likesH };
+                        SDL_RenderCopy(gRen, likesTex, nullptr, &dst);
+                    }
                 }
-                // Scrollbar
-                if (N > VIS) {
-                    int sbH = LIST_H * VIS / N;
-                    int sbY = LIST_TOP + LIST_H * gShareScroll / N;
+                if (shSawSel) {
+                    RequestHighlight((int)Screen::OnSwitch, /*sub=share browser*/41,
+                                     shSelX, shSelY, CARD_W, CARD_H, gDtSec);
+                    DrawAnimatedHighlight();
+                }
+                // Scrollbar — track total page progress, not visible-only.
+                int rowsTotal = (N + COLS - 1) / COLS;
+                if (rowsTotal > VIS_ROWS) {
+                    int sbH = LIST_H * VIS_ROWS / rowsTotal;
+                    int sbY = LIST_TOP + LIST_H * firstVisRow / rowsTotal;
                     FillRect(panelX+panelW-5, sbY, 3, sbH, COL_BORDER);
                 }
             }
 
             // Footer hint
-            const char* foot = "A  details    X  search    Left/Right  page    ZL/ZR  mii  (target slot)    Y  subtab    B  back";
+            std::string foot = Lang::T("share.footer");
             DrawTextC(foot, panelX+panelW/2, panelTop+panelH-FOOT_H/2-2, COL_DIM, Font::Sm);
 
             // Status banner (transient)
@@ -6122,8 +7040,8 @@ static void DrawMiiStats() {
                 FillRect(dx, dy, dW, 4, COL_GOLD);
 
                 auto& m = gShareMiis[gShareSel];
-                DrawText(m.name.empty()?"(unnamed)":m.name, dx + 16, dy + 14, COL_GOLD, Font::Lg);
-                DrawText("by " + (m.author.empty()?"?":m.author), dx + 16, dy + 44, COL_DIM, Font::Sm);
+                DrawText(m.name.empty()? Lang::T("share.unnamed") :m.name, dx + 16, dy + 14, COL_GOLD, Font::Lg);
+                DrawText(Lang::T("share.by") + " " + (m.author.empty()?"?":m.author), dx + 16, dy + 44, COL_DIM, Font::Sm);
 
                 int imgSize = std::min(dW/2 - 20, dH - 80);
                 int imgX = dx + 16;
@@ -6134,33 +7052,33 @@ static void DrawMiiStats() {
                     SDL_Rect dst = { imgX, imgY, imgSize, imgSize };
                     SDL_RenderCopy(gRen, gShareDetailTex, nullptr, &dst);
                 } else if (!gShareDetailErr.empty()) {
-                    DrawTextC("image failed", imgX+imgSize/2, imgY+imgSize/2, COL_DIM, Font::Sm);
+                    DrawTextC(Lang::T("share.image.failed"), imgX+imgSize/2, imgY+imgSize/2, COL_DIM, Font::Sm);
                 } else {
-                    DrawTextC("loading…", imgX+imgSize/2, imgY+imgSize/2, COL_DIM, Font::Sm);
+                    DrawTextC(Lang::T("loading"), imgX+imgSize/2, imgY+imgSize/2, COL_DIM, Font::Sm);
                 }
 
                 // Info on the right
                 int infoX = dx + imgSize + 36;
                 int infoY = imgY;
-                auto kv = [&](const char* k, const std::string& v){
+                auto kv = [&](const std::string& k, const std::string& v){
                     DrawText(k, infoX, infoY, COL_DIM, Font::Sm);
-                    DrawText(v.empty()?"-":v, infoX + 80, infoY, COL_TEXT, Font::Sm);
+                    DrawText(v.empty()?std::string("-"):v, infoX + 80, infoY, COL_TEXT, Font::Sm);
                     infoY += 22;
                 };
-                kv("platform", m.platform);
-                kv("gender",   m.gender);
-                kv("likes",    std::to_string(m.likes));
-                kv("mii id",   "#" + std::to_string(m.id));
+                kv(Lang::T("share.platform"), m.platform);
+                kv(Lang::T("share.gender"),   m.gender);
+                kv(Lang::T("share.likes"),    std::to_string(m.likes));
+                kv(Lang::T("share.mii.id"),   "#" + std::to_string(m.id));
                 infoY += 12;
-                DrawText("overwrite slot", infoX, infoY, COL_DIM, Font::Sm);
+                DrawText(Lang::T("share.overwrite.slot"), infoX, infoY, COL_DIM, Font::Sm);
                 DrawText(std::to_string(gShareImportSlot), infoX + 110, infoY, COL_GOLD, Font::Md);
                 // Show the name of the Mii currently in that slot so the user
                 // knows exactly who they're about to replace.
                 if (gMiiSav.loaded) {
                     std::string occName = SaveEditor::GetWStr32At(gMiiSav, HASH_MII_NAME, gShareImportSlot - 1);
                     std::string sub = occName.empty()
-                        ? std::string("(slot is empty)")
-                        : "(replaces \"" + occName + "\")";
+                        ? ("(" + Lang::T("share.slot.empty") + ")")
+                        : ("(" + Lang::T("share.replaces") + " \"" + occName + "\")");
                     DrawText(sub, infoX, infoY + 22, COL_DIM, Font::Sm);
                 }
                 // Bottom-right stack: slot stepper → Download → Back.
@@ -6188,10 +7106,10 @@ static void DrawMiiStats() {
 
                     FillRect(labelX, byS, labelW, stepH, {28,28,28,255});
                     DrawRect(labelX, byS, labelW, stepH, COL_BORDER);
-                    std::string slotLabel = "slot " + std::to_string(gShareImportSlot);
+                    std::string slotLabel = Lang::T("share.slot") + " " + std::to_string(gShareImportSlot);
                     if (gMiiSav.loaded) {
                         std::string occ = SaveEditor::GetWStr32At(gMiiSav, HASH_MII_NAME, gShareImportSlot - 1);
-                        if (occ.empty()) slotLabel += "  ·  (empty)";
+                        if (occ.empty()) slotLabel += "  ·  " + Lang::T("empty.paren");
                         else             slotLabel += "  ·  " + occ;
                     }
                     DrawTextC(slotLabel, labelX + labelW/2, byS + stepH/2 - 2, COL_GOLD, Font::Sm);
@@ -6207,13 +7125,13 @@ static void DrawMiiStats() {
                     SDL_Color dlFg = canImport ? COL_BG     : COL_DIM;
                     FillRect(bx, byA, btnW, btnH, dlBg);
                     DrawRect(bx, byA, btnW, btnH, COL_GOLD);
-                    DrawTextC("Download & overwrite (A)", bx + btnW/2, byA + btnH/2 - 2, dlFg, Font::Md);
+                    DrawTextC(Lang::T("share.download.overwrite") + " (A)", bx + btnW/2, byA + btnH/2 - 2, dlFg, Font::Md);
                     if (canImport) HitAdd(bx, byA, btnW, btnH, TShareDoImport, 0);
 
                     // ── Back (B) ────────────────────────────────────────
                     FillRect(bx, byB, btnW, btnH, COL_PANEL);
                     DrawRect(bx, byB, btnW, btnH, COL_BORDER);
-                    DrawTextC("Back (B)", bx + btnW/2, byB + btnH/2 - 2, COL_TEXT, Font::Md);
+                    DrawTextC(Lang::T("back") + " (B)", bx + btnW/2, byB + btnH/2 - 2, COL_TEXT, Font::Md);
                     HitAdd(bx, byB, btnW, btnH, TShareCloseDetail, 0);
                 }
 
@@ -6231,24 +7149,24 @@ static void DrawMiiStats() {
             int cx2 = editX + editW/2;
             int midY2 = panelTop + panelH/2 - 20;
 
-            DrawTextC(fd.label, cx2, midY2-102 - (fd.isStr ? 30 : 0), COL_DIM, Font::Md);
-            DrawTextC(fd.desc, cx2, midY2-76 - (fd.isStr ? 30 : 0), COL_DIM, Font::Sm);
+            DrawTextC(MiiLabelT(fd.label), cx2, midY2-102 - (fd.isStr ? 30 : 0), COL_DIM, Font::Md);
+            DrawTextC(MiiDescT(fd.label),  cx2, midY2-76 - (fd.isStr ? 30 : 0), COL_DIM, Font::Sm);
 
             if (fd.isStr) {
                 std::string val = SaveEditor::GetWStr32At(gMiiSav, SaveEditor::Hash(fd.fieldName), miiSlotIdx);
-                DrawTextC(val.empty()?"(empty)":val, cx2, midY2-70, COL_TEXT, Font::Lg);
+                DrawTextC(val.empty()? Lang::T("empty") :val, cx2, midY2-70, COL_TEXT, Font::Lg);
                 int bw=220, bh=46, bx=cx2-bw/2, by=midY2-20;
                 HitAdd(bx,by,bw,bh, TMiiStatsKbd, 0);
                 FillRect(bx,by,bw,bh,COL_SEL); DrawRect(bx,by,bw,bh,COL_ACCENT);
-                DrawTextC("keyboard", cx2, by+bh/2, COL_ACCENT, Font::Md);
+                DrawTextC(Lang::T("keyboard"), cx2, by+bh/2, COL_ACCENT, Font::Md);
                 {
                     static const uint32_t H_HOW_NAME = SaveEditor::Hash("Mii.Name.HowToCallName");
                     std::string how = SaveEditor::GetWStr64At(gMiiSav, H_HOW_NAME, miiSlotIdx);
-                    DrawTextC(how.empty()?"(same as name)":how.c_str(), cx2, by+bh+16, how.empty()?COL_DIM:COL_TEXT, Font::Sm);
+                    DrawTextC(how.empty()? Lang::T("mii.same.as.name") :how, cx2, by+bh+16, how.empty()?COL_DIM:COL_TEXT, Font::Sm);
                     int pw=220,phh=42,px=cx2-pw/2,py=by+bh+32;
                     HitAdd(px,py,pw,phh,TSimBtn,(int)HidNpadButton_X);
                     FillRect(px,py,pw,phh,COL_SEL); DrawRect(px,py,pw,phh,COL_ACCENT);
-                    DrawTextC("X  edit pronunciation",cx2,py+phh/2,COL_ACCENT,Font::Sm);
+                    DrawTextC("X  " + Lang::T("player.edit.pron"),cx2,py+phh/2,COL_ACCENT,Font::Sm);
                 }
             } else if (fd.isEnum) {
                 uint32_t enumVal = SaveEditor::GetEnumAt(gMiiSav, SaveEditor::Hash(fd.fieldName), miiSlotIdx);
@@ -6258,11 +7176,13 @@ static void DrawMiiStats() {
                 int bxL=cx2-btnGap/2-btnW, bxR=cx2+btnGap/2, btnY=midY2+10;
                 HitAdd(bxL,btnY,btnW,btnH, TSimBtn, (int)HidNpadButton_Left);
                 FillRect(bxL,btnY,btnW,btnH,COL_PANEL); DrawRect(bxL,btnY,btnW,btnH,COL_BORDER);
-                DrawTextC("< Prev", bxL+btnW/2, btnY+btnH/2, COL_DIM);
+                DrawTextC("< " + Lang::T("prev"), bxL+btnW/2, btnY+btnH/2, COL_DIM);
                 HitAdd(bxR,btnY,btnW,btnH, TSimBtn, (int)HidNpadButton_Right);
                 FillRect(bxR,btnY,btnW,btnH,COL_PANEL); DrawRect(bxR,btnY,btnW,btnH,COL_BORDER);
-                DrawTextC("Next >", bxR+btnW/2, btnY+btnH/2, COL_DIM);
-                DrawTextC("Left/Right  cycle mood", cx2, btnY+btnH+14, COL_DIM);
+                DrawTextC(Lang::T("next") + " >", bxR+btnW/2, btnY+btnH/2, COL_DIM);
+                DrawTextC(Lang::T("mii.cycle.mood"), cx2, btnY+btnH+14, COL_DIM);
+                EmitPrevNextHighlight(/*sub=mii stats mood*/120, bxL, bxR, btnY, btnW, btnH);
+                EmitPrevNextHighlight(/*sub=mii mood*/120, bxL, bxR, btnY, btnW, btnH);
             } else {
                 int32_t rawVal = fd.isUInt ? (int32_t)SaveEditor::GetUIntAt(gMiiSav,SaveEditor::Hash(fd.fieldName),miiSlotIdx)
                                            : SaveEditor::GetIntAt(gMiiSav,SaveEditor::Hash(fd.fieldName),miiSlotIdx);
@@ -6273,23 +7193,34 @@ static void DrawMiiStats() {
                 int totalBW2=(3*(bw2+gap2))*2+16;
                 int bx2=cx2-totalBW2/2, by2=midY2+10;
                 int btn2Idx=0;
+                int focBtnX = bx2, focBtnY = by2; bool gotFocBtn = false;
                 for (int s : STEPS2) {
                     bool focused=(gMiiBtnSel==btn2Idx);
+                    if (focused) { focBtnX = bx2; focBtnY = by2; gotFocBtn = true; }
                     HitAdd(bx2,by2,bw2,bh2, TAdjust, -s);
                     FillRect(bx2,by2,bw2,bh2, focused?COL_SEL:COL_PANEL);
-                    DrawRect(bx2,by2,bw2,bh2, focused?COL_GOLD:COL_RED);
+                    DrawRect(bx2,by2,bw2,bh2,
+                             (focused && gTheme.cornerRadius == 0) ? COL_GOLD : COL_RED);
                     DrawTextC("-"+std::to_string(s), bx2+bw2/2, by2+bh2/2, focused?COL_GOLD:COL_RED, Font::Md);
                     bx2+=bw2+gap2; btn2Idx++;
                 }
                 bx2+=16;
                 for (int j=2;j>=0;j--) {
                     bool focused=(gMiiBtnSel==btn2Idx);
+                    if (focused) { focBtnX = bx2; focBtnY = by2; gotFocBtn = true; }
                     int s=STEPS2[j];
                     HitAdd(bx2,by2,bw2,bh2, TAdjust, s);
                     FillRect(bx2,by2,bw2,bh2, focused?COL_SEL:COL_PANEL);
-                    DrawRect(bx2,by2,bw2,bh2, focused?COL_GOLD:COL_GREEN);
+                    DrawRect(bx2,by2,bw2,bh2,
+                             (focused && gTheme.cornerRadius == 0) ? COL_GOLD : COL_GREEN);
                     DrawTextC("+"+std::to_string(s), bx2+bw2/2, by2+bh2/2, focused?COL_GOLD:COL_GREEN, Font::Md);
                     bx2+=bw2+gap2; btn2Idx++;
+                }
+                if (gotFocBtn) {
+                    RequestHighlight((int)Screen::OnSwitch, /*sub=mii stat steppers*/39,
+                                     focBtnX, focBtnY, bw2, bh2, gDtSec,
+                                     /*slot=*/3);
+                    DrawAnimatedHighlight(/*slot=*/3);
                 }
                 // Undo button
                 {
@@ -6298,7 +7229,7 @@ static void DrawMiiStats() {
                     HitAdd(ubX, ubY, ubW, ubH, TUndoMii, 0);
                     FillRect(ubX, ubY, ubW, ubH, COL_PANEL);
                     DrawRect(ubX, ubY, ubW, ubH, canUndo ? COL_GOLD : COL_BORDER);
-                    DrawTextC("Undo", ubX+ubW/2, ubY+ubH/2, canUndo ? COL_GOLD : COL_DIM, Font::Md);
+                    DrawTextC(Lang::T("undo"), ubX+ubW/2, ubY+ubH/2, canUndo ? COL_GOLD : COL_DIM, Font::Md);
                 }
             }
 
@@ -6315,18 +7246,23 @@ static void DrawMiiStats() {
                 int ibY = panelTop + panelH - ibH - 20;
                 SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
                 SDL_RenderDrawLine(gRen, editX+12, ibY-44, editX+editW-12, ibY-44);
-                DrawTextC("Mii file", cx2, ibY-22, COL_DIM, Font::Sm);
+                DrawTextC(Lang::T("mii.file"), cx2, ibY-22, COL_DIM, Font::Sm);
                 bool ltdImp = (gMiiLtdBtnSel == 0);
                 bool ltdExp = (gMiiLtdBtnSel == 1);
                 bool ltdShr = (gMiiLtdBtnSel == 2);
+                int ltdSelX = ibxL, ltdSelY = ibY, ltdSelW = ibW;
+                bool ltdSawSel = false;
+                if (ltdImp) { ltdSelX = ibxL; ltdSelW = ibW;   ltdSawSel = true; }
+                if (ltdExp) { ltdSelX = ibxR; ltdSelW = ibW;   ltdSawSel = true; }
+                if (ltdShr) { ltdSelX = ibxS; ltdSelW = ibSqr; ltdSawSel = true; }
                 HitAdd(ibxL,ibY,ibW,ibH,TOpenImportBrowser,0);
                 FillRect(ibxL,ibY,ibW,ibH,ltdImp?COL_SEL:COL_PANEL);
                 DrawRect(ibxL,ibY,ibW,ibH,COL_ACCENT);
-                DrawTextC("import .ltd",ibxL+ibW/2,ibY+ibH/2,COL_ACCENT,Font::Lg);
+                DrawTextC(Lang::T("mii.import.ltd"),ibxL+ibW/2,ibY+ibH/2,COL_ACCENT,Font::Lg);
                 HitAdd(ibxR,ibY,ibW,ibH,TDoMiiExport,0);
                 FillRect(ibxR,ibY,ibW,ibH,ltdExp?COL_SEL:COL_PANEL);
                 DrawRect(ibxR,ibY,ibW,ibH,COL_GOLD);
-                DrawTextC("export .ltd",ibxR+ibW/2,ibY+ibH/2,COL_GOLD,Font::Lg);
+                DrawTextC(Lang::T("mii.export.ltd"),ibxR+ibW/2,ibY+ibH/2,COL_GOLD,Font::Lg);
                 // Square upload-icon button — opens the TomodachiShare browser
                 // so the user can overwrite the selected slot with a downloaded Mii.
                 // Icon-only: the arrow glyph is sized to fill the box; no text label.
@@ -6356,6 +7292,12 @@ static void DrawMiiStats() {
                         SDL_RenderDrawLine(gRen, gcx,   gcy-gH/2+1+t, gcx+gW/3, gcy-gH/2+1+gW/3+t);
                     }
                 }
+                if (ltdSawSel) {
+                    RequestHighlight((int)Screen::OnSwitch, /*sub=mii ltd buttons*/41,
+                                     ltdSelX, ibY, ltdSelW, ibH, gDtSec,
+                                     /*slot=*/3);
+                    DrawAnimatedHighlight(/*slot=*/3);
+                }
             }
 
             if (!gMiiStatsMsg.empty())
@@ -6365,28 +7307,19 @@ static void DrawMiiStats() {
 
     DrawFooter(
         gMiiStatsSubTab==MiiStatsSubTab::Social
-            ? (gSocialExpanded ? "ZL/ZR  mii    Y  subtab    X  focus view    L/R  tab    B/+  back"
-                               : "ZL/ZR  mii    Y  subtab    X  global graph    L/R  tab    B/+  back")
+            ? Lang::T(gSocialExpanded ? "mii.footer.social.global" : "mii.footer.social.focus")
         : gMiiStatsSubTab==MiiStatsSubTab::Words
-            ? "ZL/ZR  mii    Up/Down  slot    Left/Right  kind    A  text    X  pronunciation    -  undo    Y  subtab    L/R  tab    B/+  back"
+            ? Lang::T("mii.footer.words")
         : gMiiStatsSubTab==MiiStatsSubTab::Relations
-            ? "ZL/ZR  mii    Up/Down  relation    Left/Right  type    Y  subtab    L/R  tab    B/+  back"
+            ? Lang::T("mii.footer.relations")
         : gMiiStatsSubTab==MiiStatsSubTab::Belongings
-            ? (gBlPickerOpen
-                ? "ZL/ZR  item    Up/Down  item    Left/Right  skip 12    A  confirm    B  cancel"
-                : "ZL/ZR  mii    D-pad  navigate    A  pick item    -  cycle color    X  clear    Y  subtab    L/R  tab    B/+  back")
+            ? Lang::T(gBlPickerOpen ? "mii.footer.bl.picker" : "mii.footer.bl")
         : gMiiStatsSubTab==MiiStatsSubTab::Housing
-            ? (gHousingPicked >= 0
-                ? "D-pad  navigate    A  drop / pick    -  evict picked    B  cancel pick    L/R  tab"
-                : "D-pad  navigate    A  pick mii / drop    Y  subtab    L/R  tab    B/+  back")
+            ? Lang::T(gHousingPicked >= 0 ? "mii.footer.housing.picked" : "mii.footer.housing.idle")
         : gMiiStatsSubTab==MiiStatsSubTab::Browse
-            ? (gShareDetailOpen
-                ? "ZL/ZR  mii  (target slot)    A  download & overwrite    B  back to list"
-                : "Up/Down  mii    Left/Right  page    ZL/ZR  mii  (target slot)    A  details    X  search    -  sort    B/Y  back")
-        : (gMiiStatsFieldSel==0
-            ? "ZL/ZR  mii    Up/Down  field    Left/Right  select    A  confirm    X  pronunciation    Y  subtab    L/R  tab    B/+  back"
-            : "ZL/ZR  mii    Up/Down  field    Left/Right  value    X  undo    Y  subtab    L/R  tab    B/+  back"));
-    SDL_RenderPresent(gRen);
+            ? Lang::T(gShareDetailOpen ? "mii.footer.browse.detail" : "mii.footer.browse")
+        : Lang::T(gMiiStatsFieldSel==0 ? "mii.footer.stats.name" : "mii.footer.stats.value"));
+    Present();
 }
 
 static void DrawAppletWarning() {
@@ -6400,20 +7333,20 @@ static void DrawAppletWarning() {
     DrawRect(mx, my, mW, mH, COL_GOLD);
     FillRect(mx, my, mW, 4, COL_GOLD);
 
-    DrawTextC("Applet Mode Not Supported", SCREEN_W/2, my + 36, COL_GOLD, Font::Lg);
+    DrawTextC(Lang::T("applet.title"), SCREEN_W/2, my + 36, COL_GOLD, Font::Lg);
 
     SDL_SetRenderDrawColor(gRen, COL_BORDER.r, COL_BORDER.g, COL_BORDER.b, 100);
     SDL_RenderDrawLine(gRen, mx + 24, my + 60, mx + mW - 24, my + 60);
 
-    DrawTextC("TomoToolNX requires full system resources and cannot",
+    DrawTextC(Lang::T("applet.body.l1"),
               SCREEN_W/2, my + 84, COL_TEXT, Font::Sm);
-    DrawTextC("run from Applet mode (R + Album).",
+    DrawTextC(Lang::T("applet.body.l2"),
               SCREEN_W/2, my + 106, COL_TEXT, Font::Sm);
 
     SDL_SetRenderDrawColor(gRen, COL_BORDER.r, COL_BORDER.g, COL_BORDER.b, 100);
     SDL_RenderDrawLine(gRen, mx + 24, my + 130, mx + mW - 24, my + 130);
 
-    DrawTextC("How to launch correctly", SCREEN_W/2, my + 154, COL_ACCENT, Font::Md);
+    DrawTextC(Lang::T("applet.how"), SCREEN_W/2, my + 154, COL_ACCENT, Font::Md);
 
     // Step boxes
     const int sW = 320, sH = 72, sGap = 20;
@@ -6423,25 +7356,25 @@ static void DrawAppletWarning() {
 
     FillRect(sxL, sY, sW, sH, {20, 28, 20, 255});
     DrawRect(sxL, sY, sW, sH, COL_RED);
-    DrawTextC("Wrong way", sxL + sW/2, sY + 18, COL_RED, Font::Sm);
-    DrawTextC("open Album", sxL + sW/2, sY + 44, COL_DIM, Font::Sm);
+    DrawTextC(Lang::T("applet.wrong"), sxL + sW/2, sY + 18, COL_RED, Font::Sm);
+    DrawTextC(Lang::T("applet.wrong.hint"), sxL + sW/2, sY + 44, COL_DIM, Font::Sm);
 
     FillRect(sxR, sY, sW, sH, {16, 28, 16, 255});
     DrawRect(sxR, sY, sW, sH, COL_GREEN);
-    DrawTextC("Correct way", sxR + sW/2, sY + 18, COL_GREEN, Font::Sm);
-    DrawTextC("Hold R  +  open any game", sxR + sW/2, sY + 44, COL_TEXT, Font::Sm);
+    DrawTextC(Lang::T("applet.right"), sxR + sW/2, sY + 18, COL_GREEN, Font::Sm);
+    DrawTextC(Lang::T("applet.right.hint"), sxR + sW/2, sY + 44, COL_TEXT, Font::Sm);
 
-    DrawTextC("The game will not launch — the homebrew menu will open instead.",
+    DrawTextC(Lang::T("applet.note"),
               SCREEN_W/2, sY + sH + 26, COL_DIM, Font::Sm);
 
     const int btnW = 180, btnH = 44;
     int bx = SCREEN_W/2 - btnW/2, by = my + mH - 66;
     FillRect(bx, by, btnW, btnH, COL_PANEL);
     DrawRect(bx, by, btnW, btnH, COL_BORDER);
-    DrawTextC("+ / B  Exit", SCREEN_W/2, by + btnH/2, COL_DIM, Font::Md);
+    DrawTextC(Lang::T("applet.exit"), SCREEN_W/2, by + btnH/2, COL_DIM, Font::Md);
 
-    DrawFooter("B / +  exit app");
-    SDL_RenderPresent(gRen);
+    DrawFooter(Lang::T("applet.footer"));
+    Present();
 }
 
 static void DrawSaveWarning() {
@@ -6452,9 +7385,9 @@ static void DrawSaveWarning() {
     int mx = (SCREEN_W - mW) / 2, my = (SCREEN_H - mH) / 2;
     FillRect(mx, my, mW, mH, {30, 18, 18, 255});
     DrawRect(mx, my, mW, mH, COL_RED);
-    DrawTextC("Warning", SCREEN_W/2, my+28, COL_RED, Font::Lg);
-    DrawTextC("Modifying these values can break your game.", SCREEN_W/2, my+84, COL_TEXT, Font::Md);
-    DrawTextC("Make a backup in the Backup tab before editing.", SCREEN_W/2, my+114, COL_DIM, Font::Sm);
+    DrawTextC(Lang::T("warn.title"), SCREEN_W/2, my+28, COL_RED, Font::Lg);
+    DrawTextC(Lang::T("warn.body.l1"), SCREEN_W/2, my+84, COL_TEXT, Font::Md);
+    DrawTextC(Lang::T("warn.body.l2"), SCREEN_W/2, my+114, COL_DIM, Font::Sm);
     const int btnW = 200, btnH = 44;
     int bx = SCREEN_W/2 - btnW/2, by = my + mH - 60;
     bool wReady = (gSaveWarningCountdown <= 0);
@@ -6462,10 +7395,11 @@ static void DrawSaveWarning() {
     FillRect(bx, by, btnW, btnH, COL_SEL);
     DrawRect(bx, by, btnW, btnH, wReady ? COL_ACCENT : COL_BORDER);
     int wSecs = (gSaveWarningCountdown + 59) / 60;
-    std::string wLabel = wReady ? "I understand" : ("I understand  (" + std::to_string(wSecs) + ")");
+    std::string wLabel = wReady ? Lang::T("warn.understand")
+                                : (Lang::T("warn.understand") + "  (" + std::to_string(wSecs) + ")");
     DrawTextC(wLabel, SCREEN_W/2, by + btnH/2, wReady ? COL_ACCENT : COL_DIM, Font::Md);
-    DrawFooter(wReady ? "A  I understand" : "");
-    SDL_RenderPresent(gRen);
+    DrawFooter(wReady ? "A  " + Lang::T("warn.understand") : std::string(""));
+    Present();
 }
 
 static void TAckBackYes(int) {
@@ -6531,13 +7465,13 @@ static void DrawThumbTip() {
     FillRect(mx, my, mW, mH, {18, 22, 18, 255});
     DrawRect(mx, my, mW, mH, COL_GOLD);
 
-    DrawTextC("About inventory thumbnails", SCREEN_W/2, my + 32, COL_GOLD, Font::Lg);
+    DrawTextC(Lang::T("thumbtip.title"), SCREEN_W/2, my + 32, COL_GOLD, Font::Lg);
 
-    DrawTextC("Your texture was imported, but the inventory thumbnail", SCREEN_W/2, my + 88, COL_TEXT, Font::Md);
-    DrawTextC("is managed by the game itself and won't update on its own.", SCREEN_W/2, my + 114, COL_TEXT, Font::Md);
-    DrawTextC("To refresh it: open this item in Studio Workshop,", SCREEN_W/2, my + 152, COL_DIM, Font::Md);
-    DrawTextC("enter its texture editor, and re-save — the game", SCREEN_W/2, my + 176, COL_DIM, Font::Md);
-    DrawTextC("will automatically rebuild the thumbnail.", SCREEN_W/2, my + 200, COL_DIM, Font::Md);
+    DrawTextC(Lang::T("thumbtip.l1"), SCREEN_W/2, my + 88,  COL_TEXT, Font::Md);
+    DrawTextC(Lang::T("thumbtip.l2"), SCREEN_W/2, my + 114, COL_TEXT, Font::Md);
+    DrawTextC(Lang::T("thumbtip.l3"), SCREEN_W/2, my + 152, COL_DIM,  Font::Md);
+    DrawTextC(Lang::T("thumbtip.l4"), SCREEN_W/2, my + 176, COL_DIM,  Font::Md);
+    DrawTextC(Lang::T("thumbtip.l5"), SCREEN_W/2, my + 200, COL_DIM,  Font::Md);
 
     const int btnW = 220, btnH = 44;
     int bx = SCREEN_W/2 - btnW/2, by = my + mH - 62;
@@ -6548,9 +7482,10 @@ static void DrawThumbTip() {
     FillRect(bx, by, btnW, btnH, COL_PANEL);
     DrawRect(bx, by, btnW, btnH, btnBorder);
     int secs = (gThumbTipCountdown + 59) / 60;
-    std::string label = ready ? "Got it" : ("Got it  (" + std::to_string(secs) + ")");
+    std::string label = ready ? Lang::T("thumbtip.gotit")
+                              : (Lang::T("thumbtip.gotit") + "  (" + std::to_string(secs) + ")");
     DrawTextC(label, SCREEN_W/2, by + btnH/2, btnText, Font::Md);
-    SDL_RenderPresent(gRen);
+    Present();
 }
 
 // ── Background-removal modal ───────────────────────────────────────────────
@@ -6566,29 +7501,29 @@ static void DrawBgRemovePrompt() {
     int mx = (SCREEN_W - mW) / 2, my = (SCREEN_H - mH) / 2;
     FillRect(mx, my, mW, mH, {18, 22, 30, 255});
     DrawRect(mx, my, mW, mH, COL_ACCENT);
-    DrawTextC("Remove Background?", SCREEN_W/2, my + 36, COL_ACCENT, Font::Lg);
-    DrawTextC("The selected texture will be modified in-place.", SCREEN_W/2, my + 88, COL_TEXT, Font::Md);
-    DrawTextC("This may take up to 30 seconds.", SCREEN_W/2, my + 114, COL_DIM, Font::Sm);
+    DrawTextC(Lang::T("bg.title"), SCREEN_W/2, my + 36, COL_ACCENT, Font::Lg);
+    DrawTextC(Lang::T("bg.body.l1"), SCREEN_W/2, my + 88, COL_TEXT, Font::Md);
+    DrawTextC(Lang::T("bg.body.l2"), SCREEN_W/2, my + 114, COL_DIM, Font::Sm);
     const int bW = 180, bH = 46, gap = 28;
     int by2 = my + mH - 62;
     HitAdd(mx + mW/2 - bW - gap/2, by2, bW, bH, TConfirmBgRemove, 0);
     FillRect(mx + mW/2 - bW - gap/2, by2, bW, bH, COL_SEL);
     DrawRect(mx + mW/2 - bW - gap/2, by2, bW, bH, COL_ACCENT);
-    DrawTextC("A  Confirm", mx + mW/2 - gap/2 - bW/2, by2 + bH/2, COL_ACCENT, Font::Md);
+    DrawTextC("A  " + Lang::T("confirm"), mx + mW/2 - gap/2 - bW/2, by2 + bH/2, COL_ACCENT, Font::Md);
     HitAdd(mx + mW/2 + gap/2, by2, bW, bH, TCancelBgRemove, 0);
     FillRect(mx + mW/2 + gap/2, by2, bW, bH, COL_SEL);
     DrawRect(mx + mW/2 + gap/2, by2, bW, bH, {90,140,200,255});
-    DrawTextC("B  Cancel", mx + mW/2 + gap/2 + bW/2, by2 + bH/2, {90,140,200,255}, Font::Md);
-    DrawFooter("A  confirm    B  cancel");
-    SDL_RenderPresent(gRen);
+    DrawTextC("B  " + Lang::T("cancel"), mx + mW/2 + gap/2 + bW/2, by2 + bH/2, {90,140,200,255}, Font::Md);
+    DrawFooter("A  " + Lang::T("confirm") + "    B  " + Lang::T("cancel"));
+    Present();
 }
 
 static void DrawBgRemoving() {
     SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
     SDL_RenderClear(gRen);
-    DrawTextC("Removing background...", SCREEN_W/2, SCREEN_H/2 - 18, COL_ACCENT, Font::Lg);
-    DrawTextC("This may take up to 30 seconds.", SCREEN_W/2, SCREEN_H/2 + 22, COL_DIM, Font::Md);
-    SDL_RenderPresent(gRen);
+    DrawTextC(Lang::T("bg.removing"), SCREEN_W/2, SCREEN_H/2 - 18, COL_ACCENT, Font::Lg);
+    DrawTextC(Lang::T("bg.body.l2"), SCREEN_W/2, SCREEN_H/2 + 22, COL_DIM, Font::Md);
+    Present();
 }
 
 struct BgAnimState { int frame = 0; };
@@ -6599,7 +7534,7 @@ static void OnBgRemoveProgress(int done, int total, void* ud) {
     s->frame++;
     SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
     SDL_RenderClear(gRen);
-    DrawTextC("Removing background...", SCREEN_W/2, SCREEN_H/2 - 60, COL_ACCENT, Font::Lg);
+    DrawTextC(Lang::T("bg.removing"), SCREEN_W/2, SCREEN_H/2 - 60, COL_ACCENT, Font::Lg);
     // Spinner
     char spin[2] = {kSpinner[s->frame % 4], '\0'};
     DrawTextC(spin, SCREEN_W/2, SCREEN_H/2 - 10, {90,140,200,255}, Font::Lg);
@@ -6610,8 +7545,8 @@ static void OnBgRemoveProgress(int done, int total, void* ud) {
     FillRect(barX, barY, barW, barH, COL_PANEL);
     DrawRect(barX, barY, barW, barH, COL_BORDER);
     if (pct > 0.f) FillRect(barX+1, barY+1, (int)((barW-2)*pct), barH-2, {90,140,200,255});
-    DrawTextC("This may take up to 30 seconds.", SCREEN_W/2, SCREEN_H/2 + 52, COL_DIM, Font::Md);
-    SDL_RenderPresent(gRen);
+    DrawTextC(Lang::T("bg.body.l2"), SCREEN_W/2, SCREEN_H/2 + 52, COL_DIM, Font::Md);
+    Present();
 }
 
 static void TConfirmBgRemove(int) {
@@ -6662,13 +7597,17 @@ static void DrawBackPrompt() {
     int mx=(SCREEN_W-mW)/2, my=(SCREEN_H-mH)/2;
     FillRect(mx, my, mW, mH, {20,24,20,255});
     DrawRect(mx, my, mW, mH, COL_GOLD);
-    DrawTextC("Save changes?", SCREEN_W/2, my+28, COL_GOLD, Font::Lg);
-    DrawTextC("Unsaved edits will be lost if you choose No.", SCREEN_W/2, my+70, COL_DIM, Font::Sm);
+    DrawTextC(Lang::T("backprompt.title"), SCREEN_W/2, my+28, COL_GOLD, Font::Lg);
+    DrawTextC(Lang::T("backprompt.body"), SCREEN_W/2, my+70, COL_DIM, Font::Sm);
     const int bW=180, bH=48, gap=30, bOff=90;
-    const char* yesLbl = gBackPromptToUserPick ? "A  Save & Back" : "A  Save & Exit";
-    const char* noLbl  = gBackPromptToUserPick ? "B  Discard & Back" : "B  Discard & Exit";
-    const char* footer = gBackPromptToUserPick ? "A  save & back    B  discard & back    X  cancel"
-                                               : "A  save & exit    B  discard & exit    X  cancel";
+    std::string yesS = "A  " + Lang::T(gBackPromptToUserPick ? "backprompt.save.back" : "backprompt.save.exit");
+    std::string noS  = "B  " + Lang::T(gBackPromptToUserPick ? "backprompt.discard.back" : "backprompt.discard.exit");
+    std::string footerS = gBackPromptToUserPick
+        ? Lang::T("backprompt.footer.back")
+        : Lang::T("backprompt.footer.exit");
+    const char* yesLbl = yesS.c_str();
+    const char* noLbl  = noS.c_str();
+    const char* footer = footerS.c_str();
     HitAdd(mx+mW/2-bW-gap/2, my+mH-bOff, bW, bH, TAckBackYes, 0);
     FillRect(mx+mW/2-bW-gap/2, my+mH-bOff, bW, bH, COL_SEL);
     DrawRect(mx+mW/2-bW-gap/2, my+mH-bOff, bW, bH, COL_GREEN);
@@ -6678,7 +7617,7 @@ static void DrawBackPrompt() {
     DrawRect(mx+mW/2+gap/2, my+mH-bOff, bW, bH, COL_RED);
     DrawTextC(noLbl, mx+mW/2+gap/2+bW/2, my+mH-bOff+bH/2, COL_RED, Font::Md);
     DrawFooter(footer);
-    SDL_RenderPresent(gRen);
+    Present();
 }
 static void TUndoPlayer(int) {
     if (!gPlayerUndoValid[gPlayerFieldSel]) return;
@@ -6767,10 +7706,10 @@ static void DrawError() {
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b, 255);
     SDL_RenderClear(gRen);
     DrawHeader("");
-    DrawTextC("error", SCREEN_W/2, SCREEN_H/2-20, COL_RED, Font::Lg);
+    DrawTextC(Lang::T("error.title"), SCREEN_W/2, SCREEN_H/2-20, COL_RED, Font::Lg);
     DrawTextC(gError,  SCREEN_W/2, SCREEN_H/2+16, COL_DIM);
-    DrawFooter("+  quit");
-    SDL_RenderPresent(gRen);
+    DrawFooter(Lang::T("footer.quit"));
+    Present();
 }
 
 // ─── Touch input ──────────────────────────────────────────────────────────────
@@ -6979,6 +7918,7 @@ int main(int,char**) {
     gRen=SDL_CreateRenderer(win,-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
     SDL_SetRenderDrawBlendMode(gRen,SDL_BLENDMODE_BLEND);
     FontInit();
+    Audio::Init();
 
     padConfigureInput(1,HidNpadStyleSet_NpadStandard);
     padInitializeDefault(&gPad);
@@ -6993,6 +7933,10 @@ int main(int,char**) {
     rename("/switch/TomoToolNX/__exports_tmp__", "/switch/TomoToolNX/Exports");
     mkdir("/switch/TomoToolNX/Exports", 0777);
     LoadConfig();
+    // LoadConfig may have picked a non-Latin language (saved config or system
+    // language detection on first launch). Reload glyphs so ru/zh actually
+    // render — FontInit ran before the language was known.
+    FontReload(Lang::Current());
     mkdir(gExportPath.c_str(), 0777);
     MtpServer::SetLogCallback([](const std::string& msg, bool ok){
         if (ok) LogOK(msg); else LogERR(msg);
@@ -7036,10 +7980,35 @@ int main(int,char**) {
 
     bool running = true; (void)running;
 
+    gLastTickMs = SDL_GetTicks();
+    Screen      gPrevScreen = gScreen;
+    // Overlay open-state snapshots so the fade fires on false→true.
+    bool prevShowBackPrompt   = gShowBackPrompt;
+    bool prevShowFileBrowser  = gShowFileBrowser;
+    bool prevShowRestorePicker= gShowRestorePicker;
+
     while (appletMainLoop()) {
+        // Per-frame timing for animations.
+        Uint32 nowMs = SDL_GetTicks();
+        gDtSec = (nowMs - gLastTickMs) / 1000.f;
+        if (gDtSec > 0.1f) gDtSec = 0.1f;          // clamp huge stalls (mount, etc.)
+        gLastTickMs = nowMs;
+        gElapsedSec += gDtSec;
+        gTextCacheFrame++;  // advances the LRU clock for the text-texture cache
+        gFade.Step(gDtSec);
+        // Fade on screen change or any modal overlay opening.
+        if (gScreen != gPrevScreen) { gFade.Begin(); gPrevScreen = gScreen; }
+        if (gShowBackPrompt    && !prevShowBackPrompt)    gFade.Begin();
+        if (gShowFileBrowser   && !prevShowFileBrowser)   gFade.Begin();
+        if (gShowRestorePicker && !prevShowRestorePicker) gFade.Begin();
+        prevShowBackPrompt    = gShowBackPrompt;
+        prevShowFileBrowser   = gShowFileBrowser;
+        prevShowRestorePicker = gShowRestorePicker;
+
         padUpdate(&gPad);
         u64 kDown=padGetButtonsDown(&gPad);
         u64 kHeld=padGetButtons(&gPad);
+
         {
             SDL_Event ev;
             while (SDL_PollEvent(&ev)) {
@@ -7073,7 +8042,31 @@ int main(int,char**) {
 
         kDown |= gSimKDown;
         gSimKDown = 0;
+        gFrameKDown = kDown;   // expose to render code (prev/next click feedback)
         u64 kNav = NavRepeat(kDown, kHeld);
+
+        // UI sound dispatch. Nav for movement / tab cycling, click for actions.
+        // Y is a sub-tab cycle on the Mii editor, so override it to nav there.
+        const bool yIsNav = (gScreen == Screen::OnSwitch &&
+                             gOnSwitchMode == OnSwitchMode::MiiStats);
+
+        constexpr u64 NAV_REPEAT_MASK =
+            HidNpadButton_Up    | HidNpadButton_Down  | HidNpadButton_Left  | HidNpadButton_Right
+            | HidNpadButton_StickLUp   | HidNpadButton_StickLDown
+            | HidNpadButton_StickLLeft | HidNpadButton_StickLRight
+            | HidNpadButton_StickRUp   | HidNpadButton_StickRDown
+            | HidNpadButton_StickRLeft | HidNpadButton_StickRRight
+            | HidNpadButton_ZL | HidNpadButton_ZR;
+        u64 navEdgeMask = HidNpadButton_L | HidNpadButton_R;
+        if (yIsNav) navEdgeMask |= HidNpadButton_Y;
+
+        constexpr u64 CLICK_BASE_MASK =
+            HidNpadButton_A | HidNpadButton_B | HidNpadButton_X
+            | HidNpadButton_Minus | HidNpadButton_Plus;
+        u64 clickMask = CLICK_BASE_MASK | (yIsNav ? 0 : HidNpadButton_Y);
+
+        if ((kNav & NAV_REPEAT_MASK) || (kDown & navEdgeMask)) Audio::Play(Audio::SfxNav);
+        if (kDown & clickMask)                                  Audio::Play(Audio::SfxClick);
 
         switch (gScreen) {
 
@@ -7164,9 +8157,9 @@ int main(int,char**) {
                                 } else {
                                     SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
                                     SDL_RenderClear(gRen);
-                                    DrawTextC("Restoring backup...", SCREEN_W/2, SCREEN_H/2 - 18, COL_ACCENT, Font::Lg);
-                                    DrawTextC("Please wait.", SCREEN_W/2, SCREEN_H/2 + 22, COL_DIM, Font::Md);
-                                    SDL_RenderPresent(gRen);
+                                    DrawTextC(Lang::T("restore.progress.title"), SCREEN_W/2, SCREEN_H/2 - 18, COL_ACCENT, Font::Lg);
+                                    DrawTextC(Lang::T("restore.progress.wait"), SCREEN_W/2, SCREEN_H/2 + 22, COL_DIM, Font::Md);
+                                    Present();
                                     std::string rerr = BackupService::RestoreBackup(gRestoreList[gRestoreSel], "tomodata:/");
                                     SaveMount::Commit();
                                     SaveMount::Unmount();
@@ -7234,12 +8227,14 @@ int main(int,char**) {
                 }
                 if (kDown&HidNpadButton_X) { gShowFileBrowser = false; }
             } else {
-                if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))
+                if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp)) {
                     gSettingsSel = std::max(0, gSettingsSel - 1);
-                if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
-                    gSettingsSel = std::min(3, gSettingsSel + 1);
+                }
+                if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown)) {
+                    gSettingsSel = std::min(4, gSettingsSel + 1);
+                }
                 // Row mapping: 0 = Language, 1 = Export Path, 2 = Max Backups,
-                //              3 = Restore Backup.
+                //              3 = Restore Backup, 4 = Theme.
                 if (gSettingsSel == 3 && kDown&HidNpadButton_A) {
                     gRestoreList        = BackupService::ListBackups();
                     gRestoreSel         = 0;
@@ -7278,6 +8273,25 @@ int main(int,char**) {
                             if (left)            next = (curIdx > 0) ? curIdx - 1 : (int)avail.size() - 1;
                             else if (right || a) next = (curIdx + 1 < (int)avail.size()) ? curIdx + 1 : 0;
                             Lang::SetCurrent(avail[next].code);
+                            FontReload(Lang::Current());
+                            SaveConfig();
+                        }
+                    }
+                }
+                if (gSettingsSel == 4) {
+                    bool left  = kNav&(HidNpadButton_Left |HidNpadButton_StickLLeft |HidNpadButton_StickRLeft);
+                    bool right = kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight);
+                    bool a     = kDown&HidNpadButton_A;
+                    if (left || right || a) {
+                        const auto& avail = ThemeNS::Available();
+                        if (!avail.empty()) {
+                            int curIdx = 0;
+                            for (int ti = 0; ti < (int)avail.size(); ti++)
+                                if (avail[ti].code == ThemeNS::Current()) { curIdx = ti; break; }
+                            int next = curIdx;
+                            if (left)            next = (curIdx > 0) ? curIdx - 1 : (int)avail.size() - 1;
+                            else if (right || a) next = (curIdx + 1 < (int)avail.size()) ? curIdx + 1 : 0;
+                            ThemeNS::SetCurrent(avail[next].code);
                             SaveConfig();
                         }
                     }
@@ -8048,10 +9062,18 @@ int main(int,char**) {
                         }
                     } else {
                         if (N > 0) {
+                            // Up/Down jumps a row, Left/Right walks one card.
+                            // Clamps at edges so the page-nav handler below
+                            // can pick up the same press to flip pages.
+                            constexpr int SHARE_COLS = 3;
                             if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))
-                                gShareSel = (gShareSel > 0) ? gShareSel - 1 : N - 1;
+                                gShareSel = std::max(0, gShareSel - SHARE_COLS);
                             if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
-                                gShareSel = (gShareSel + 1 < N) ? gShareSel + 1 : 0;
+                                gShareSel = std::min(N - 1, gShareSel + SHARE_COLS);
+                            if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))
+                                if (gShareSel > 0)     gShareSel--;
+                            if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight))
+                                if (gShareSel < N - 1) gShareSel++;
                         }
                         // ZL/ZR moves selection in YOUR mii list on the left.
                         // The overwrite target follows that selection — so picking
@@ -8418,13 +9440,18 @@ int main(int,char**) {
                             gShareSort = (gShareSort + 1) % 3;
                             gSharePage = 1; ShareLoadPage();
                         }
-                        // Left/Right = change page (ZL/ZR is reserved for cycling the
-                        // selected Mii slot in the list on the left, like other sub-tabs).
+                        // Left/Right at the EDGE of the current grid flips
+                        // pages. Inside the grid the same input walks card by
+                        // card (handled above). ZL/ZR stays reserved for the
+                        // overwrite-slot cycle on the left list.
                         if (!gShareListLoading) {
+                            int N2 = (int)gShareMiis.size();
                             bool left  = kNav & (HidNpadButton_Left  | HidNpadButton_StickLLeft  | HidNpadButton_StickRLeft);
                             bool right = kNav & (HidNpadButton_Right | HidNpadButton_StickLRight | HidNpadButton_StickRRight);
-                            if (left  && gSharePage > 1)              { gSharePage--; ShareLoadPage(); }
-                            if (right && gSharePage < gShareLastPage) { gSharePage++; ShareLoadPage(); }
+                            bool atFirst = (N2 == 0 || gShareSel == 0);
+                            bool atLast  = (N2 == 0 || gShareSel == N2 - 1);
+                            if (left  && atFirst && gSharePage > 1)              { gSharePage--; ShareLoadPage(); }
+                            if (right && atLast  && gSharePage < gShareLastPage) { gSharePage++; ShareLoadPage(); }
                         }
                         // B from the Browse list goes back to Stats (Browse isn't in the
                         // pill bar, so this gives users a one-press exit). Swallow B so
@@ -8881,9 +9908,9 @@ int main(int,char**) {
         case Screen::SaveFeedback: {
             SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
             SDL_RenderClear(gRen);
-            DrawTextC("Saved!", SCREEN_W/2, SCREEN_H/2 - 20, COL_GREEN, Font::Lg);
-            DrawTextC("Changes saved successfully.", SCREEN_W/2, SCREEN_H/2 + 28, COL_DIM, Font::Md);
-            SDL_RenderPresent(gRen);
+            DrawTextC(Lang::T("save.feedback.title"), SCREEN_W/2, SCREEN_H/2 - 20, COL_GREEN, Font::Lg);
+            DrawTextC(Lang::T("save.feedback.body"), SCREEN_W/2, SCREEN_H/2 + 28, COL_DIM, Font::Md);
+            Present();
             if (--gSaveFeedbackFrames <= 0) {
                 if (gSaveFeedbackQuit) gQuitApp = true;
                 else gScreen = Screen::UserPick;
@@ -8908,6 +9935,7 @@ int main(int,char**) {
     Updater::Cleanup();
     for (auto tex : gAvatarTextures) if (tex) SDL_DestroyTexture(tex);
     gAvatarTextures.clear();
+    Audio::Quit();
     FontQuit();
     nifmExit();
     socketExit();

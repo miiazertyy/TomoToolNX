@@ -43,8 +43,10 @@ Instructions at the bottom of the README.
 Install the required portlibs via `dkp-pacman` (run inside the MSYS2 devkitPro shell):
 
 ```sh
-dkp-pacman -S switch-sdl2 switch-sdl2_image switch-sdl2_ttf switch-freetype switch-harfbuzz switch-zstd switch-curl switch-mbedtls
+dkp-pacman -S switch-sdl2 switch-sdl2_image switch-sdl2_ttf switch-sdl2_mixer switch-mpg123 switch-freetype switch-harfbuzz switch-zstd switch-curl switch-mbedtls
 ```
+
+`switch-sdl2_mixer` (+ `switch-mpg123` for the MP3 backend) is used for the on-Switch UI click / nav sound effects. `dkp-pacman` will pull in the transitive deps (`libogg`, `libvorbisidec`, `libopus`, `opusfile`, `libmodplug`, `flac`) automatically.
 
 ## Build
 
