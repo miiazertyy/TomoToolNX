@@ -2290,10 +2290,22 @@ function drawSocialCanvas(d, cv) {
     ctx.fillText('no relationships', W/2, H/2); return;
   }
   const cx=W/2, cy=H/2, n=edges.length;
-  // Adaptive node size
-  const nW=n<=6?94:n<=12?80:n<=22?68:n<=38?56:46;
-  const nH=n<=12?44:n<=26?36:28;
   const cnW=120, cnH=38;
+  // Pick the largest node size whose total ring capacity covers all n edges.
+  // Tiers descend from spacious to compact; final tier is small enough to fit
+  // the full island roster (up to 69 connections) on any canvas size.
+  const tiers=[[94,44],[80,44],[68,36],[56,36],[46,28],[40,24],[34,22],[30,20],[26,18]];
+  let nW=tiers[tiers.length-1][0], nH=tiers[tiers.length-1][1];
+  for(const [tW,tH] of tiers){
+    let cap=0, Rt=Math.max(cnW/2+tW/2+16, 80);
+    const mR=Math.min(W/2-tW/2-6, H/2-tH/2-6);
+    while(cap<n && Rt<=mR){
+      const s=(tW+8)/(2*Rt);
+      cap += s>=1?1:Math.max(1,Math.floor(Math.PI/Math.asin(s)));
+      Rt += tH+10;
+    }
+    if(cap>=n){nW=tW; nH=tH; break;}
+  }
   // Build concentric rings inner→outer
   const maxR=Math.min(W/2-nW/2-6, H/2-nH/2-6);
   let Rcur=Math.max(cnW/2+nW/2+16, 80);
@@ -5733,18 +5745,26 @@ function renderMiiSocial(){
   const hName=H('Mii.Name.Name');
   const centerName=getWStr32At(e,hName,slot)||'?';
   const pc=arrSize(e,H_IA);
-  const edges=[];
+  // Dedupe by partner slot: the relationship array can contain stale/historical
+  // pair entries for the same other-mii. Keep the entry with the strongest meter
+  // (or, on tie, the first seen) so the social view reflects current state and
+  // n never exceeds the island roster.
+  const byOther=new Map();
   for(let i=0;i<pc;i++){
     const a=getIntAt(e,H_IA,i),b=getIntAt(e,H_IB,i);
     if(a<0||b<0)continue;
     if(a!==slot&&b!==slot)continue;
+    if(a===b)continue;
     const selfA=(a===slot),other=selfA?b:a;
     const outIdx=selfA?i*2:i*2+1,inIdx=selfA?i*2+1:i*2;
     const outT=getAnyEnumAt(e,H_BASE,outIdx),outM=getIntAt(e,H_METER,outIdx);
     const inT=getAnyEnumAt(e,H_BASE,inIdx),inM=getIntAt(e,H_METER,inIdx);
     const oName=getWStr32At(e,hName,other)||'?';
-    edges.push({slot:other+1,name:oName,outType:relLabel(outT),outMeter:outM,inType:relLabel(inT),inMeter:inM,color:relColor(outT)});
+    const ed={slot:other+1,name:oName,outType:relLabel(outT),outMeter:outM,inType:relLabel(inT),inMeter:inM,color:relColor(outT)};
+    const prev=byOther.get(other);
+    if(!prev||(outM|0)>(prev.outMeter|0))byOther.set(other,ed);
   }
+  const edges=[...byOther.values()];
   // Sort by type for visual grouping (same type = same color cluster)
   edges.sort((a,b)=>a.outType<b.outType?-1:a.outType>b.outType?1:0);
   // Build legend from unique type+color pairs

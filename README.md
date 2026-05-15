@@ -9,6 +9,8 @@ A Nintendo Switch homebrew tool for editing Tomodachi Life save data directly fr
 > The save-file parser, generated data tables (wishes, habits, clothes, coordinates, treasures), Map.sav schema hashes, UGC kind table, housing-edit safety rules, and the Custom BC1/BC3 texture encoder are derived from [alexislours/ltd-save-editor](https://github.com/alexislours/ltd-save-editor) (AGPL-3.0-or-later).
 > And big thanks to [tlmodding/ltd-gamedata](https://github.com/tlmodding/ltd-gamedata) for early reference for save key hashes.
 
+(Outdated Pictures)
+
 <img src="https://i.imgur.com/FO7lZ3o.png" width="600">
 <img src="https://i.imgur.com/upNJWY0.png" width="600">
 <img src="https://i.imgur.com/aHBKPVO.png" width="600">
@@ -16,7 +18,7 @@ A Nintendo Switch homebrew tool for editing Tomodachi Life save data directly fr
 ---
 
 ### Submitting your translation
-Open a Pull Request on [github.com/miiazertyy/TomoToolNX](https://github.com/miiazertyy/TomoToolNX) with whichever files you touched. You can translate just the WebUI, just the homebrew, or both — every key counts.
+Open a Pull Request [here](https://github.com/miiazertyy/TomoToolNX/compare) with whichever files you touched. You can translate just the WebUI, just the homebrew, or both — every key counts.
 Instructions at the bottom of the README.
 
 ---

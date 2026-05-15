@@ -1293,6 +1293,20 @@ static bool ShareTryConsumeJob(ShareJob& out); // main thread call
 static void ShareFreeThumbs();
 static void ShareFreeDetail();
 
+// ── Caches so flipping pages / searching back to a previous page is instant ──
+// Thumb cache: id → SDL_Texture, owned by the cache (not by ShareMii). Pages
+// reuse already-decoded thumbs even after the list refreshes. LRU-evicted.
+// List cache: parsed list responses keyed by query+sort+savFilter+page so the
+// API doesn't get hit twice for the same page during a browsing session.
+static std::map<int, SDL_Texture*>           gShareThumbCache;
+static std::vector<int>                      gShareThumbCacheLRU;   // back = MRU
+static constexpr size_t                      kShareThumbCacheMax = 256;
+
+struct ShareListSnapshot { std::vector<ShareMii> miis; int total=0; int lastPage=1; };
+static std::map<std::string, ShareListSnapshot> gShareListCache;
+static std::vector<std::string>                 gShareListCacheLRU; // back = MRU
+static constexpr size_t                         kShareListCacheMax = 24;
+
 // Housing sub-tab state
 static const uint32_t HASH_HOUSE_MAPID = SaveEditor::Hash("Mii.Location.HouseMapId");
 static const uint32_t HASH_ROOM_INDEX  = SaveEditor::Hash("Mii.Location.RoomIndex");
@@ -2517,10 +2531,99 @@ static void ShareParseListJson(const std::string& s) {
     if (ShareJsonFindKey(s, 0, s.size(), "totalCount", tS, tE)) { long v; size_t pp = tS; if (ShareJsonReadInt(s, pp, v)) gShareTotal = (int)v; }
     if (ShareJsonFindKey(s, 0, s.size(), "lastPage", tS, tE)) { long v; size_t pp = tS; if (ShareJsonReadInt(s, pp, v)) gShareLastPage = (int)std::max(1L, v); }
 }
+// Drop only the per-entry runtime state; textures live in gShareThumbCache.
 static void ShareFreeThumbs() {
     for (auto& m : gShareMiis) {
-        if (m.thumb) { SDL_DestroyTexture(m.thumb); m.thumb = nullptr; }
-        m.thumbReady = false; m.thumbRequested = false; m.thumbBytes.clear();
+        m.thumb = nullptr;
+        m.thumbReady = false;
+        m.thumbRequested = false;
+        m.thumbBytes.clear();
+    }
+}
+
+// Thumb-cache helpers. The cache owns every texture it stores; ShareMii
+// just holds a non-owning pointer. Evicts oldest entry when over capacity.
+static void ShareThumbCachePut(int id, SDL_Texture* tex) {
+    if (id <= 0 || !tex) return;
+    auto it = gShareThumbCache.find(id);
+    if (it != gShareThumbCache.end()) {
+        if (it->second != tex) SDL_DestroyTexture(it->second);
+        it->second = tex;
+    } else {
+        while (gShareThumbCacheLRU.size() >= kShareThumbCacheMax) {
+            int oldId = gShareThumbCacheLRU.front();
+            gShareThumbCacheLRU.erase(gShareThumbCacheLRU.begin());
+            auto eit = gShareThumbCache.find(oldId);
+            if (eit != gShareThumbCache.end()) {
+                if (eit->second) SDL_DestroyTexture(eit->second);
+                gShareThumbCache.erase(eit);
+            }
+        }
+        gShareThumbCache[id] = tex;
+    }
+    auto lit = std::find(gShareThumbCacheLRU.begin(), gShareThumbCacheLRU.end(), id);
+    if (lit != gShareThumbCacheLRU.end()) gShareThumbCacheLRU.erase(lit);
+    gShareThumbCacheLRU.push_back(id);
+}
+static SDL_Texture* ShareThumbCacheGet(int id) {
+    auto it = gShareThumbCache.find(id);
+    if (it == gShareThumbCache.end()) return nullptr;
+    auto lit = std::find(gShareThumbCacheLRU.begin(), gShareThumbCacheLRU.end(), id);
+    if (lit != gShareThumbCacheLRU.end()) {
+        gShareThumbCacheLRU.erase(lit);
+        gShareThumbCacheLRU.push_back(id);
+    }
+    return it->second;
+}
+
+// Build a cache key from the current list-query parameters. Two miis with the
+// same id can appear on different pages depending on sort, so we include all
+// the parameters that affect ordering.
+static std::string ShareListCacheKey(int page) {
+    char head[64];
+    snprintf(head, sizeof(head), "%d|%d|%d|", page, gShareSort, gShareFromSavOnly?1:0);
+    return std::string(head) + gShareQuery;
+}
+static void ShareListCacheStore(const std::string& key, const ShareListSnapshot& snap) {
+    auto it = gShareListCache.find(key);
+    if (it != gShareListCache.end()) it->second = snap;
+    else {
+        while (gShareListCacheLRU.size() >= kShareListCacheMax) {
+            gShareListCache.erase(gShareListCacheLRU.front());
+            gShareListCacheLRU.erase(gShareListCacheLRU.begin());
+        }
+        gShareListCache[key] = snap;
+    }
+    auto lit = std::find(gShareListCacheLRU.begin(), gShareListCacheLRU.end(), key);
+    if (lit != gShareListCacheLRU.end()) gShareListCacheLRU.erase(lit);
+    gShareListCacheLRU.push_back(key);
+}
+static const ShareListSnapshot* ShareListCacheLookup(const std::string& key) {
+    auto it = gShareListCache.find(key);
+    if (it == gShareListCache.end()) return nullptr;
+    auto lit = std::find(gShareListCacheLRU.begin(), gShareListCacheLRU.end(), key);
+    if (lit != gShareListCacheLRU.end()) {
+        gShareListCacheLRU.erase(lit);
+        gShareListCacheLRU.push_back(key);
+    }
+    return &it->second;
+}
+// Wire up gShareMiis after restoring from a list snapshot: re-attach any
+// thumb textures that are still in the thumb cache so they don't have to
+// be re-fetched.
+static void ShareRehydrateThumbsFromCache() {
+    for (auto& m : gShareMiis) {
+        SDL_Texture* t = ShareThumbCacheGet(m.id);
+        if (t) {
+            m.thumb = t;
+            m.thumbRequested = true;
+            m.thumbReady = false;
+        } else {
+            m.thumb = nullptr;
+            m.thumbRequested = false;
+            m.thumbReady = false;
+            m.thumbBytes.clear();
+        }
     }
 }
 static void ShareFreeDetail() {
@@ -2546,6 +2649,17 @@ static void ShareLoadPage() {
     ShareFreeThumbs();
     gShareMiis.clear();
     gShareSel = 0; gShareScroll = 0;
+    // Try the cache before hitting the API — flipping back to a page you
+    // already visited should be instant.
+    const ShareListSnapshot* hit = ShareListCacheLookup(ShareListCacheKey(gSharePage));
+    if (hit) {
+        gShareMiis    = hit->miis;
+        gShareTotal   = hit->total;
+        gShareLastPage= hit->lastPage;
+        gShareListLoading = false;
+        ShareRehydrateThumbsFromCache();
+        return;
+    }
     gShareListLoading = true;
     ShareSetStatus("loading…", {180,180,180,255}, 600);
     ShareSubmitJob(ShareJobKind::ListPage, ShareUrlList(), -1);
@@ -2554,6 +2668,13 @@ static void ShareRequestThumb(int idx) {
     if (idx < 0 || idx >= (int)gShareMiis.size()) return;
     auto& m = gShareMiis[idx];
     if (m.thumbRequested) return;
+    // Check the thumb cache first — re-attach the texture and skip the fetch.
+    SDL_Texture* cached = ShareThumbCacheGet(m.id);
+    if (cached) {
+        m.thumb = cached;
+        m.thumbRequested = true;
+        return;
+    }
     m.thumbRequested = true;
     ShareSubmitJob(ShareJobKind::Thumb, ShareUrlImage(m.id, "mii"), idx);
 }
@@ -2602,6 +2723,9 @@ static void SharePump() {
             } else {
                 std::string s((const char*)j.body.data(), j.body.size());
                 ShareParseListJson(s);
+                // Re-use already-decoded thumb textures from earlier visits
+                // before queuing fresh HTTP fetches.
+                ShareRehydrateThumbsFromCache();
                 // If the user got pushed past the end (e.g. rapid ZR presses),
                 // clamp and re-fetch so we never display "0 miis · page 6 / 1".
                 if (gSharePage > gShareLastPage && gShareLastPage >= 1) {
@@ -2609,9 +2733,23 @@ static void SharePump() {
                     ShareLoadPage();
                     continue;
                 }
-                // Prefetch ALL thumbnails on the page so the user doesn't have
-                // to scroll into view to start loading. The worker queues them
-                // and any user-initiated job (Detail/Download) jumps the line.
+                // Snapshot this page so the next visit skips the network.
+                {
+                    ShareListSnapshot snap;
+                    snap.miis     = gShareMiis;
+                    snap.total    = gShareTotal;
+                    snap.lastPage = gShareLastPage;
+                    // Strip live texture pointers — the snapshot is parameter
+                    // data only; thumbs live in the thumb cache.
+                    for (auto& sm : snap.miis) {
+                        sm.thumb = nullptr;
+                        sm.thumbReady = false;
+                        sm.thumbRequested = false;
+                        sm.thumbBytes.clear();
+                    }
+                    ShareListCacheStore(ShareListCacheKey(gSharePage), snap);
+                }
+                // Prefetch any thumbs the cache doesn't already have.
                 for (int i = 0; i < (int)gShareMiis.size(); i++) ShareRequestThumb(i);
                 char buf[80];
                 snprintf(buf, sizeof(buf), "%d miis · page %d / %d",
@@ -2656,12 +2794,18 @@ static void SharePump() {
             }
         }
     }
-    // Decode any thumbnails / detail images we now have bytes for.
+    // Decode any thumbnails / detail images we now have bytes for. Decoded
+    // textures get parked in the thumb cache so later page revisits skip
+    // both the network fetch AND the PNG decode.
     for (auto& m : gShareMiis) {
         if (m.thumbReady && !m.thumb) {
-            m.thumb = SharePngToTexture(m.thumbBytes);
+            SDL_Texture* tex = SharePngToTexture(m.thumbBytes);
             m.thumbBytes.clear();
-            m.thumbReady = false; // texture now owns the data
+            m.thumbReady = false;
+            if (tex) {
+                ShareThumbCachePut(m.id, tex);
+                m.thumb = tex;
+            }
         }
     }
     if (gShareDetailReady && !gShareDetailTex) {
@@ -3286,12 +3430,14 @@ static void DrawSettings() {
     DrawHeader(Lang::T("settings.title"));
 
     struct SettingsItem { const char* labelKey; const char* descKey; };
+    // Row order: Language → Theme → Export Path → Max Backups → Restore.
+    // Language + Theme grouped at the top as the two "display" prefs.
     static const SettingsItem ITEMS[] = {
         { "settings.item.lang",       "settings.item.lang.desc"    },
+        { "settings.item.theme",      "settings.item.theme.desc"   },
         { "settings.item.export",     "settings.item.export.desc"  },
         { "settings.item.maxbk",      "settings.item.maxbk.desc"   },
         { "settings.item.restore",    "settings.item.restore.desc" },
-        { "settings.item.theme",      "settings.item.theme.desc"   },
     };
     static const int ITEM_COUNT = 5;
 
@@ -3316,7 +3462,7 @@ static void DrawSettings() {
         DrawText(Lang::T(ITEMS[i].labelKey), listX + 16, ry + 10, labelCol, Font::Md);
         DrawText(Lang::T(ITEMS[i].descKey),  listX + 16, ry + 40, descCol,  Font::Sm);
 
-        if (i == 1) {
+        if (i == 2) {
             TTF_Font* fsm = GetFont(Font::Sm);
             int vw = 0, vh = 0;
             if (fsm) TTF_SizeUTF8(fsm, gExportPath.c_str(), &vw, &vh);
@@ -3328,12 +3474,12 @@ static void DrawSettings() {
             }
             DrawText(disp,        listX + listW - vw - 16, ry + 12, sel ? COL_ACCENT : COL_DIM, Font::Sm);
             DrawText("A  " + Lang::T("settings.change"), listX + listW - 100,     ry + 40, sel ? COL_GOLD   : COL_DIM, Font::Sm);
-        } else if (i == 3) {
+        } else if (i == 4) {
             int cnt = BackupService::CountBackups();
             std::string v = (cnt == 0) ? Lang::T("settings.backups.none") : std::to_string(cnt) + " " + Lang::T("settings.backups.available");
             DrawText(v,          listX + listW - 130, ry + 12, sel ? COL_ACCENT : COL_DIM, Font::Sm);
             DrawText("A  " + Lang::T("settings.open"),  listX + listW - 100, ry + 40, sel ? COL_GOLD   : COL_DIM, Font::Sm);
-        } else if (i == 2) {
+        } else if (i == 3) {
             const int arrowW = 36, numW = 48, ctrlH = 34;
             int ctrlX = listX + listW - arrowW - numW - arrowW - 20;
             int ctrlY = ry + (rowH - ctrlH) / 2;
@@ -3367,7 +3513,7 @@ static void DrawSettings() {
             DrawRect(ctrlX + arrowW + chipW, ctrlY, arrowW, ctrlH, sel ? COL_GOLD : COL_BORDER);
             DrawTextC(">", ctrlX + arrowW + chipW + arrowW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
             HitAdd(ctrlX + arrowW + chipW, ctrlY, arrowW, ctrlH, TSettingsRowRight, i);
-        } else if (i == 4) {
+        } else if (i == 1) {
             // Theme: < [Current] > stepper. Identical pattern to the language row.
             std::string curLabel = Lang::T("theme." + ThemeNS::Current());
             const int arrowW = 36, chipW = 160, ctrlH = 34;
@@ -3563,7 +3709,12 @@ static void DrawMounting() {
 static const int LIST_X=12, LIST_W=380, LIST_Y=64, LIST_H=SCREEN_H-96, ITEM_H=28;
 static const int LIST_PAD_TOP=6; // padding between box top and first item
 static const int PREVIEW_X=400, PREVIEW_Y=LIST_Y, PREVIEW_W=868, PREVIEW_H=LIST_H;
-static const int VISIBLE = LIST_H/ITEM_H;
+// UGC list sits below a search bar; these match the renderer's locals so
+// touch / scroll / input handlers reach every drawn row.
+static const int UGC_SEARCH_H   = 30;
+static const int UGC_SEARCH_GAP = 10;
+static const int UGC_LIST_TOP_Y = LIST_Y + UGC_SEARCH_H + UGC_SEARCH_GAP + 4;
+static const int VISIBLE = (LIST_H - UGC_SEARCH_H - UGC_SEARCH_GAP - 4) / ITEM_H;
 
 // Implementations deferred to here because they reference VISIBLE and LoadPreview
 static void TSelUgc(int idx) {
@@ -3946,9 +4097,10 @@ static void DrawOnSwitch() {
 
     // ── UGC tab ──────────────────────────────────────────────────────────────
     if (gOnSwitchMode == OnSwitchMode::UGC) {
-        // Search bar — standalone, sits above the list panel with a clear gap
-        const int SEARCH_H = 30;
-        const int SEARCH_GAP = 10;
+        // Search bar above the list. Sizes live at file scope (UGC_SEARCH_*)
+        // so input/touch handlers stay aligned with the render.
+        const int SEARCH_H   = UGC_SEARCH_H;
+        const int SEARCH_GAP = UGC_SEARCH_GAP;
         int sbX = LIST_X, sbY = LIST_Y, sbW = LIST_W;
         bool searchActive = !gUgcFilter.empty();
         // Hit-area: tap to open keyboard; clear button hits separately when active
@@ -4397,14 +4549,17 @@ static void DrawPlayer() {
     }
 
     if (!gPlayerSav.loaded) {
-        // Same fix as the Mii tab — surface the load error so the screen
-        // doesn't sit on "loading..." forever when the parser actually failed.
         if (!gPlayerMsg.empty()) {
             DrawTextC(gPlayerMsg, SCREEN_W/2, SCREEN_H/2 - 14, COL_RED, Font::Md);
-            DrawTextC(Lang::T("player.parse.fail.l1"),
-                      SCREEN_W/2, SCREEN_H/2 + 18, COL_DIM, Font::Sm);
-            DrawTextC(Lang::T("player.parse.fail.l2"),
-                      SCREEN_W/2, SCREEN_H/2 + 38, COL_DIM, Font::Sm);
+            if (gPlayerMsg.find("Cannot open") != std::string::npos) {
+                DrawTextC(Lang::T("player.notfound.hint"),
+                          SCREEN_W/2, SCREEN_H/2 + 18, COL_DIM, Font::Sm);
+            } else {
+                DrawTextC(Lang::T("player.parse.fail.l1"),
+                          SCREEN_W/2, SCREEN_H/2 + 18, COL_DIM, Font::Sm);
+                DrawTextC(Lang::T("player.parse.fail.l2"),
+                          SCREEN_W/2, SCREEN_H/2 + 38, COL_DIM, Font::Sm);
+            }
         } else {
             DrawTextC(Lang::T("player.loading"), SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
         }
@@ -5448,14 +5603,22 @@ static void DrawMiiStats() {
     if (!gMiiSav.loaded) {
         // Surface the actual load error instead of leaving "loading..." on
         // screen forever. SaveEditor::Load writes the reason into gMiiStatsMsg
-        // ("Cannot open", "Bad magic", "Bad saveDataOffset", etc.) — without
-        // showing it the app looks frozen when the save itself is the problem.
+        // ("Cannot open", "Bad magic", "Bad saveDataOffset", etc.).
         if (!gMiiStatsMsg.empty()) {
             DrawTextC(gMiiStatsMsg, SCREEN_W/2, SCREEN_H/2 - 14, COL_RED, Font::Md);
-            DrawTextC(Lang::T("mii.parse.fail.l1"),
-                      SCREEN_W/2, SCREEN_H/2 + 18, COL_DIM, Font::Sm);
-            DrawTextC(Lang::T("mii.parse.fail.l2"),
-                      SCREEN_W/2, SCREEN_H/2 + 38, COL_DIM, Font::Sm);
+            // "Cannot open" almost always means the file doesn't exist —
+            // either no Mii has been created yet or the wrong profile was
+            // picked. Show a friendlier hint instead of the "Mii.sav
+            // couldn't be parsed" wording which implies a corrupt save.
+            if (gMiiStatsMsg.find("Cannot open") != std::string::npos) {
+                DrawTextC(Lang::T("mii.notfound.hint"),
+                          SCREEN_W/2, SCREEN_H/2 + 18, COL_DIM, Font::Sm);
+            } else {
+                DrawTextC(Lang::T("mii.parse.fail.l1"),
+                          SCREEN_W/2, SCREEN_H/2 + 18, COL_DIM, Font::Sm);
+                DrawTextC(Lang::T("mii.parse.fail.l2"),
+                          SCREEN_W/2, SCREEN_H/2 + 38, COL_DIM, Font::Sm);
+            }
         } else {
             DrawTextC(Lang::T("mii.loading"), SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
         }
@@ -7879,7 +8042,7 @@ static void ProcessTouch(int tx, int ty, u64& kDown) {
             int filtPos = gEntryScroll + i;
             if (filtPos >= (int)gFilteredEntries.size()) break;
             int realIdx = gFilteredEntries[filtPos];
-            if (hit(LIST_X, LIST_Y+LIST_PAD_TOP+i*ITEM_H, LIST_W, ITEM_H)) {
+            if (hit(LIST_X, UGC_LIST_TOP_Y+i*ITEM_H, LIST_W, ITEM_H)) {
                 if (gEntrySel != realIdx) { gEntrySel = realIdx; LoadPreview(gEntries[realIdx]); }
                 break;
             }
@@ -7950,12 +8113,13 @@ int main(int,char**) {
     // a Settings toggle; FTP/WebUI transfer paths are unaffected.
     // MtpServer::Init();
 
-    // Boot-time auto-update disabled: spinning up curl/SSL/nifm at launch
-    // reliably crashes Ryujinx (OutOfDomains → libnx fatal) regardless of
-    // emulator-detection heuristics, and the check is purely cosmetic
-    // (notifies, doesn't actually update the app). Skip straight to user
-    // selection on every launch.
-    gScreen = Screen::UserPick;
+    // Kick off the GitHub release check in the background. The handler at
+    // case Screen::UpdateCheck polls Updater::GetState() and either shows
+    // the "update available" screen or falls through to UserPick.
+    // Note: on Ryujinx this can crash mid-handshake (curl/SSL + nifm IPC
+    // domain exhaustion). Hardware is fine.
+    Updater::StartCheck();
+    gScreen = Screen::UpdateCheck;
 
     gUsers=SaveMount::GetUsers();
     if (gUsers.empty()){
@@ -8233,16 +8397,16 @@ int main(int,char**) {
                 if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown)) {
                     gSettingsSel = std::min(4, gSettingsSel + 1);
                 }
-                // Row mapping: 0 = Language, 1 = Export Path, 2 = Max Backups,
-                //              3 = Restore Backup, 4 = Theme.
-                if (gSettingsSel == 3 && kDown&HidNpadButton_A) {
+                // Row mapping: 0 = Language, 1 = Theme, 2 = Export Path,
+                //              3 = Max Backups, 4 = Restore Backup.
+                if (gSettingsSel == 4 && kDown&HidNpadButton_A) {
                     gRestoreList        = BackupService::ListBackups();
                     gRestoreSel         = 0;
                     gRestoreScroll      = 0;
                     gRestoreConfirmKind = 0;
                     gShowRestorePicker  = true;
                 }
-                if (gSettingsSel == 1 && kDown&HidNpadButton_A) {
+                if (gSettingsSel == 2 && kDown&HidNpadButton_A) {
                     gBrowseForExportDir = true; gBrowseForMii = false;
                     std::string sp = gExportPath;
                     struct stat _st;
@@ -8251,7 +8415,7 @@ int main(int,char**) {
                     }
                     BrowseRefresh(sp); gShowFileBrowser = true;
                 }
-                if (gSettingsSel == 2) {
+                if (gSettingsSel == 3) {
                     if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft)) {
                         gMaxBackups = std::max(1, gMaxBackups - 1); SaveConfig();
                     }
@@ -8278,7 +8442,7 @@ int main(int,char**) {
                         }
                     }
                 }
-                if (gSettingsSel == 4) {
+                if (gSettingsSel == 1) {
                     bool left  = kNav&(HidNpadButton_Left |HidNpadButton_StickLLeft |HidNpadButton_StickRLeft);
                     bool right = kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight);
                     bool a     = kDown&HidNpadButton_A;
@@ -8484,9 +8648,15 @@ int main(int,char**) {
                         } else {
                             std::string lower=entry.name;
                             for(auto& c:lower)c=(char)tolower((unsigned char)c);
-                            bool isLtd = lower.size()>=4 && lower.compare(lower.size()-4,4,".ltd")==0;
-                            if(isLtd) DoUgcImportLtd(fullPath);
-                            else DoOnSwitchImport(fullPath);
+                            // UGC item files are 5-char extensions: .ltdf .ltdc
+                            // .ltdg .ltdi .ltde .ltdo .ltdl. Check the 4 chars
+                            // before the type letter — checking just ".ltd"
+                            // at size-4 misses every variant since their last
+                            // 4 chars are "ltd<x>", not ".ltd".
+                            bool isLtdx = lower.size() >= 5
+                                       && lower.compare(lower.size()-5, 4, ".ltd") == 0;
+                            if (isLtdx) DoUgcImportLtd(fullPath);
+                            else        DoOnSwitchImport(fullPath);
                         }
                     }
                 }
@@ -8952,8 +9122,8 @@ int main(int,char**) {
                                 if (dir == 3) return col < 3 ? s + 1 : s;
                             } else {
                                 int col = s - 21;
-                                if (dir == 0) return 17 + col;
-                                if (dir == 1) return s;
+                                if (dir == 0) return 17 + col;     // ↑ to pocket bottom row
+                                if (dir == 1) return col;          // ↓ wraps to worn top row
                                 if (dir == 2) return col > 0 ? s - 1 : s;
                                 if (dir == 3) return col < 3 ? s + 1 : s;
                             }
@@ -9927,6 +10097,13 @@ int main(int,char**) {
     FreePreview();
     ShareFreeThumbs();
     ShareFreeDetail();
+    // Tear down the long-lived caches. The thumb cache owns its textures;
+    // the list cache only holds parsed metadata so its destructor is enough.
+    for (auto& kv : gShareThumbCache) if (kv.second) SDL_DestroyTexture(kv.second);
+    gShareThumbCache.clear();
+    gShareThumbCacheLRU.clear();
+    gShareListCache.clear();
+    gShareListCacheLRU.clear();
     ShareWorkerStopFn();
     HttpServer::Stop();
     MtpServer::Exit();
