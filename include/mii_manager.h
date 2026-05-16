@@ -42,6 +42,12 @@ void LoadUgcNames();
 // Returns empty string if the slot is unnamed or the save is unreadable.
 std::string GetUgcName(const std::string& stem);
 
+// Overwrite the in-game name for a UGC slot (e.g. "UgcFood003") with `newName`.
+// `newName` is treated as UTF-8 and re-encoded to the 128-byte UTF-16LE slot
+// the game expects. Returns "" on success or an error string. Caller should
+// call LoadUgcNames() afterwards to refresh the in-memory cache.
+std::string RenameUgc(const std::string& stem, const std::string& newName);
+
 // Export UGC item at 1-based slot to destPath (auto-appends .ltdf/.ltdc/etc.).
 // ugcKind: 0=Food,1=Cloth,2=Goods,3=Interior,4=Exterior,5=MapObject,6=MapFloor
 // Returns empty string on success, error message on failure.

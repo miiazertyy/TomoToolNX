@@ -51,6 +51,16 @@ namespace TextureProcessor {
     // - Contain: scale down to fit inside, letterbox the remainder with the matte color.
     // - Fill:    stretch to the target W/H ignoring aspect ratio.
     enum class FitMode   { Cover, Contain, Fill };
+    // Canvas dimensions for the imported texture's .canvas.zs. The game uses
+    // different in-memory canvas sizes for different UGC mesh types; we can't
+    // reliably detect "this slot is a book" or "this is a TV" from byte count
+    // alone (multiple meshes share the same ugctex byte budget), so the user
+    // picks the shape explicitly in the texture-tab settings.
+    // - Square: 256×256 — the default, used by food/clothing/goods/etc.
+    // - Book:   256×512 — taller; book covers open up to twice the height.
+    // - Tv:     256×128 — shorter; the TV mesh maps a wide screen onto a
+    //                     half-height canvas.
+    enum class CanvasShape { Square, Book, Tv };
 
     struct Matte { uint8_t r = 0, g = 0, b = 0, a = 0; };  // a==0 means transparent letterbox
 
@@ -89,11 +99,21 @@ namespace TextureProcessor {
         bool writeThumb      = false;
         bool noSrgb          = false;
         std::string originalUgctexPath;
+        // Path to the existing .canvas.zs for this slot. When set, the new
+        // canvas inherits its dimensions instead of defaulting to 256×256 —
+        // required for non-square UGC items (books, etc.) whose canvases
+        // are 256-wide × N-tall.
+        std::string originalCanvasPath;
         std::string thumbPath; // actual thumb file path — write destination when set
         Bc1Encoder  encoder  = Bc1Encoder::Custom;
         Bc1Mode     bc1Mode  = Bc1Mode::Auto;
         FitMode     fitMode  = FitMode::Cover;   // matches upstream default
         Matte       matte    = {};               // transparent unless fitMode == Contain
+        // When set to anything other than CanvasShape::Square, overrides the
+        // canvas dimensions chosen from `originalCanvasPath`. Caller-provided
+        // explicit override for slots whose mesh expects a non-square canvas
+        // (books, TVs, etc.) — see the CanvasShape enum above.
+        CanvasShape canvasShape = CanvasShape::Square;
     };
 
     // Returns empty string on success, error message on failure.

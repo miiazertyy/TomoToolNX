@@ -8,8 +8,10 @@
 #include "backup.h"
 #include "mii_manager.h"
 #include "save_editor.h"
+#include "save_mount.h"
 #include "habits_data.h"
 #include "wishes_data.h"
+#include "island_generator.h"
 
 #include <switch.h>
 #include <sys/socket.h>
@@ -186,6 +188,28 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 /* Social graph overlay */
 .social-overlay{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:100;display:none;flex-direction:column;align-items:center;justify-content:center}
 .social-overlay.active{display:flex}
+/* Island Generator overlay */
+.ig-overlay{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:120;display:none;align-items:center;justify-content:center;padding:24px;box-sizing:border-box}
+.ig-overlay.active{display:flex}
+.ig-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:22px 26px;width:min(540px,100%);max-height:90vh;overflow-y:auto;box-shadow:0 14px 44px rgba(0,0,0,.6)}
+.ig-title{color:var(--gold);font-size:.95rem;letter-spacing:.14em;text-transform:uppercase;margin-bottom:6px}
+.ig-sub{color:var(--muted);font-size:.78rem;margin-bottom:18px;line-height:1.45}
+.ig-row{margin:14px 0}
+.ig-row-label{display:block;color:var(--text);font-size:.78rem;margin-bottom:6px;letter-spacing:.06em}
+.ig-slider{display:flex;align-items:center;gap:10px}
+.ig-slider input[type=range]{flex:1}
+.ig-slider-val{color:var(--gold);font-size:.85rem;min-width:32px;text-align:right}
+.ig-radio{display:flex;flex-wrap:wrap;gap:6px}
+.ig-radio label{padding:6px 10px;border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:.78rem;background:var(--bg);transition:background .12s,border-color .12s}
+.ig-radio label.sel{background:var(--gold);color:#111;border-color:var(--gold)}
+.ig-radio input{display:none}
+.ig-progress{font-size:.74rem;color:var(--muted);margin-top:6px;min-height:1.1em}
+.ig-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+.ig-btn{padding:7px 16px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.8rem;border-radius:4px;cursor:pointer;letter-spacing:.04em}
+.ig-btn:hover:not(:disabled){background:var(--gold);color:#111;border-color:var(--gold)}
+.ig-btn:disabled{opacity:.4;cursor:not-allowed}
+.ig-btn-primary{background:var(--gold);color:#111;border-color:var(--gold);font-weight:600}
+.ig-btn-primary:hover:not(:disabled){background:#e1b751}
 .social-header{color:var(--gold);font-size:.85rem;letter-spacing:.12em;margin-bottom:8px}
 #social-canvas{background:#0a0a0a;border:1px solid var(--border);border-radius:4px;touch-action:none}
 .social-close{margin-top:10px;font-size:.8rem;color:var(--muted);cursor:pointer}
@@ -581,6 +605,15 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
       <button class="s-close" onclick="closeSettings()">&#x2715;</button>
     </div>
     <div class="s-section">
+      <div class="s-section-label" data-i18n="settings.shape">Canvas shape</div>
+      <div class="s-row" role="radiogroup">
+        <button class="btn-enc enc-on" id="shape-square" onclick="setShape('square')">Square</button>
+        <button class="btn-enc" id="shape-book"   onclick="setShape('book')">Book</button>
+        <button class="btn-enc" id="shape-tv"     onclick="setShape('tv')">TV wide</button>
+      </div>
+      <p class="s-hint" id="shape-hint">Square 256×256 — default for food, clothing, goods, walls, etc.</p>
+    </div>
+    <div class="s-section">
       <div class="s-section-label" data-i18n="settings.encoder">Encoder</div>
       <div class="s-row" role="radiogroup">
         <button class="btn-enc enc-on" id="enc-custom" onclick="setEnc('custom')">Gamma-aware</button>
@@ -619,8 +652,19 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
   </div>
 </div>
   <div class="list-wrap" style="padding-bottom:env(safe-area-inset-bottom,0px)">
-    <div class="list-label" style="display:flex;align-items:center;gap:6px">
-      <span style="flex:1">textures</span>
+    <div class="list-label" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <span style="flex:1;min-width:60px">textures</span>
+      <select id="ugc-kind-filter" onchange="renderList()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:3px;font-size:11px;font-family:inherit;outline:none;cursor:pointer">
+        <option value="-1">All</option>
+        <option value="0">Food</option>
+        <option value="1">Clothing</option>
+        <option value="2">Treasure</option>
+        <option value="3">Interior</option>
+        <option value="4">Exterior</option>
+        <option value="5">Objects</option>
+        <option value="6">Landscaping</option>
+        <option value="7">Face Paint</option>
+      </select>
       <input type="search" id="ugc-search" placeholder="search..." oninput="renderList()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:3px 8px;border-radius:3px;font-size:11px;font-family:inherit;width:140px;outline:none">
     </div>
     <div id="list"></div>
@@ -637,6 +681,41 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
 <!-- TomodachiShare detail overlay -->
 <div class="br-detail-overlay" id="br-detail-overlay" onclick="if(event.target===this)closeBrowseDetail()">
   <div class="br-detail" id="br-detail-card"></div>
+</div>
+
+<!-- Island Generator overlay (Phase B) -->
+<div class="ig-overlay" id="ig-overlay">
+  <div class="ig-card" onclick="event.stopPropagation()">
+    <div class="ig-title" data-i18n="islandgen.web.title">Island Generator</div>
+    <div class="ig-sub" data-i18n="islandgen.web.sub">A fresh save was just created for this user. Fill the island with random miis, a random or template map, and pick how relationships should start.</div>
+
+    <!-- Mii count is fixed: every generated island fills all 70 slots since
+         the game can't truly "remove" a Mii slot anyway (only mark empty),
+         and users can delete unwanted ones from inside Tomodachi Life. -->
+
+    <div class="ig-row">
+      <span class="ig-row-label" data-i18n="islandgen.web.map">Map</span>
+      <div class="ig-radio" id="ig-map-radio">
+        <label class="sel"><input type="radio" name="ig-map" value="random:surprise" checked>Surprise me</label>
+        <!-- templates injected dynamically -->
+      </div>
+    </div>
+
+    <div class="ig-row">
+      <span class="ig-row-label" data-i18n="islandgen.web.rels">Relationships</span>
+      <div class="ig-radio" id="ig-rels-radio">
+        <label class="sel"><input type="radio" name="ig-rels" value="dense" checked>Dense random</label>
+        <label><input type="radio" name="ig-rels" value="none">Everyone unknown</label>
+      </div>
+    </div>
+
+    <div class="ig-progress" id="ig-progress">&nbsp;</div>
+
+    <div class="ig-actions">
+      <button class="ig-btn"          id="ig-btn-skip"  onclick="igDismiss()">Skip</button>
+      <button class="ig-btn ig-btn-primary" id="ig-btn-go" onclick="igRun()">Generate</button>
+    </div>
+  </div>
 </div>
 
 <!-- Player Panel -->
@@ -1447,13 +1526,31 @@ async function loadList(){
   renderList();
   setStatus('','info');
 }
+// Same prefix list as the on-Switch UGC tab, plus FacePaint at index 7 so
+// the filter dropdown can scope by every stem the scanner reports. This is
+// intentionally a superset of UGC_ITEM_PFXS — that one is used for imports
+// and excludes FacePaint, which isn't importable as an .ltdx.
+const UGC_FILTER_PFXS=['Food','Cloth','Goods','Interior','Exterior','MapObject','MapFloor','FacePaint'];
+function ugcFilterKindOf(stem){
+  const rest=stem&&stem.startsWith('Ugc')?stem.slice(3):stem||'';
+  // Longest prefix wins so 'MapObject' doesn't match the shorter 'Map'.
+  let best=-1, bestLen=0;
+  for(let k=0;k<UGC_FILTER_PFXS.length;k++){
+    const p=UGC_FILTER_PFXS[k];
+    if(rest.startsWith(p)&&p.length>bestLen){best=k;bestLen=p.length;}
+  }
+  return best;
+}
 function renderList(){
   const sb=document.getElementById('ugc-search');
+  const kf=document.getElementById('ugc-kind-filter');
   const q=(sb&&sb.value||'').trim().toLowerCase();
+  const kindSel=kf?parseInt(kf.value,10):-1;
   const l=document.getElementById('list'); if(!l)return;
   l.innerHTML='';
   let shown=0;
   entries.forEach(e=>{
+    if(kindSel>=0&&ugcFilterKindOf(e.stem||'')!==kindSel)return;
     if(q){
       const name=(e.name||'').toLowerCase();
       const stem=(e.stem||'').toLowerCase();
@@ -1472,7 +1569,8 @@ function renderList(){
     l.appendChild(div);
   }
   const hdr=document.getElementById('hdr-count');
-  if(hdr)hdr.textContent=q?(shown+' / '+entries.length+' textures'):(entries.length+' textures');
+  const filtered=(q.length>0)||(kindSel>=0);
+  if(hdr)hdr.textContent=filtered?(shown+' / '+entries.length+' textures'):(entries.length+' textures');
 }
 async function selectEntry(e){
   selected=e;
@@ -1497,6 +1595,15 @@ async function doRemoveBg(){if(!selected)return;showSpinner('removing background
 // ── Encoder / BC1 mode / Fit / Matte ──────────────────────────────────────────
 // Labels & hints intentionally short — verbose copy made the drawer overflow.
 let encMode='custom', bc1Mode='auto', fitMode='cover', matteOpt='transparent', matteHex='#888888';
+// Canvas shape — Square (default), Book (256×512), or TV (256×128). Picking
+// the wrong shape produces visibly broken in-game results so it's the first
+// row of the settings drawer, matching the on-Switch UI.
+let shape='square';
+const SHAPE_HINTS={
+  square:'256×256 — default (food, clothes, goods…).',
+  book:'Fit into a 3:4 book area; black bars on the sides.',
+  tv:'Fit into a 16:9 wide area; black bars top and bottom.'
+};
 const ENC_HINTS={
   custom:'Gamma-aware sRGB fitting. Best quality (default).',
   pca:'PCA endpoint fit. Faster but weaker on gradients.'
@@ -1511,6 +1618,12 @@ const FIT_HINTS={
   contain:'Fit the whole image inside, leaving transparent edges.',
   fill:'Stretch to fill the texture, ignoring aspect ratio.'
 };
+function setShape(v){
+  shape=v;
+  ['square','book','tv'].forEach(k=>document.getElementById('shape-'+k).classList.toggle('enc-on',k===v));
+  const h=document.getElementById('shape-hint');
+  if(h)h.textContent=SHAPE_HINTS[v]||'';
+}
 function setEnc(v){
   encMode=v;
   ['custom','pca'].forEach(k=>document.getElementById('enc-'+k).classList.toggle('enc-on',k===v));
@@ -1546,7 +1659,7 @@ function setBc1(v){
 function fileChosen(){const fi=document.getElementById('file-input');if(!fi.files.length)return;const f=fi.files[0];fi.value='';const ext=f.name.slice(f.name.lastIndexOf('.')).toLowerCase();if(UGC_ITEM_EXTS.includes(ext)){uploadUgcItemFile(f);}else{pendingFile=f;uploadFile();}}
 async function uploadFile(){
   showSpinner('importing...');
-  const fd=new FormData();fd.append('file',pendingFile);fd.append('stem',selected.stem);fd.append('encoder',encMode);fd.append('bc1Mode',bc1Mode);fd.append('fitMode',fitMode);fd.append('matte',matteHexForUpload());
+  const fd=new FormData();fd.append('file',pendingFile);fd.append('stem',selected.stem);fd.append('encoder',encMode);fd.append('bc1Mode',bc1Mode);fd.append('fitMode',fitMode);fd.append('matte',matteHexForUpload());fd.append('shape',shape);
   const d=await(await fetch('/api/import',{method:'POST',body:fd})).json();
   modalClose();
   if(d.ok){setStatus('imported','ok');await loadList();const fresh=entries.find(e=>e.stem===selected.stem);if(fresh)selectEntry(fresh);}
@@ -2267,6 +2380,146 @@ function onMiiChange(ev){
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function setSaveStatus(w,msg,cls){const el=document.getElementById('save-status-'+w);if(el){el.textContent=msg;el.className='status '+cls;}}
+
+// ── Island Generator (web UI orchestration for /api/genisland/*) ────────────
+// Auto-opens after the homebrew bootstraps a save container (signaled by
+// tomodata:/.tomotool_first_run). Drives the on-device endpoints sequentially
+// + loops the existing TomoShare browse/import for the mii-fill phase.
+async function igCheckAndShow(){
+  try{
+    const r=await fetch('/api/genisland/first_run');
+    if(!r.ok)return;
+    const j=await r.json();
+    if(!j||!j.first_run)return;
+    await igPopulateTemplates();
+    document.getElementById('ig-overlay').classList.add('active');
+  }catch(_){/* server might still be coming up — ignore and let user retry */}
+}
+async function igPopulateTemplates(){
+  const radio=document.getElementById('ig-map-radio');
+  try{
+    const r=await fetch('/api/genisland/templates');
+    const j=await r.json();
+    if(!j||!j.ok)return;
+    radio.querySelectorAll('label:not(:first-child)').forEach(n=>n.remove());
+    for(const t of (j.templates||[])){
+      const id=t.id,nm=esc(t.name||t.id);
+      const lab=document.createElement('label');
+      lab.title=t.description||'';
+      lab.innerHTML=`<input type="radio" name="ig-map" value="template:${esc(id)}">${nm}`;
+      radio.appendChild(lab);
+    }
+    // Re-bind selection styling
+    radio.querySelectorAll('label').forEach(lab=>{
+      lab.addEventListener('click',()=>{
+        radio.querySelectorAll('label').forEach(l=>l.classList.remove('sel'));
+        lab.classList.add('sel');
+      });
+    });
+    // Same for relationship radio
+    const rel=document.getElementById('ig-rels-radio');
+    rel.querySelectorAll('label').forEach(lab=>{
+      lab.addEventListener('click',()=>{
+        rel.querySelectorAll('label').forEach(l=>l.classList.remove('sel'));
+        lab.classList.add('sel');
+      });
+    });
+  }catch(_){/* keep "Surprise me" as the only option */}
+}
+function igSetProgress(s){document.getElementById('ig-progress').textContent=s||'';}
+function igBusy(b){
+  document.getElementById('ig-btn-go').disabled=b;
+  document.getElementById('ig-btn-skip').disabled=b;
+}
+async function igDismiss(){
+  try{await fetch('/api/genisland/first_run',{method:'POST'});}catch(_){}
+  document.getElementById('ig-overlay').classList.remove('active');
+}
+async function igRun(){
+  igBusy(true);
+  try{
+    const count=70;  // every generated island fills all Mii slots; the
+                     // slider was removed since users can delete unwanted
+                     // residents from inside Tomodachi Life.
+    const mapSel=document.querySelector('input[name=ig-map]:checked').value;  // "random:surprise" or "template:<id>"
+    const relSel=document.querySelector('input[name=ig-rels]:checked').value; // "dense" or "none"
+
+    // 1. Map
+    igSetProgress('Generating map…');
+    {
+      let url='/api/genisland/map?';
+      if(mapSel.indexOf('template:')===0) url+='mode=template&id='+encodeURIComponent(mapSel.substring(9));
+      else                                 url+='mode=random';
+      const r=await fetch(url,{method:'POST'});
+      const j=await r.json();
+      if(!j||!j.ok) throw new Error(j&&j.error?j.error:'map step failed');
+    }
+
+    // 2. Wishes + Levels (always)
+    igSetProgress('Unlocking wishes…');
+    await fetch('/api/genisland/wishes',{method:'POST'});
+    igSetProgress('Setting random mii levels…');
+    await fetch('/api/genisland/levels?min=100&max=150',{method:'POST'});
+
+    // 3. Mii fill — loop the TomoShare browse/import path. We deliberately
+    //    avoid the default "latest" sort: that biases every generated island
+    //    toward the same handful of miis uploaded that day. Instead we ask
+    //    the API for sort=popular over a long time range, page through a
+    //    wide random window, and pick a random item per fetched page.
+    //    A small dedup set prevents the same partner-of-the-day showing up
+    //    twice on one island.
+    const used = new Set();
+    for(let slot=2; slot<=count; slot++){
+      igSetProgress('Fetching mii '+slot+' of '+count+' from TomoShare…');
+      try{
+        const page=Math.floor(Math.random()*60)+1;        // wider page window
+        const sort=Math.random()<0.5?'popular':'random';   // mix popular + random
+        const url='/api/share/list?type=mii&sort='+sort+'&timeRange=all&page='+page;
+        const lr=await fetch(url);
+        const lj=await lr.json();
+        const items=(lj&&lj.items)||[];
+        if(!items.length) continue;
+        // Local shuffle so we don't always pick item[0] of a page.
+        for(let i=items.length-1;i>0;i--){
+          const j=Math.floor(Math.random()*(i+1));
+          [items[i],items[j]]=[items[j],items[i]];
+        }
+        let pick=null;
+        for(const it of items){
+          if(it&&it.id&&!used.has(it.id)){pick=it;break;}
+        }
+        if(!pick) pick=items[0];
+        if(!pick||!pick.id) continue;
+        used.add(pick.id);
+        await fetch('/api/share/import?id='+encodeURIComponent(pick.id)+'&slot='+slot,{method:'POST'});
+      }catch(_){/* skip this slot, keep going */}
+    }
+
+    // 4. Housing pass
+    igSetProgress('Assigning houses…');
+    await fetch('/api/genisland/houses',{method:'POST'});
+
+    // 5. Relationships (dense or wipe)
+    igSetProgress('Writing relationships…');
+    await fetch('/api/genisland/rels?mode='+encodeURIComponent(relSel),{method:'POST'});
+
+    // 6. Clear the first-run marker and reload the in-page save model.
+    await fetch('/api/genisland/first_run',{method:'POST'});
+    igSetProgress('Done — reloading…');
+    document.getElementById('ig-overlay').classList.remove('active');
+    // Best-effort reload of the in-page save model
+    try{
+      if(typeof reloadSave==='function') await reloadSave();
+      else location.reload();
+    }catch(_){location.reload();}
+  }catch(e){
+    igSetProgress('Error: '+(e&&e.message?e.message:String(e)));
+  }finally{
+    igBusy(false);
+  }
+}
+// Kick the check shortly after page load so the existing onload chain runs first.
+window.addEventListener('load',()=>setTimeout(igCheckAndShow,400));
 
 // ── Social graph ──────────────────────────────────────────────────────────────
 async function openSocialGraph(slot) {
@@ -5879,13 +6132,14 @@ static void HandleExport(int fd,const std::string& query){
 static void HandleImport(int fd,const Request& req){
     auto fields=ParseMultipart(req.body,req.contentType);
     std::string stem;std::vector<uint8_t> fileData;std::string fileExt=".png";
-    std::string encoderStr,bc1ModeStr,fitModeStr,matteStr;
+    std::string encoderStr,bc1ModeStr,fitModeStr,matteStr,shapeStr;
     for(auto& f:fields){
         if(f.name=="stem")stem=f.data;
         else if(f.name=="encoder")encoderStr=f.data;
         else if(f.name=="bc1Mode")bc1ModeStr=f.data;
         else if(f.name=="fitMode")fitModeStr=f.data;
         else if(f.name=="matte")matteStr=f.data;
+        else if(f.name=="shape")shapeStr=f.data;
         else if(f.name=="file"){fileData.assign(f.data.begin(),f.data.end());if(!f.filename.empty()){size_t dot=f.filename.rfind('.');if(dot!=std::string::npos)fileExt=f.filename.substr(dot);}}
     }
     if(stem.empty()||fileData.empty()){SrvLog("Import: missing stem or file",true);Send500(fd,"Missing stem or file");return;}
@@ -5902,13 +6156,19 @@ static void HandleImport(int fd,const Request& req){
 
     TextureProcessor::ImportOptions opts;
     opts.pngPath=tmpPath;opts.destStem=found->directory()+"/"+found->stem;
-    opts.writeCanvas=found->hasCanvas();opts.writeThumb=found->hasThumb();opts.thumbPath=found->thumbPath;opts.noSrgb=false;opts.originalUgctexPath=found->ugctexPath;
+    opts.writeCanvas=found->hasCanvas();opts.writeThumb=found->hasThumb();opts.thumbPath=found->thumbPath;opts.noSrgb=false;opts.originalUgctexPath=found->ugctexPath;opts.originalCanvasPath=found->canvasPath;
     if(encoderStr=="pca") opts.encoder=TextureProcessor::Bc1Encoder::PCA;
     if(bc1ModeStr=="fourColor") opts.bc1Mode=TextureProcessor::Bc1Mode::FourColor;
     else if(bc1ModeStr=="threeColor") opts.bc1Mode=TextureProcessor::Bc1Mode::ThreeColor;
     if(fitModeStr=="contain") opts.fitMode=TextureProcessor::FitMode::Contain;
     else if(fitModeStr=="fill") opts.fitMode=TextureProcessor::FitMode::Fill;
     else opts.fitMode=TextureProcessor::FitMode::Cover;
+    // Canvas shape — picks output dimensions when the slot isn't square. The
+    // WebUI exposes a Square/Book/TV dropdown next to the existing encoder
+    // controls; omitting the field keeps the upstream square-default.
+    if(shapeStr=="book")    opts.canvasShape=TextureProcessor::CanvasShape::Book;
+    else if(shapeStr=="tv") opts.canvasShape=TextureProcessor::CanvasShape::Tv;
+    else                    opts.canvasShape=TextureProcessor::CanvasShape::Square;
     // Matte color comes in as '#RRGGBB' (or empty = transparent). Only used
     // when fit=contain; otherwise the resize ignores it.
     if(!matteStr.empty() && matteStr.size()==7 && matteStr[0]=='#'){
@@ -5945,7 +6205,7 @@ static void HandleBgRemove(int fd,const Request& req){
     if(!found){SrvLog("BgRemove: entry not found: "+stem,true);Send500(fd,"Entry not found");return;}
     TextureProcessor::ImportOptions opts;
     opts.destStem=found->directory()+"/"+found->stem;
-    opts.writeCanvas=found->hasCanvas();opts.writeThumb=found->hasThumb();opts.thumbPath=found->thumbPath;opts.noSrgb=false;opts.originalUgctexPath=found->ugctexPath;
+    opts.writeCanvas=found->hasCanvas();opts.writeThumb=found->hasThumb();opts.thumbPath=found->thumbPath;opts.noSrgb=false;opts.originalUgctexPath=found->ugctexPath;opts.originalCanvasPath=found->canvasPath;
     {mutexLock(&s_bgMutex);s_bgJob={found->ugctexPath,opts};s_bgState=ImportState::Queued;s_bgResult="";mutexUnlock(&s_bgMutex);}
     SrvLog("BgRemove: job queued for main thread");
     bool timedOut=true;
@@ -6475,6 +6735,165 @@ static void HandleItemImage(int fd, const std::string& path) {
     Send302(fd, "https://raw.githubusercontent.com/ltdimages/images/main/" + name);
 }
 
+// ── Island Generator endpoints ──────────────────────────────────────────────
+//
+// All endpoints follow the same pattern:
+//   1. Load the relevant .sav file from tomodata:/.
+//   2. Call into IslandGen / SaveEditor helpers to mutate.
+//   3. Save back to disk + SaveMount::Commit().
+// Returns JSON {ok, ...stats} or {ok:false, error:...} on failure.
+
+static std::string GenFirstRunMarkerPath() { return "tomodata:/.tomotool_first_run"; }
+
+static bool GenFirstRunMarkerExists() {
+    struct stat st;
+    return stat(GenFirstRunMarkerPath().c_str(), &st) == 0;
+}
+
+static void HandleGenFirstRun(int fd) {
+    std::string j = std::string("{\"ok\":true,\"first_run\":")
+                  + (GenFirstRunMarkerExists() ? "true" : "false") + "}";
+    Send200(fd, "application/json", j);
+}
+
+static void HandleGenFirstRunClear(int fd) {
+    remove(GenFirstRunMarkerPath().c_str());
+    Send200(fd, "application/json", "{\"ok\":true}");
+}
+
+static void HandleGenTemplates(int fd) {
+    int sCount = 0, tCount = 0;
+    const IslandGen::SurfaceTheme* themes    = IslandGen::AllSurfaceThemes(&sCount);
+    const IslandGen::MapTemplate*  templates = IslandGen::AllMapTemplates(&tCount);
+
+    std::string j = "{\"ok\":true,\"themes\":[";
+    for (int i = 0; i < sCount; i++) {
+        if (i) j += ",";
+        j += "{\"id\":\""; j += themes[i].id; j += "\"}";
+    }
+    j += "],\"templates\":[";
+    bool first = true;
+    for (int i = 0; i < tCount; i++) {
+        // Hide templates whose bin2s payload is the 4-byte "STUB" placeholder
+        // (no real bytes shipped). Real templates are ~38 KB.
+        if (templates[i].size < 1024) continue;
+        if (!first) j += ",";
+        first = false;
+        j += "{\"id\":\"";          j += templates[i].id;
+        j += "\",\"name\":\"";      j += templates[i].displayName;
+        j += "\",\"description\":\""; j += templates[i].description;
+        j += "\"}";
+    }
+    j += "]}";
+    Send200(fd, "application/json", j);
+}
+
+static void HandleGenMap(int fd, const std::string& query) {
+    std::string mode = GetQueryParam(query, "mode");
+    std::string id   = GetQueryParam(query, "id");
+    if (mode.empty()) mode = "random";
+
+    SaveEditor::SavFile mp; std::string err;
+    if (!SaveEditor::Load("tomodata:/Map.sav", mp, err)) { Send500(fd, "load Map.sav: " + err); return; }
+
+    if (mode == "template") {
+        const IslandGen::MapTemplate* t = IslandGen::MapTemplateById(id.c_str());
+        if (!t) { Send500(fd, "unknown template id"); return; }
+        err = IslandGen::ApplyMapTemplate(mp, *t);
+        if (!err.empty()) { Send500(fd, err); return; }
+    } else {
+        // Random: pick a theme. If query carries a specific theme id, honor
+        // it; otherwise roll one uniformly.
+        std::string themeId = GetQueryParam(query, "theme");
+        const IslandGen::SurfaceTheme* th = themeId.empty()
+            ? nullptr
+            : IslandGen::SurfaceThemeById(themeId.c_str());
+        int tc = 0;
+        const IslandGen::SurfaceTheme* themes = IslandGen::AllSurfaceThemes(&tc);
+        if (!th) th = &themes[(unsigned)armGetSystemTick() % (unsigned)tc];
+        err = IslandGen::GenerateRandomMap(mp, *th);
+        if (!err.empty()) { Send500(fd, err); return; }
+    }
+    int moved = IslandGen::SnapActorsToLand(mp);
+    err = SaveEditor::Save("tomodata:/Map.sav", mp);
+    if (!err.empty()) { Send500(fd, "save Map.sav: " + err); return; }
+    SaveMount::Commit();
+
+    std::string j = "{\"ok\":true,\"actors_snapped\":" + std::to_string(moved) + "}";
+    Send200(fd, "application/json", j);
+}
+
+static void HandleGenHouses(int fd, const std::string& /*query*/) {
+    SaveEditor::SavFile mp, mi; std::string err;
+    if (!SaveEditor::Load("tomodata:/Map.sav", mp, err))  { Send500(fd, "load Map.sav: " + err); return; }
+    if (!SaveEditor::Load("tomodata:/Mii.sav", mi, err))  { Send500(fd, "load Mii.sav: " + err); return; }
+
+    int placed = IslandGen::AssignHousing(mi, mp);
+    err = SaveEditor::Save("tomodata:/Mii.sav", mi);
+    if (!err.empty()) { Send500(fd, "save Mii.sav: " + err); return; }
+    SaveMount::Commit();
+
+    std::string j = "{\"ok\":true,\"placed\":" + std::to_string(placed) + "}";
+    Send200(fd, "application/json", j);
+}
+
+static void HandleGenRels(int fd, const std::string& query) {
+    std::string mode = GetQueryParam(query, "mode");
+    if (mode.empty()) mode = "dense";
+
+    SaveEditor::SavFile mi; std::string err;
+    if (!SaveEditor::Load("tomodata:/Mii.sav", mi, err))  { Send500(fd, "load Mii.sav: " + err); return; }
+
+    int n = 0;
+    if (mode == "none") {
+        n = IslandGen::WipeRelationships(mi);
+    } else {
+        n = IslandGen::WriteDenseRelationships(mi);
+    }
+    err = SaveEditor::Save("tomodata:/Mii.sav", mi);
+    if (!err.empty()) { Send500(fd, "save Mii.sav: " + err); return; }
+    SaveMount::Commit();
+
+    std::string j = "{\"ok\":true,\"written\":" + std::to_string(n) + ",\"mode\":\"" + mode + "\"}";
+    Send200(fd, "application/json", j);
+}
+
+static void HandleGenWishes(int fd) {
+    SaveEditor::SavFile pl; std::string err;
+    if (!SaveEditor::Load("tomodata:/Player.sav", pl, err)) { Send500(fd, "load Player.sav: " + err); return; }
+
+    int n = IslandGen::UnlockAllWishes(pl);
+    err = SaveEditor::Save("tomodata:/Player.sav", pl);
+    if (!err.empty()) { Send500(fd, "save Player.sav: " + err); return; }
+    SaveMount::Commit();
+
+    std::string j = "{\"ok\":true,\"unlocked\":" + std::to_string(n) + "}";
+    Send200(fd, "application/json", j);
+}
+
+static void HandleGenLevels(int fd, const std::string& query) {
+    std::string minS = GetQueryParam(query, "min");
+    std::string maxS = GetQueryParam(query, "max");
+    int minLv = !minS.empty() ? atoi(minS.c_str()) : 100;
+    int maxLv = !maxS.empty() ? atoi(maxS.c_str()) : 150;
+    // Clamp to a reasonable Tomodachi range. Game caps mii level around 999.
+    if (minLv < 0)   minLv = 0;
+    if (maxLv > 999) maxLv = 999;
+
+    SaveEditor::SavFile mi; std::string err;
+    if (!SaveEditor::Load("tomodata:/Mii.sav", mi, err))  { Send500(fd, "load Mii.sav: " + err); return; }
+
+    int n = IslandGen::RandomizeMiiLevels(mi, minLv, maxLv);
+    err = SaveEditor::Save("tomodata:/Mii.sav", mi);
+    if (!err.empty()) { Send500(fd, "save Mii.sav: " + err); return; }
+    SaveMount::Commit();
+
+    std::string j = "{\"ok\":true,\"miis\":" + std::to_string(n)
+                  + ",\"min\":" + std::to_string(minLv)
+                  + ",\"max\":" + std::to_string(maxLv) + "}";
+    Send200(fd, "application/json", j);
+}
+
 static void HandleConnection(int fd){
     mutexLock(&s_mutex); s_lastConnectTick = armGetSystemTick(); mutexUnlock(&s_mutex);
     Request req;if(!ReadRequest(fd,req)){close(fd);return;}
@@ -6500,6 +6919,15 @@ static void HandleConnection(int fd){
     else if(req.method=="GET"  &&req.path=="/api/share/image")     HandleShareImage(fd,req.query);
     else if(req.method=="POST" &&req.path=="/api/share/import")    HandleShareImport(fd,req.query);
     else if(req.method=="GET"  &&req.path.compare(0,5,"/img/")==0)  HandleItemImage(fd,req.path);
+    // ── Island Generator endpoints (Phase B) ────────────────────────────────
+    else if(req.method=="GET"  &&req.path=="/api/genisland/first_run") HandleGenFirstRun(fd);
+    else if(req.method=="POST" &&req.path=="/api/genisland/first_run") HandleGenFirstRunClear(fd);
+    else if(req.method=="GET"  &&req.path=="/api/genisland/templates") HandleGenTemplates(fd);
+    else if(req.method=="POST" &&req.path=="/api/genisland/map")       HandleGenMap(fd,req.query);
+    else if(req.method=="POST" &&req.path=="/api/genisland/houses")    HandleGenHouses(fd,req.query);
+    else if(req.method=="POST" &&req.path=="/api/genisland/rels")      HandleGenRels(fd,req.query);
+    else if(req.method=="POST" &&req.path=="/api/genisland/wishes")    HandleGenWishes(fd);
+    else if(req.method=="POST" &&req.path=="/api/genisland/levels")    HandleGenLevels(fd,req.query);
     else Send404(fd);
     close(fd);
 }

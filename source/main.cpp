@@ -25,6 +25,8 @@
 #include "wishes_data.h"
 #include "u2net_infer.h"
 #include "i18n.h"
+#include "island_generator.h"
+#include "island_generator_runner.h"
 #include <string>
 #include <vector>
 #include <dirent.h>
@@ -536,7 +538,14 @@ static u64 gFrameKDown = 0;   // this frame's merged kDown
 static int gPNDir      = -1;  // -1 unset, 0 left, 1 right
 enum class Screen { AppletWarning, UpdateCheck, UpdateAvailable, UserPick,
                     BackupPrompt, BackingUp, Mounting, OnSwitch, SaveFeedback,
-                    Error, Settings };
+                    Error, Settings,
+                    // No-save bootstrap and bundle workflow (Island Generator).
+                    IslandGenPrompt, BundleCreate, BundlePick,
+                    // On-Switch Island Generator: a small config screen
+                    // followed by a progress screen while the background
+                    // worker walks the map/wishes/levels/fetch/houses/rels
+                    // pipeline. Replaces the old WebUI-only flow.
+                    IslandGenConfig, IslandGenBatchLtd, IslandGenRun };
 
 // Animated outline that hops to whichever side of a < / > pair was last pressed.
 static void EmitPrevNextHighlight(int subTag,
@@ -741,6 +750,139 @@ static void DrawGearIcon(int cx, int cy, int r, SDL_Color col) {
 
 
 
+// Floppy-disk glyph — outline disk shell, a small "shutter" at the top, and
+// a "label" rectangle in the lower half. `size` is the bounding box side
+// length; the icon is drawn centred on (cx, cy). Used as the per-user
+// restore-picker button under each card in DrawUserPick.
+static void DrawFloppyIcon(int cx, int cy, int size, SDL_Color col) {
+    if (size < 8) return;
+    int s = size;
+    int x0 = cx - s/2;
+    int y0 = cy - s/2;
+
+    // Use FillRectSquare throughout so the floppy keeps its sharp 90°
+    // corners on every theme. Plain FillRect respects the theme's corner
+    // radius — fine for the surrounding pill box, but it turned the actual
+    // floppy body into a rounded blob on the Switch theme, which doesn't
+    // read as a floppy disk anymore.
+
+    // Outer disk shell — filled body with a slightly inset border for depth.
+    FillRectSquare(x0, y0, s, s, col);
+
+    // Shutter (top): small inset rectangle missing one corner — drawn as a
+    // darker recess so the shape reads as a floppy. We use the background
+    // colour to "punch" it out.
+    int shW = s * 60 / 100;
+    int shH = s * 30 / 100;
+    int shX = cx - shW/2;
+    int shY = y0 + s * 12 / 100;
+    FillRectSquare(shX, shY, shW, shH, COL_BG);
+    // Notched corner cue — small square on the shutter's top-right.
+    int notch = s * 14 / 100;
+    if (notch > 1)
+        FillRectSquare(shX + shW - notch, shY, notch, notch, col);
+
+    // Label (bottom): inset rectangle in the lower half of the disk.
+    int lbW = s * 76 / 100;
+    int lbH = s * 36 / 100;
+    int lbX = cx - lbW/2;
+    int lbY = y0 + s - lbH - (s * 10 / 100);
+    FillRectSquare(lbX, lbY, lbW, lbH, COL_BG);
+    // Two faint "lines" on the label for the floppy paper-strip look.
+    int lineH = std::max(1, s / 14);
+    FillRectSquare(lbX + lbW * 12/100, lbY + lbH * 30/100, lbW * 76/100, lineH, col);
+    FillRectSquare(lbX + lbW * 12/100, lbY + lbH * 60/100, lbW * 76/100, lineH, col);
+}
+
+// Pencil glyph posed like a real writing pencil: tip pointing straight
+// down, eraser at the top, with a gentle 15° lean to the right so it reads
+// "held by a right hand mid-write" rather than "abstract diagonal stroke".
+// The body is split into sharpened lead → wood → ferrule → eraser cap, so
+// the silhouette is recognisable even at icon size.
+static void DrawPencilIcon(int cx, int cy, int size, SDL_Color col) {
+    if (size < 8) return;
+    int s = size;
+    int x0 = cx - s/2;
+    int y0 = cy - s/2;
+
+    // Pencil axis: vertical, length = s. We define a local frame where
+    //   frac = 0  → bottom-of-box centre  (the sharpened tip)
+    //   frac = 1  → top-of-box centre     (the back of the eraser)
+    // and lean the top of the pencil slightly right of the bottom so the
+    // shape reads as a held writing pencil rather than a flagpole.
+    const float L          = (float)(s - 1);
+    // Lean ~30% of the icon size: the bottom (tip) sits to the LEFT of
+    // center and the top (eraser) sits to the RIGHT. At small icon sizes
+    // anything under ~20% reads as a straight vertical pencil; 30% gives
+    // a clear "writing-at-an-angle" silhouette pointing down-left.
+    const float leanPx     = s * 0.30f;
+    const float halfT      = s * 0.16f; // body half-thickness, horizontal
+    const float tipFrac    = 0.22f;     // 0..tipFrac: tapered lead+wood
+    const float bandFrac   = 0.74f;     // ferrule line position
+    const float eraserFrac = 0.82f;     // eraserFrac..1.0: eraser cap
+    // Eraser sticks out a touch wider than the wood body — same trick a
+    // real pencil ferrule does, and it gives the top of the icon a clear
+    // silhouette beat distinct from the shaft.
+    const float eraserBoost = 1.18f;
+
+    SDL_Color dark = { (uint8_t)(col.r * 55 / 100),
+                       (uint8_t)(col.g * 55 / 100),
+                       (uint8_t)(col.b * 55 / 100), col.a };
+
+    auto putPx = [&](int x, int y, SDL_Color c) {
+        SDL_SetRenderDrawColor(gRen, c.r, c.g, c.b, c.a);
+        SDL_RenderDrawPoint(gRen, x, y);
+    };
+
+    for (int dy = 0; dy < s; dy++) {
+        // u runs UP the pencil — bottom row is u=0 (the tip), top row is u=L.
+        float u    = (float)(s - 1 - dy);
+        float frac = u / L;
+
+        // Centerline X for this row, in LOCAL [0, s) coordinates — the inner
+        // loop compares against `dx` which is local, so mixing absolute `cx`
+        // here would push the entire shape off-screen (a long-standing bug
+        // hidden by the old surrounding black-box background).
+        float localMid = (float)(s - 1) * 0.5f;
+        float tipCx    = localMid - leanPx * 0.5f;
+        float eraserCx = localMid + leanPx * 0.5f;
+        float centerX  = tipCx + (eraserCx - tipCx) * frac;
+
+        // Thickness as a function of position along the axis.
+        float t = halfT;
+        if (frac < tipFrac) {
+            // Sharp cone — linearly taper from 0 (point) to halfT.
+            t = halfT * (frac / tipFrac);
+        } else if (frac >= eraserFrac) {
+            t = halfT * eraserBoost;
+        }
+
+        for (int dx = 0; dx < s; dx++) {
+            float v = (float)dx - centerX;
+            if (fabsf(v) > t) continue;
+
+            // 1-pixel gap perpendicular to the axis at the wood→ferrule
+            // and ferrule→eraser joins, so the eye reads three sections.
+            if (fabsf(frac - bandFrac)   * L < 0.55f) continue;
+            if (fabsf(frac - eraserFrac) * L < 0.55f) continue;
+
+            SDL_Color c;
+            if (frac < tipFrac * 0.45f) {
+                c = dark;       // bare graphite lead at the very tip
+            } else if (frac < tipFrac) {
+                c = col;        // wood reveal between lead and body
+            } else if (frac >= bandFrac && frac < eraserFrac) {
+                c = dark;       // metal ferrule band
+            } else if (frac >= eraserFrac) {
+                c = col;        // eraser cap — same colour, wider silhouette
+            } else {
+                c = col;        // wood body
+            }
+            putPx(x0 + dx, y0 + dy, c);
+        }
+    }
+}
+
 // ─── Screens ──────────────────────────────────────────────────────────────────
 // (Screen enum was forward-declared earlier so the highlight helper could use it.)
 
@@ -751,6 +893,54 @@ static std::vector<SaveMount::UserInfo> gUsers;
 static int         gUserSel   = 0;
 static bool        gBackupFull = false;  // true when MAX_BACKUPS slots are used
 static std::vector<SDL_Texture*> gAvatarTextures;
+
+// ─── Island Generator: bundle workflow state (Phase C) ───────────────────────
+// gBundleCreateSel: 0 = Blank, 1 = Generated. Both create a fresh bundle dir
+//   under /switch/TomoToolNX/Bundles/island_<timestamp>/. "Generated" sets a
+//   marker file so the next user that adopts the bundle gets the web UI
+//   generator overlay on load.
+static int  gBundleCreateSel = 0;
+// State for the post-BundleCreate "apply this island to a user" screen.
+// `gPendingBundleName` is the folder name under BUNDLE_ROOT we just wrote;
+// `gPendingBundleGenerated` mirrors the gBundleCreateSel choice so we can
+// drop the WebUI-overlay sentinel after the bundle is copied onto the
+// chosen user's save.
+static std::string gPendingBundleName;
+static bool        gPendingBundleGenerated = false;
+static int         gBundleApplyUserSel = 0;
+// Overwrite-confirm modal shown if the selected user already has a save.
+static bool        gShowBundleOverwriteConfirm = false;
+// Two-second cooldown (120 frames at 60 fps) before the Overwrite button
+// becomes pressable, mirroring the save-data warning. Stops accidental
+// double-A from wiping someone's town the same way the save warning stops
+// accidental edits.
+static int         gBundleOverwriteCountdown   = 0;
+// When true, the Screen::BackingUp completion handler should hand off to the
+// bundle-apply step (and from there to IslandGenConfig or BackupPrompt)
+// instead of the usual OnSwitch transition. Used so the overwrite path can
+// snapshot the user's existing save before clobbering it — same code path as
+// the standard pre-edit backup, threaded through the bundle-apply flow.
+static bool        gApplyBundleAfterBackup     = false;
+static int         gApplyBundleUserIdx         = -1;
+// On-Switch Island Generator config (Screen::IslandGenConfig):
+//   gIslandGenSel: 0 = Map row, 1 = Relationships row, 2 = Go button.
+//   gIslandGenMapMode: "random" or "template:<id>".
+//   gIslandGenRelMode: "dense" or "none".
+// gIslandGenSel: row index for the on-Switch config screen. Now 4 rows:
+//   0=Map, 1=Relationships, 2=Batch LTD toggle, 3=Go button.
+static int         gIslandGenSel       = 3;
+static std::string gIslandGenMapMode   = "random";
+static std::string gIslandGenRelMode   = "dense";
+// On true, runner jumps to Screen::IslandGenBatchLtd before starting so
+// the user can drop .ltd files into /switch/TomoToolNX/Miis/ via MTP.
+static bool        gIslandGenBatchLtd  = false;
+// Snapshot of the most recent runner state for the progress screen. Updated
+// each frame from IslandGenRunner::Snapshot() so the UI only has to look at
+// these locals rather than re-locking the runner mutex.
+static IslandGenRunner::Progress gIslandGenProgress;
+static std::string gBundleMsg;          // toast shown on UserPick after creation
+static SDL_Color   gBundleMsgCol = {180, 180, 180, 255};
+static int  gBundleMsgFrames = 0;       // ttl in frames; 0 = hidden
 
 // ─── Log (WebUI screen) ───────────────────────────────────────────────────────
 
@@ -774,6 +964,13 @@ static std::vector<UgcTextureEntry> gEntries;
 static int          gEntrySel    = 0;
 static int          gEntryScroll = 0;          // position in filtered list (top of visible window)
 static std::string  gUgcFilter;                // active substring filter (lowercase)
+// Active category filter for the UGC list. -1 means "All categories"; otherwise
+// an index into gUgcKinds[] (Food, Cloth, Goods, Interior, Exterior, Map Object,
+// Map Floor, Face Paint). Combined with gUgcFilter via AND in UgcMatchesFilter.
+static int          gUgcKindFilter = -1;
+// True while the category picker modal is open.
+static bool         gShowUgcKindPicker = false;
+static int          gUgcKindPickerSel  = 0;
 static std::vector<int> gFilteredEntries;      // indices into gEntries that match the filter
 static SDL_Texture* gPreviewTex  = nullptr;
 static std::string  gPreviewStem;
@@ -783,6 +980,10 @@ static bool         gPreviewNoSrgb  = false; // color encoding toggle: false=sRG
 static TextureProcessor::Bc1Encoder gEncMode = TextureProcessor::Bc1Encoder::Custom;
 static TextureProcessor::Bc1Mode    gBc1Mode = TextureProcessor::Bc1Mode::Auto;
 static TextureProcessor::FitMode    gFitMode = TextureProcessor::FitMode::Cover;
+// Default canvas shape applied to every UGC import. Square is correct for
+// most slots; Book/Tv are manual overrides because byte-count detection
+// alone can't tell which mesh a given slot is bound to.
+static TextureProcessor::CanvasShape gCanvasShape = TextureProcessor::CanvasShape::Square;
 static TextureProcessor::Matte      gMatte;            // transparent by default
 
 // File browser
@@ -849,6 +1050,9 @@ static void TSelUser (int idx);
 static void TSelUgc  (int idx);
 static void TUgcOpenSearch(int);
 static void TUgcClearSearch(int);
+static void TUgcOpenKindPicker(int);
+static void TUgcPickKind(int);
+static void TUgcCloseKindPicker(int);
 static void TSelBrowse(int idx);
 static void TAdjust  (int delta); // encoded: negative=left, positive=right; |val| = scale
 static void TUndoNameLang(int);
@@ -872,8 +1076,12 @@ static void TBLSel(int idx);
 static void TBLPickSel(int idx);
 static void BlOpenPicker(int blSel, int miiIdx);
 static void TAckSaveWarning(int);
+static void TToggleMtp(int);
+static void TAckMtpWarningYes(int);
+static void TAckMtpWarningNo(int);
 static void TPlayerKbd(int);
 static void TMiiStatsKbd(int);
+static void TUgcRenameTap(int);
 static void DrawSaveWarning();
 static void DrawFileBrowser();
 static void TUndoPlayer(int);
@@ -935,6 +1143,10 @@ static int  gPlayerBtnSel   = 3;     // 0-7 for 8 Player numeric buttons
 static int  gMiiBtnSel      = 2;     // 0-5 for 6 MiiStats numeric buttons
 static int  gMiiLtdBtnSel   = 0;     // 0=import .ltd  1=export .ltd  2=download from TomodachiShare (Name field)
 static bool gMiiNameKbdReq  = false; // touch-triggered open of name keyboard
+// Touch-triggered open of the on-screen keyboard for renaming the currently
+// previewed UGC slot. Handled at end-of-frame in the OnSwitch loop so the
+// applet call doesn't run mid-HitFire dispatch.
+static bool gUgcRenameKbdReq = false;
 static bool gBtnTouchActive = false; // set by TAdjust (touch), cleared after use
 static bool gRelDateKbdReq  = false;
 static int  gRelDatePairIdx = -1;
@@ -971,6 +1183,12 @@ static bool                     gShowRestorePicker = false;
 static std::vector<std::string> gRestoreList;
 static int                      gRestoreSel        = 0;
 static int                      gRestoreScroll     = 0;
+// UID-hex tag identifying which user the open restore picker is scoped to.
+// Set when the floppy-disk button under a user card is activated; the picker
+// only lists backups belonging to that user, and the restore action mounts
+// the same user's save before copying files in.
+static std::string              gRestorePickerUid;
+static int                      gRestorePickerUserIdx = -1;
 // Confirmation modal kind for the restore picker:
 //   0 = no modal, 1 = "Restore this backup?", 2 = "Delete this backup?"
 static int                      gRestoreConfirmKind = 0;
@@ -985,6 +1203,10 @@ static void TSelTexSettingsItem(int i) { gTexSettingsSel = i; }
 static void TRestorePickSel(int i)  { gRestoreSel  = i; }
 static void TRestoreConfirmA(int)   { gSimKDown |= HidNpadButton_A; }
 static void TRestoreConfirmB(int)   { gSimKDown |= HidNpadButton_B; }
+// Touch handler for the per-user floppy-disk button in DrawUserPick — selects
+// the tapped user card and synthesises an X press, which the UserPick input
+// handler interprets as "open the restore picker for this account".
+static void TUserRestore(int idx);
 
 // ─── Player field table ───────────────────────────────────────────────────────
 struct SaveFieldDef {
@@ -1223,7 +1445,11 @@ static std::string FitNodeName(const std::string& s, TTF_Font* f, int maxW) {
 }
 
 // MiiStats sub-tab state
-enum class MiiStatsSubTab { Stats=0, Belongings=1, Habits=2, Words=3, Relations=4, Housing=5, Social=6, Browse=7 };
+// Subtab order: Stats, Words, Relations, Items (Belongings), Habits, Housing, Social.
+// Integer values match the display order so casting `(int)gMiiStatsSubTab`
+// is equal to the visible tab index. Browse stays off-strip (reached via the
+// upload icon on the Stats subtab, not via the pill bar).
+enum class MiiStatsSubTab { Stats=0, Words=1, Relations=2, Belongings=3, Habits=4, Housing=5, Social=6, Browse=7 };
 // Number of sub-tabs reachable via the pill bar and the Y-cycle (Stats..Housing).
 // Browse (7) sits outside this cycle and is only reachable via the upload-icon
 // button next to "export .ltd" on the Stats sub-tab.
@@ -1482,6 +1708,12 @@ static OnSwitchMode    gPrevOnSwitchMode = OnSwitchMode::UGC;
 
 // Save editor first-launch warning
 static bool         gSaveWarningAcked    = false;
+// Has the user acknowledged the "MTP may crash on emulator" warning once?
+// Persisted to config so the prompt only ever appears the first time the
+// user tries to start MTP. The MTP *running* state itself is never persisted
+// — that would let a Ryujinx user crash-on-boot in an infinite loop.
+static bool         gMtpWarningAcked     = false;
+static bool         gShowMtpWarning      = false;
 static bool         gShowSaveWarning     = false;
 static int          gSaveWarningCountdown = 0;
 static OnSwitchMode gSaveWarningTarget   = OnSwitchMode::Player;
@@ -1516,6 +1748,28 @@ static u64 NavRepeat(u64 kDown, u64 kHeld) {
 static void TSelUser(int idx) {
     if (idx>=0 && idx<(int)gUsers.size()) { gUserSel=idx; gSimKDown|=HidNpadButton_A; }
 }
+// Tap the trailing "+" tile in the user picker. Routes to BundleCreate by
+// pointing gUserSel at the sentinel slot then synthesising an A press, which
+// the UserPick handler interprets as "open bundle-create".
+static void TBundleNewTap(int /*unused*/) {
+    gUserSel = (int)gUsers.size();
+    gSimKDown |= HidNpadButton_A;
+}
+static void TUserRestore(int idx) {
+    if (idx < 0 || idx >= (int)gUsers.size()) return;
+    gUserSel = idx;
+    gSimKDown |= HidNpadButton_X;
+}
+// BundleApply: tapping a user card selects it and fires A (same pattern as
+// the main user picker — keeps the controller path and the touch path on a
+// single dispatch).
+static void TBundleApplyPickUser(int idx) {
+    if (idx < 0 || idx >= (int)gUsers.size()) return;
+    gBundleApplyUserSel = idx;
+    gSimKDown |= HidNpadButton_A;
+}
+static void TBundleApplyOverwriteYes(int) { gSimKDown |= HidNpadButton_A; }
+static void TBundleApplyOverwriteNo(int)  { gSimKDown |= HidNpadButton_B; }
 // TSelUgc defined after VISIBLE and LoadPreview are declared (below)
 static void TSelBrowse(int idx) {
     if (idx>=0 && idx<(int)gBrowseEntries.size()) { gBrowseSel=idx; gSimKDown|=HidNpadButton_A; }
@@ -1526,6 +1780,10 @@ static void TAdjust(int delta) {
     else         { gTouchScale= delta; gSimKDown|=HidNpadButton_Right; }
     gBtnTouchActive = true;
 }
+
+// (TPlayerNumKbd lives further down — after ShowNumberKeyboard and
+// PlayerLabelT are declared. Placing it here would force a forward decl;
+// it's only used by the player tab anyway, so we keep it co-located.)
 static void TSelPlayerField(int idx) { gPlayerFieldSel=idx; }
 static void TSetSkinTone(int idx) {
     if (!gPlayerSav.loaded) return;
@@ -1730,6 +1988,76 @@ static void BlRebuildFilter() {
         if (match) gBlFiltered.push_back(i);
     }
 }
+// MTP USB file-sharing toggle. Init is gated behind a one-time "this can
+// crash on emulators" warning; once the user clicks through, subsequent
+// toggles flip immediately. We never persist the running state — that
+// would let a Ryujinx user crash on every boot in an infinite loop.
+static void TToggleMtp(int) {
+    if (MtpServer::IsRunning()) {
+        MtpServer::Exit();
+        return;
+    }
+    if (!gMtpWarningAcked) { gShowMtpWarning = true; return; }
+    MtpServer::Init();
+}
+// Modal confirm — proceed with starting MTP and remember the ack.
+static void TAckMtpWarningYes(int) {
+    gShowMtpWarning   = false;
+    gMtpWarningAcked  = true;
+    SaveConfig();
+    MtpServer::Init();
+}
+// Modal cancel — just close, don't start MTP and don't set the ack so
+// the warning fires again next time.
+static void TAckMtpWarningNo(int) {
+    gShowMtpWarning = false;
+}
+
+// "MTP may crash on emulators" warning modal. Drawn on top of whichever
+// screen armed it — currently the WebUI tab and Screen::IslandGenBatchLtd.
+// Caller is responsible for the gShowMtpWarning gate; this function only
+// renders + registers the Yes/No hit boxes.
+static void DrawMtpWarningModal() {
+    SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(gRen, 0, 0, 0, 190);
+    SDL_Rect full = { 0, 0, SCREEN_W, SCREEN_H };
+    SDL_RenderFillRect(gRen, &full);
+
+    // Wider box + Sm-font body so localized strings (German/Russian/
+    // Chinese variants tend to be longest) don't overrun the frame.
+    const int mW = 760, mH = 240;
+    const int mx = (SCREEN_W - mW) / 2;
+    const int my = (SCREEN_H - mH) / 2;
+    SDL_Color accent = {220, 160, 60, 255};
+    FillRect(mx, my, mW, mH, {18, 16, 12, 255});
+    DrawRect(mx, my, mW, mH, accent);
+    FillRect(mx, my, mW, 4, accent);
+
+    DrawTextC(Lang::T("webui.mtp.warn.title"),
+              SCREEN_W/2, my + 36, accent, Font::Lg);
+    DrawTextC(Lang::T("webui.mtp.warn.l1"),
+              SCREEN_W/2, my + 90,  COL_TEXT, Font::Sm);
+    DrawTextC(Lang::T("webui.mtp.warn.l2"),
+              SCREEN_W/2, my + 114, COL_DIM,  Font::Sm);
+    DrawTextC(Lang::T("webui.mtp.warn.l3"),
+              SCREEN_W/2, my + 138, COL_DIM,  Font::Sm);
+
+    const int bW = 200, bH = 42, gap = 16;
+    int by = my + mH - bH - 18;
+    int bxA = SCREEN_W/2 - gap/2 - bW;
+    int bxB = SCREEN_W/2 + gap/2;
+    FillRect(bxA, by, bW, bH, COL_SEL);
+    DrawRect(bxA, by, bW, bH, accent);
+    DrawTextC("A  " + Lang::T("webui.mtp.warn.yes"),
+              bxA + bW/2, by + bH/2, accent, Font::Md);
+    HitAdd(bxA, by, bW, bH, TAckMtpWarningYes, 0);
+    FillRect(bxB, by, bW, bH, COL_PANEL);
+    DrawRect(bxB, by, bW, bH, COL_BORDER);
+    DrawTextC("B  " + Lang::T("webui.mtp.warn.no"),
+              bxB + bW/2, by + bH/2, COL_DIM, Font::Md);
+    HitAdd(bxB, by, bW, bH, TAckMtpWarningNo, 0);
+}
+
 static void TAckSaveWarning(int) {
     gSaveWarningAcked = true; gShowSaveWarning = false; SaveConfig(); HttpServer::SetSaveWarnAcked(true);
     gOnSwitchMode = gSaveWarningTarget;
@@ -1749,6 +2077,7 @@ static void TAckSaveWarning(int) {
 }
 static void TPlayerKbd(int) { gSimKDown|=HidNpadButton_A; }
 static void TMiiStatsKbd(int) { gMiiNameKbdReq = true; }
+static void TUgcRenameTap(int) { gUgcRenameKbdReq = true; }
 
 // ─── On-screen keyboard ───────────────────────────────────────────────────────
 static std::string ShowKeyboard(const std::string& guide, const std::string& initial, int maxLen=32) {
@@ -1764,6 +2093,53 @@ static std::string ShowKeyboard(const std::string& guide, const std::string& ini
     Result rc = swkbdShow(&kbd, buf, sizeof(buf));
     swkbdClose(&kbd); // must be paired with every successful swkbdCreate
     return R_SUCCEEDED(rc) ? std::string(buf) : initial;
+}
+
+// Pops the number-pad swkbd preset and returns the entered digits as a
+// string (empty if cancelled). Used by fields like Player.Money where the
+// value range (0..millions) makes +/- nudge buttons impractical.
+static std::string ShowNumberKeyboard(const std::string& guide,
+                                      const std::string& initial,
+                                      int maxLen = 10) {
+    SwkbdConfig kbd;
+    if (R_FAILED(swkbdCreate(&kbd, 0))) return initial;
+    swkbdConfigMakePresetDefault(&kbd);
+    swkbdConfigSetType(&kbd, SwkbdType_NumPad);
+    swkbdConfigSetHeaderText(&kbd, guide.c_str());
+    swkbdConfigSetStringLenMin(&kbd, 0);
+    swkbdConfigSetStringLenMax(&kbd, (u32)maxLen);
+    swkbdConfigSetInitialText(&kbd, initial.c_str());
+    char buf[64] = {};
+    Result rc = swkbdShow(&kbd, buf, sizeof(buf));
+    swkbdClose(&kbd);
+    return R_SUCCEEDED(rc) ? std::string(buf) : std::string();
+}
+
+// "1500000" -> "15 000,00". Treats the input as a cents amount: the last
+// two digits are cents, everything else is whole-dollar with a space as
+// thousand separator. Comma between dollars and cents (European format).
+static std::string FormatThousands(uint64_t cents) {
+    uint64_t whole = cents / 100;
+    uint64_t frac  = cents % 100;
+    std::string s = std::to_string(whole);
+    int n = (int)s.size();
+    std::string out;
+    if (n <= 3) {
+        out = s;
+    } else {
+        out.reserve(n + n / 3 + 4);
+        int firstGroup = n % 3;
+        if (firstGroup == 0) firstGroup = 3;
+        out.append(s, 0, (size_t)firstGroup);
+        for (int i = firstGroup; i < n; i += 3) {
+            out.push_back(' ');
+            out.append(s, (size_t)i, 3);
+        }
+    }
+    char buf[8];
+    std::snprintf(buf, sizeof(buf), ",%02u", (unsigned)frac);
+    out += buf;
+    return out;
 }
 
 // ─── Housing helpers ──────────────────────────────────────────────────────────
@@ -2014,7 +2390,10 @@ static void THousingConfirm(int choice) {
             else                         HousingWriteLoc(occ, -1, -1);
             break;
         case 1: { // move occupant to next free room of the same house
-            int fr = HousingLowestFreeRoom(edH, ed, occ);
+            // Same merge-trap as HousingDoDrop: do NOT exclude the editor
+            // (ed) — they're correctly at (edH, edR) and we want that room
+            // to count as taken. Exclude only the occupant we're moving.
+            int fr = HousingLowestFreeRoom(edH, occ, -1);
             if (fr < 0) HousingWriteLoc(occ, -1, -1);
             else        HousingWriteLoc(occ, edH, fr);
             break;
@@ -2084,7 +2463,15 @@ static void HousingDoDrop(int houseId, int room) {
             placed = true;
         }
         if (!placed) {
-            int free = HousingLowestFreeRoom(houseId, picked, occ);
+            // IMPORTANT: do NOT exclude `picked` from the free-room scan.
+            // We just wrote picked into (houseId, room); excluding them
+            // would make the room look free and we'd write occ into the
+            // same room, producing the "two miis in one room" merge that
+            // corrupts Mii.sav. We DO exclude occ because that's the Mii
+            // we're trying to relocate — their current save entry still
+            // points at (houseId, room) and we don't want it to count
+            // against the free-room lookup.
+            int free = HousingLowestFreeRoom(houseId, occ, -1);
             if (free < 0) HousingWriteLoc(occ, -1, -1);
             else          HousingWriteLoc(occ, houseId, free);
         }
@@ -2845,9 +3232,47 @@ static std::string FormatStem(const std::string& stem) {
     return stem;
 }
 
+// UGC categories — index matches gUgcKindFilter when non-negative. The `prefix`
+// is the substring that appears in the stem ("UgcFood003", "UgcMapObject003"...).
+// `labelKey` is a Lang::T key so categories can be translated.
+struct UgcKindDef { const char* prefix; const char* labelKey; };
+static const UgcKindDef gUgcKinds[] = {
+    { "Food",      "ugc.kind.food"      },
+    { "Cloth",     "ugc.kind.cloth"     },
+    { "Goods",     "ugc.kind.goods"     },
+    { "Interior",  "ugc.kind.interior"  },
+    { "Exterior",  "ugc.kind.exterior"  },
+    { "MapObject", "ugc.kind.map_object"},
+    { "MapFloor",  "ugc.kind.map_floor" },
+    { "FacePaint", "ugc.kind.face_paint"},
+};
+static const int gUgcKindCount = (int)(sizeof(gUgcKinds) / sizeof(gUgcKinds[0]));
+
+// Map a stem (e.g. "UgcMapObject007") to its category index, or -1 if it
+// doesn't start with "Ugc<prefix>". Longest prefix wins so "MapObject" beats
+// "Map" — but we keep prefixes disjoint in the table to avoid surprises.
+static int UgcKindOfStem(const std::string& stem) {
+    if (stem.size() < 4 || stem.compare(0, 3, "Ugc") != 0) return -1;
+    int best = -1, bestLen = 0;
+    for (int i = 0; i < gUgcKindCount; i++) {
+        size_t pl = strlen(gUgcKinds[i].prefix);
+        if (stem.size() < 3 + pl) continue;
+        if (stem.compare(3, pl, gUgcKinds[i].prefix) != 0) continue;
+        if ((int)pl > bestLen) { best = i; bestLen = (int)pl; }
+    }
+    return best;
+}
+
 // ── UGC list filter ─────────────────────────────────────────────────────────
-// Case-insensitive substring match against display name AND stem.
+// Case-insensitive substring match against display name AND stem, ANDed with
+// the active category filter (gUgcKindFilter).
 static bool UgcMatchesFilter(int gEntriesIdx) {
+    const auto& e = gEntries[gEntriesIdx];
+
+    // Category gate first — cheap rejection when "All" isn't selected.
+    if (gUgcKindFilter >= 0 && gUgcKindFilter < gUgcKindCount) {
+        if (UgcKindOfStem(e.stem) != gUgcKindFilter) return false;
+    }
     if (gUgcFilter.empty()) return true;
     auto contains = [&](const std::string& hay) -> bool {
         size_t nlen = gUgcFilter.size();
@@ -2864,7 +3289,6 @@ static bool UgcMatchesFilter(int gEntriesIdx) {
         }
         return false;
     };
-    const auto& e = gEntries[gEntriesIdx];
     std::string name = MiiManager::GetUgcName(e.stem);
     if (!name.empty() && contains(name)) return true;
     return contains(e.stem);
@@ -2896,8 +3320,29 @@ static int UgcFilterPos(int realIdx) {
 static void LoadPreview(const UgcTextureEntry& e) {
     FreePreview();
     RgbaImage img;
-    std::string err = TextureProcessor::DecodeFile(e.ugctexPath, img, gPreviewNoSrgb);
-    if (!err.empty()) { gOnSwitchMsg=err; gOnSwitchMsgCol=COL_RED; return; }
+    // Prefer the .canvas.zs when it's non-square: the .ugctex.zs is always
+    // forced into one of the 3 square BC layouts (256/384/512) so for
+    // books/TVs the user would never see the rectangular result picked in
+    // the canvas-shape setting. The canvas is the high-quality RGBA slot
+    // the game actually maps onto the book / TV mesh, and the decoder
+    // already handles the 256-wide × N-tall case.
+    bool usedCanvas = false;
+    if (e.hasCanvas()) {
+        std::vector<uint8_t> raw = TextureProcessor::ZstdDecompress(e.canvasPath);
+        if (raw.size() >= 4) {
+            int totalPx = (int)(raw.size() / 4);
+            int side    = (int)std::sqrt((double)totalPx);
+            bool rectangular = !(side > 0 && side * side == totalPx);
+            if (rectangular) {
+                std::string cerr = TextureProcessor::DecodeCanvas(raw, img, gPreviewNoSrgb);
+                if (cerr.empty()) usedCanvas = true;
+            }
+        }
+    }
+    if (!usedCanvas) {
+        std::string err = TextureProcessor::DecodeFile(e.ugctexPath, img, gPreviewNoSrgb);
+        if (!err.empty()) { gOnSwitchMsg=err; gOnSwitchMsgCol=COL_RED; return; }
+    }
     SDL_Surface* surf = SDL_CreateRGBSurfaceFrom(
         img.pixels.data(), img.width, img.height, 32, img.width*4,
         0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
@@ -3049,6 +3494,8 @@ static void DoOnSwitchImport(const std::string& pngPath) {
     opts.thumbPath          = gEntries[gEntrySel].thumbPath;
     opts.noSrgb             = gPreviewNoSrgb;
     opts.originalUgctexPath = gEntries[gEntrySel].ugctexPath;
+    opts.originalCanvasPath = gEntries[gEntrySel].canvasPath;
+    opts.canvasShape        = gCanvasShape;
     opts.encoder            = gEncMode;
     opts.bc1Mode            = gBc1Mode;
     opts.fitMode            = gFitMode;
@@ -3099,6 +3546,9 @@ static void TDoUgcExportLtd(int) { DoUgcExportLtd(); }
 static void TSetEncMode(int v) { gEncMode = (TextureProcessor::Bc1Encoder)v; SaveConfig(); }
 static void TSetBc1Mode(int v) { gBc1Mode = (TextureProcessor::Bc1Mode)v; SaveConfig(); }
 static void TSetFitMode(int v) { gFitMode = (TextureProcessor::FitMode)v; SaveConfig(); }
+static void TSetCanvasShape(int v) {
+    gCanvasShape = (TextureProcessor::CanvasShape)v; SaveConfig();
+}
 // Three matte presets for on-Switch. The WebUI has a full hex picker; on a
 // controller a 3-button stepper covers the typical cases without keyboard.
 static void TSetMatte  (int v) {
@@ -3247,7 +3697,10 @@ static void DrawRestorePicker() {
     const int listW = 720, listX = (SCREEN_W - listW) / 2;
     const int rowH  = 72,  rowGap = 6;
     const int listY = 104;
-    const int RVIS  = 6;
+    // Keep this in sync with the input handler in main.cpp's UserPick
+    // case (it uses RVIS = 7 for the page-down math). 7 rows fit between
+    // listY = 104 and the footer at ~y=688 with rowH+rowGap = 78 each.
+    const int RVIS  = 7;
 
     // ── Summary strip above the list ───────────────────────────────────────
     {
@@ -3306,9 +3759,11 @@ static void DrawRestorePicker() {
             dateStr = n;
         }
         int textX = listX + 16;
-        DrawText(dateStr, textX, ry + 14, sel ? COL_TEXT : COL_DIM, Font::Md);
+        // Bumped up ~4 px so the date+time stack sits centered on the
+        // row instead of biased toward the bottom edge.
+        DrawText(dateStr, textX, ry + 10, sel ? COL_TEXT : COL_DIM, Font::Md);
         if (!timeStr.empty())
-            DrawText(timeStr, textX, ry + rowH - 24, COL_DIM, Font::Sm);
+            DrawText(timeStr, textX, ry + rowH - 28, COL_DIM, Font::Sm);
 
         // ── Right-side: position badge + (when selected) action chips ────
         std::string badgeStr;
@@ -3425,21 +3880,22 @@ static void DrawSettings() {
     SDL_RenderClear(gRen);
 
     if (gShowFileBrowser)    { DrawFileBrowser();    Present(); return; }
-    if (gShowRestorePicker)  { DrawRestorePicker();  Present(); return; }
+    // The restore picker now lives on the user picker (per-user floppy button),
+    // so Settings no longer needs the overlay branch.
 
     DrawHeader(Lang::T("settings.title"));
 
     struct SettingsItem { const char* labelKey; const char* descKey; };
-    // Row order: Language → Theme → Export Path → Max Backups → Restore.
-    // Language + Theme grouped at the top as the two "display" prefs.
+    // Row order: Language → Theme → Export Path → Max Backups.
+    // The per-user "Restore Backup" action lives on the user picker as a
+    // floppy-disk button under each user card — see DrawUserPick.
     static const SettingsItem ITEMS[] = {
         { "settings.item.lang",       "settings.item.lang.desc"    },
         { "settings.item.theme",      "settings.item.theme.desc"   },
         { "settings.item.export",     "settings.item.export.desc"  },
         { "settings.item.maxbk",      "settings.item.maxbk.desc"   },
-        { "settings.item.restore",    "settings.item.restore.desc" },
     };
-    static const int ITEM_COUNT = 5;
+    static const int ITEM_COUNT = 4;
 
     const int listW = 720, listX = (SCREEN_W - listW) / 2;
     const int rowH  = 68,  rowGap = 5;
@@ -3474,11 +3930,6 @@ static void DrawSettings() {
             }
             DrawText(disp,        listX + listW - vw - 16, ry + 12, sel ? COL_ACCENT : COL_DIM, Font::Sm);
             DrawText("A  " + Lang::T("settings.change"), listX + listW - 100,     ry + 40, sel ? COL_GOLD   : COL_DIM, Font::Sm);
-        } else if (i == 4) {
-            int cnt = BackupService::CountBackups();
-            std::string v = (cnt == 0) ? Lang::T("settings.backups.none") : std::to_string(cnt) + " " + Lang::T("settings.backups.available");
-            DrawText(v,          listX + listW - 130, ry + 12, sel ? COL_ACCENT : COL_DIM, Font::Sm);
-            DrawText("A  " + Lang::T("settings.open"),  listX + listW - 100, ry + 40, sel ? COL_GOLD   : COL_DIM, Font::Sm);
         } else if (i == 3) {
             const int arrowW = 36, numW = 48, ctrlH = 34;
             int ctrlX = listX + listW - arrowW - numW - arrowW - 20;
@@ -3546,41 +3997,61 @@ static void DrawSettings() {
     Present();
 }
 
+// Sentinel used as the HitAdd tag value for the trailing "+" tile in the
+// user-picker grid. UserPick stores `gUserSel == gUsers.size()` for this slot,
+// but the touch path needs a value distinguishable from real user indices.
+static constexpr int kBundleNewIdx = -1;
+static void TBundleNewTap(int);
+
 static void DrawUserPick() {
     HitClear();
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
     SDL_RenderClear(gRen);
+
+    // The per-user restore picker is rendered as a modal overlay owned by
+    // this screen — the floppy button under each card opens it.
+    if (gShowRestorePicker) { DrawRestorePicker(); Present(); return; }
+
     DrawHeader("");
     DrawTextC(Lang::T("userpick.title"), SCREEN_W/2, 44, COL_DIM, Font::Md);
 
     int n = (int)gUsers.size();
     if (n == 0) { DrawFooter(Lang::T("footer.quit")); Present(); return; }
 
+    // The grid has n+1 slots: n real users followed by the "+" bundle tile.
+    const int gridLen  = n + 1;
     const int GAP      = 24;
-    const int MAX_VIS  = std::min(n, 5);
+    const int MAX_VIS  = std::min(gridLen, 5);
     const int CARD_W   = std::min(220, (SCREEN_W - 120 - (MAX_VIS-1)*GAP) / MAX_VIS);
     const int AV_SIZE  = CARD_W - 30;
     const int CARD_H   = AV_SIZE + 66;
+    // Floppy-disk button (per-user restore) sits below each user card.
+    const int FLOPPY_SIZE = 30;
+    const int FLOPPY_PAD  = 12;
+    const int CLUSTER_H   = CARD_H + FLOPPY_PAD + FLOPPY_SIZE;
 
     int scroll = 0;
-    if (n > MAX_VIS) {
+    if (gridLen > MAX_VIS) {
         scroll = gUserSel - MAX_VIS/2;
-        scroll = std::max(0, std::min(scroll, n - MAX_VIS));
+        scroll = std::max(0, std::min(scroll, gridLen - MAX_VIS));
     }
 
     int totalW = MAX_VIS*CARD_W + (MAX_VIS-1)*GAP;
     int startX = (SCREEN_W - totalW) / 2;
-    int startY = 68 + (SCREEN_H - 36 - 68 - CARD_H) / 2;
+    int startY = 68 + (SCREEN_H - 36 - 68 - CLUSTER_H) / 2;
 
     int selCardX = startX, selCardY = startY;
     for (int i = 0; i < MAX_VIS; i++) {
         int idx = scroll + i;
-        if (idx >= n) break;
-        bool sel = (idx == gUserSel);
-        int cx = startX + i*(CARD_W + GAP);
+        if (idx >= gridLen) break;
+        bool sel  = (idx == gUserSel);
+        bool plus = (idx == n);            // trailing "+" tile
+        int  cx   = startX + i*(CARD_W + GAP);
         if (sel) { selCardX = cx; selCardY = startY; }
 
-        HitAdd(cx, startY, CARD_W, CARD_H, TSelUser, idx);
+        HitAdd(cx, startY, CARD_W, CARD_H,
+               plus ? TBundleNewTap : TSelUser,
+               plus ? kBundleNewIdx : idx);
 
         if (sel) DrawShadow(cx, startY, CARD_W, CARD_H, gTheme.cornerRadius);
         FillRect(cx, startY, CARD_W, CARD_H, sel ? COL_SEL : COL_PANEL);
@@ -3593,17 +4064,48 @@ static void DrawUserPick() {
 
         int avX = cx + (CARD_W - AV_SIZE)/2;
         int avY = startY + 14;
-        if (idx < (int)gAvatarTextures.size() && gAvatarTextures[idx]) {
+        if (plus) {
+            // Dashed-style avatar slot with a big centred "+" glyph.
+            FillRect(avX, avY, AV_SIZE, AV_SIZE, COL_PANEL2);
+            DrawRect(avX, avY, AV_SIZE, AV_SIZE, sel ? COL_GOLD : COL_BORDER);
+            DrawTextC("+", cx+CARD_W/2, avY+AV_SIZE/2, sel ? COL_GOLD : COL_DIM, Font::Lg);
+            DrawTextC(Lang::T("userpick.new_bundle"),
+                      cx+CARD_W/2, avY+AV_SIZE+20,
+                      sel ? COL_TEXT : COL_DIM, Font::Sm);
+        } else if (idx < (int)gAvatarTextures.size() && gAvatarTextures[idx]) {
             SDL_Rect dst{avX, avY, AV_SIZE, AV_SIZE};
             SDL_RenderCopy(gRen, gAvatarTextures[idx], nullptr, &dst);
+            DrawTextC(gUsers[idx].nickname, cx+CARD_W/2, avY+AV_SIZE+20,
+                      sel ? COL_TEXT : COL_DIM, Font::Sm);
         } else {
             FillRect(avX, avY, AV_SIZE, AV_SIZE, COL_PANEL2);
             DrawRect(avX, avY, AV_SIZE, AV_SIZE, COL_BORDER);
             DrawTextC("?", cx+CARD_W/2, avY+AV_SIZE/2, COL_DIM, Font::Lg);
+            DrawTextC(gUsers[idx].nickname, cx+CARD_W/2, avY+AV_SIZE+20,
+                      sel ? COL_TEXT : COL_DIM, Font::Sm);
         }
 
-        DrawTextC(gUsers[idx].nickname, cx+CARD_W/2, avY+AV_SIZE+20,
-                  sel ? COL_TEXT : COL_DIM, Font::Sm);
+        // Per-user "restore" affordance — a small floppy-disk button below
+        // each user card. The "+" tile has no save data, so it gets no button.
+        if (!plus) {
+            int fbX = cx + (CARD_W - FLOPPY_SIZE)/2;
+            int fbY = startY + CARD_H + FLOPPY_PAD;
+            // Show the button as enabled-styled when this user actually has
+            // backups on disk; otherwise dim it so it reads as informational.
+            bool hasBackups = BackupService::HasExistingBackup(
+                SaveMount::SafeUserFolder(gUsers[idx]));
+            SDL_Color iconCol = !hasBackups ? COL_DIM
+                              : (sel ? COL_GOLD : COL_TEXT);
+            SDL_Color frameCol = (sel ? COL_GOLD : COL_BORDER);
+            // Subtle pill background so the icon doesn't float on the BG.
+            FillRect(fbX - 4, fbY - 4, FLOPPY_SIZE + 8, FLOPPY_SIZE + 8, COL_PANEL);
+            DrawRect(fbX - 4, fbY - 4, FLOPPY_SIZE + 8, FLOPPY_SIZE + 8, frameCol);
+            DrawFloppyIcon(fbX + FLOPPY_SIZE/2, fbY + FLOPPY_SIZE/2,
+                           FLOPPY_SIZE - 6, iconCol);
+            // Register the hit AFTER the card hit so taps on the floppy win.
+            HitAdd(fbX - 4, fbY - 4, FLOPPY_SIZE + 8, FLOPPY_SIZE + 8,
+                   TUserRestore, idx);
+        }
     }
 
     // Animated selection outline glides between user cards.
@@ -3627,6 +4129,13 @@ static void DrawUserPick() {
     DrawRect(sBtnX, sBtnY, sBtnW, sBtnH, COL_BORDER);
     DrawGearIcon(sBtnX + sBtnW/2, sBtnY + sBtnH/2, sBtnH * 30 / 100, COL_DIM);
 
+    // Bundle-create toast (auto-fades after a few seconds). Sits just above the
+    // footer so it doesn't overlap the user cards.
+    if (gBundleMsgFrames > 0) {
+        DrawTextC(gBundleMsg, SCREEN_W/2, SCREEN_H - 56, gBundleMsgCol, Font::Sm);
+        gBundleMsgFrames--;
+    }
+
     DrawFooter(Lang::T("userpick.footer"));
     Present();
 }
@@ -3647,7 +4156,9 @@ static void DrawBackupPrompt() {
     HitAdd(x1,cy,cw,ch, TSimBtn, (int)HidNpadButton_A);
     HitAdd(x2,cy,cw,ch, TSimBtn, (int)HidNpadButton_B);
 
-    int curCount = BackupService::CountBackups();
+    std::string curUidTag = (gUserSel >= 0 && gUserSel < (int)gUsers.size())
+                          ? SaveMount::SafeUserFolder(gUsers[gUserSel]) : std::string();
+    int curCount = BackupService::CountBackups(curUidTag);
     auto sub = [](std::string s, const std::string& tok, const std::string& val) {
         size_t p = 0;
         while ((p = s.find(tok, p)) != std::string::npos) { s.replace(p, tok.size(), val); p += val.size(); }
@@ -3752,6 +4263,41 @@ static void TUgcClearSearch(int) {
     }
 }
 
+// Apply a new category filter (-1 = All, else gUgcKinds[] index), then rebuild
+// the filtered list and reset scroll. Shared between the tap-on-tile path and
+// the controller "All" reset path.
+static void TUgcApplyKind(int kindIdx) {
+    if (kindIdx < -1 || kindIdx >= gUgcKindCount) kindIdx = -1;
+    gUgcKindFilter = kindIdx;
+    RebuildUgcFilter();
+    gEntryScroll = 0;
+    if (!gFilteredEntries.empty() && UgcFilterPos(gEntrySel) < 0) {
+        gEntrySel = gFilteredEntries[0];
+        if (!gEntries.empty()) LoadPreview(gEntries[gEntrySel]);
+    }
+}
+
+static void TUgcOpenKindPicker(int) {
+    gShowUgcKindPicker = true;
+    // 0 = "All" row, 1..N = kinds. Seed the cursor on the active filter.
+    gUgcKindPickerSel = (gUgcKindFilter < 0) ? 0 : (gUgcKindFilter + 1);
+}
+
+// Tile tap in the category picker. `idx` is 0 for "All", or 1..N for a kind
+// (offset by +1 so 0 stays reserved for "All").
+static void TUgcPickKind(int idx) {
+    gUgcKindPickerSel = idx;
+    TUgcApplyKind(idx == 0 ? -1 : (idx - 1));
+    gShowUgcKindPicker = false;
+}
+
+// Tap anywhere outside the picker tiles closes the modal without changing
+// the active filter — mirrors how the back-prompt and save-warning modals
+// behave for off-target taps.
+static void TUgcCloseKindPicker(int) {
+    gShowUgcKindPicker = false;
+}
+
 
 static const char* CONFIG_PATH = "/switch/TomoToolNX/config.ini";
 
@@ -3782,6 +4328,131 @@ static std::string DetectSystemLanguage() {
     return code;
 }
 
+// Map the console's (region, language) to the Tomodachi Life LANGUAGE enum
+// (`Player.NameRegionLanguageID` etc.). The TL enum matches the schema in
+// ltd-save-editor's `enumOptions.ts`:
+//   0=JPja  1=USen  2=USes  3=USfr  4=USpt
+//   5=EUen  6=EUes  7=EUfr  8=EUde  9=EUit 10=EUpt 11=EUnl 12=EUru
+//   13=KRko 14=CNzh 15=TWzh
+// Used when seeding a fresh island so the bundler's region doesn't leak into
+// every new save. Falls back to EUen — a sensible Western default — when
+// detection fails or returns an unsupported combination.
+static uint8_t DetectTomodachiLanguageId() {
+    uint8_t fallback = 5; // EUen
+    if (R_FAILED(setInitialize())) return fallback;
+    u64 langCode = 0;
+    SetLanguage lang = SetLanguage_ENUS;
+    SetRegion   region = SetRegion_EUR;
+    bool gotLang   = R_SUCCEEDED(setGetSystemLanguage(&langCode))
+                  && R_SUCCEEDED(setMakeLanguage(langCode, &lang));
+    bool gotRegion = R_SUCCEEDED(setGetRegionCode(&region));
+    setExit();
+    if (!gotLang) return fallback;
+    if (!gotRegion) region = SetRegion_EUR;
+
+    // Group the system region into the three TL "families" the enum carries.
+    enum Fam { FAM_JP, FAM_US, FAM_EU, FAM_HTK, FAM_CN };
+    Fam fam;
+    switch (region) {
+        case SetRegion_JPN: fam = FAM_JP;  break;
+        case SetRegion_USA: fam = FAM_US;  break;
+        case SetRegion_EUR:
+        case SetRegion_AUS: fam = FAM_EU;  break;
+        case SetRegion_HTK: fam = FAM_HTK; break;
+        case SetRegion_CHN: fam = FAM_CN;  break;
+        default:            fam = FAM_EU;  break;
+    }
+
+    if (fam == FAM_JP) return 0;       // JPja — region overrides language
+    if (fam == FAM_CN) return 14;      // CNzh
+    if (fam == FAM_HTK) {
+        switch (lang) {
+            case SetLanguage_KO:       return 13; // KRko
+            case SetLanguage_ZHCN:
+            case SetLanguage_ZHHANS:   return 14; // CNzh (Simplified)
+            case SetLanguage_ZHTW:
+            case SetLanguage_ZHHANT:   return 15; // TWzh (Traditional)
+            default:                   return 15;
+        }
+    }
+
+    // FAM_US / FAM_EU — pick by language with the appropriate prefix.
+    if (fam == FAM_US) {
+        switch (lang) {
+            case SetLanguage_ES:
+            case SetLanguage_ES419: return 2;   // USes
+            case SetLanguage_FR:
+            case SetLanguage_FRCA:  return 3;   // USfr
+            case SetLanguage_PT:
+            case SetLanguage_PTBR:  return 4;   // USpt
+            default:                return 1;   // USen
+        }
+    }
+    // EU / AUS — TL has no AUSen split, EU bucket is the right fit.
+    switch (lang) {
+        case SetLanguage_ES:
+        case SetLanguage_ES419: return 6;   // EUes
+        case SetLanguage_FR:
+        case SetLanguage_FRCA:  return 7;   // EUfr
+        case SetLanguage_DE:    return 8;   // EUde
+        case SetLanguage_IT:    return 9;   // EUit
+        case SetLanguage_PT:
+        case SetLanguage_PTBR:  return 10;  // EUpt
+        case SetLanguage_NL:    return 11;  // EUnl
+        case SetLanguage_RU:    return 12;  // EUru
+        default:                return 5;   // EUen
+    }
+}
+
+// Rewrite the three Player.sav language-ID enums to match the running
+// console's region/language. Called immediately after a seeded save (or
+// bundle) lands on disk so the bundler's region/language doesn't carry over
+// to every new island. Returns "" on success, error string otherwise.
+//
+// CRITICAL: the on-disk enum value is the Murmur3 hash of the identifier
+// string (e.g. "EUfr" -> 0x70b94da7), NOT the LANGUAGE-array index. An
+// earlier version wrote the raw index (0..15) which the game's loader
+// rejected as an unknown enum value, refusing to load the whole save.
+// The table below mirrors LANGUAGE[] in ltd-save-editor's enumOptions.ts
+// and was generated by Murmur3-hashing each identifier; keep it in sync
+// if the enum ever grows.
+static std::string PatchSeedLanguageInPlace(const std::string& playerSavPath) {
+    static const uint32_t kLanguageHashes[16] = {
+        0xf618046eu, // 0  JPja
+        0xeb419930u, // 1  USen
+        0x45f76612u, // 2  USes
+        0x97b0c749u, // 3  USfr
+        0xcbfb1536u, // 4  USpt
+        0x5883c71au, // 5  EUen
+        0xbdd674dcu, // 6  EUes
+        0x70b94da7u, // 7  EUfr
+        0xf4f3ee10u, // 8  EUde
+        0x469e188eu, // 9  EUit
+        0x7c8cfb5du, // 10 EUpt
+        0x19c0ea41u, // 11 EUnl
+        0xe7cd05c7u, // 12 EUru
+        0x58d25172u, // 13 KRko
+        0x46d2f975u, // 14 CNzh
+        0x44d6fc24u, // 15 TWzh
+    };
+    uint8_t langId = DetectTomodachiLanguageId();
+    if (langId >= 16) langId = 5; // safety net — fall back to EUen
+    uint32_t langHash = kLanguageHashes[langId];
+    SaveEditor::SavFile sav;
+    std::string err;
+    if (!SaveEditor::Load(playerSavPath, sav, err))
+        return "load Player.sav: " + err;
+    SaveEditor::SetEnum(sav,
+        SaveEditor::Hash("Player.NameRegionLanguageID"),       langHash);
+    SaveEditor::SetEnum(sav,
+        SaveEditor::Hash("Player.IslandNameRegionLanguageID"), langHash);
+    SaveEditor::SetEnum(sav,
+        SaveEditor::Hash("Player.LastRegionLanguageID"),       langHash);
+    std::string werr = SaveEditor::Save(playerSavPath, sav);
+    if (!werr.empty()) return "save Player.sav: " + werr;
+    return "";
+}
+
 static void LoadConfig() {
     bool langFromConfig = false;
     FILE* f = fopen(CONFIG_PATH, "r");
@@ -3802,6 +4473,7 @@ static void LoadConfig() {
         if (key == "export_path")      gExportPath      = val;
         if (key == "thumb_tip_seen")   gThumbTipSeen    = (val == "1");
         if (key == "save_warn_acked")  gSaveWarningAcked = (val == "1");
+        if (key == "mtp_warn_acked")   gMtpWarningAcked  = (val == "1");
         if (key == "max_backups")    { int v = atoi(val.c_str()); if (v >= 1 && v <= 99) gMaxBackups = v; }
         if (key == "encoder") {
             if      (val == "custom") gEncMode = TextureProcessor::Bc1Encoder::Custom;
@@ -3816,6 +4488,11 @@ static void LoadConfig() {
             if      (val == "cover")    gFitMode = TextureProcessor::FitMode::Cover;
             else if (val == "contain")  gFitMode = TextureProcessor::FitMode::Contain;
             else if (val == "fill")     gFitMode = TextureProcessor::FitMode::Fill;
+        }
+        if (key == "canvas_shape") {
+            if      (val == "square") gCanvasShape = TextureProcessor::CanvasShape::Square;
+            else if (val == "book")   gCanvasShape = TextureProcessor::CanvasShape::Book;
+            else if (val == "tv")     gCanvasShape = TextureProcessor::CanvasShape::Tv;
         }
         if (key == "matte") {
             // Format: "transparent" or "rrggbb" hex; empty/invalid → transparent.
@@ -3846,6 +4523,7 @@ static void SaveConfig() {
     fprintf(f, "export_path=%s\n",     gExportPath.c_str());
     fprintf(f, "thumb_tip_seen=%d\n",  gThumbTipSeen     ? 1 : 0);
     fprintf(f, "save_warn_acked=%d\n", gSaveWarningAcked ? 1 : 0);
+    fprintf(f, "mtp_warn_acked=%d\n",  gMtpWarningAcked  ? 1 : 0);
     fprintf(f, "max_backups=%d\n",     gMaxBackups);
     fprintf(f, "encoder=%s\n",
             gEncMode == TextureProcessor::Bc1Encoder::Custom ? "custom" : "pca");
@@ -3855,6 +4533,9 @@ static void SaveConfig() {
     fprintf(f, "fit_mode=%s\n",
             gFitMode == TextureProcessor::FitMode::Cover   ? "cover" :
             gFitMode == TextureProcessor::FitMode::Contain ? "contain" : "fill");
+    fprintf(f, "canvas_shape=%s\n",
+            gCanvasShape == TextureProcessor::CanvasShape::Square ? "square" :
+            gCanvasShape == TextureProcessor::CanvasShape::Book   ? "book"   : "tv");
     if (gMatte.a == 0) {
         fprintf(f, "matte=transparent\n");
     } else {
@@ -3991,46 +4672,64 @@ static void DrawTexSettings() {
         }
     };
 
-    // ── Row 0: Encoder ───────────────────────────────────────────────────────
+    // ── Row 0: Canvas shape ─────────────────────────────────────────────────
+    // First in the list because picking the wrong shape produces visibly
+    // broken in-game results — much higher impact than tweaking encoder
+    // settings, which only affect quality.
     {
         int sy = contentY;
+        std::string hint =
+            (gCanvasShape == TextureProcessor::CanvasShape::Square) ? Lang::T("settings.shape.hint.square") :
+            (gCanvasShape == TextureProcessor::CanvasShape::Book)   ? Lang::T("settings.shape.hint.book")   :
+                                                                       Lang::T("settings.shape.hint.tv");
+        drawPillRow(0, sy, Lang::T("settings.shape"), hint, false);
+        // "TV wide" because the wide canvas isn't only for TVs — same shape
+        // is what posters, signs, paintings, and any other wide-display
+        // mesh wants.
+        const char* names[] = { "Square", "Book", "TV wide" };
+        drawPills(sy, 3, 96, 28, (int)gCanvasShape, false, 0, names, TSetCanvasShape);
+    }
+
+    // ── Row 1: Encoder ──────────────────────────────────────────────────────
+    {
+        int sy = contentY + (rowH + rowGap);
         std::string hint = (gEncMode == TextureProcessor::Bc1Encoder::Custom)
             ? Lang::T("settings.encoder.hint.custom")
             : Lang::T("settings.encoder.hint.pca");
-        drawPillRow(0, sy, Lang::T("settings.encoder"), hint, false);
+        drawPillRow(1, sy, Lang::T("settings.encoder"), hint, false);
         const char* names[] = { "Gamma-aware", "PCA" };
-        drawPills(sy, 2, 130, 28, (int)gEncMode, false, 0, names, TSetEncMode);
+        drawPills(sy, 2, 130, 28, (int)gEncMode, false, 1, names, TSetEncMode);
     }
 
-    // ── Row 1: BC1 Mode ──────────────────────────────────────────────────────
+    // ── Row 2: BC1 Mode ──────────────────────────────────────────────────────
     {
         bool disabled = (gEncMode != TextureProcessor::Bc1Encoder::Custom);
-        int sy = contentY + (rowH + rowGap);
+        int sy = contentY + 2 * (rowH + rowGap);
         std::string hint = disabled ? Lang::T("settings.bc1.disabled") :
             (gBc1Mode == TextureProcessor::Bc1Mode::Auto)       ? Lang::T("settings.bc1.hint.auto") :
             (gBc1Mode == TextureProcessor::Bc1Mode::FourColor)  ? Lang::T("settings.bc1.hint.fourColor") :
                                                                    Lang::T("settings.bc1.hint.threeColor");
-        drawPillRow(1, sy, Lang::T("settings.bc1"), hint, disabled);
+        drawPillRow(2, sy, Lang::T("settings.bc1"), hint, disabled);
         const char* names[] = { "Auto", "4-color", "3-color" };
-        drawPills(sy, 3, 80, 28, (int)gBc1Mode, disabled, 1, names, TSetBc1Mode);
+        drawPills(sy, 3, 80, 28, (int)gBc1Mode, disabled, 2, names, TSetBc1Mode);
     }
 
-    // ── Row 2: Fit mode ──────────────────────────────────────────────────────
+    // ── Row 3: Fit mode ──────────────────────────────────────────────────────
     {
-        int sy = contentY + 2 * (rowH + rowGap);
+        int sy = contentY + 3 * (rowH + rowGap);
         std::string hint =
             (gFitMode == TextureProcessor::FitMode::Cover)   ? Lang::T("settings.fit.hint.cover")   :
             (gFitMode == TextureProcessor::FitMode::Contain) ? Lang::T("settings.fit.hint.contain") :
                                                                 Lang::T("settings.fit.hint.fill");
-        drawPillRow(2, sy, Lang::T("settings.fit"), hint, false);
+        drawPillRow(3, sy, Lang::T("settings.fit"), hint, false);
         const char* names[] = { "Cover", "Contain", "Fill" };
-        drawPills(sy, 3, 80, 28, (int)gFitMode, false, 2, names, TSetFitMode);
+        drawPills(sy, 3, 80, 28, (int)gFitMode, false, 3, names, TSetFitMode);
     }
 
-    // ── Row 3: Background (matte) — only relevant when Fit == Contain ───────
+    // ── Row 4: Background (matte) — only relevant when Fit == Contain ───────
     {
         bool disabled = (gFitMode != TextureProcessor::FitMode::Contain);
-        int sy = contentY + 3 * (rowH + rowGap);
+        int sy = contentY + 4 * (rowH + rowGap);
         int matteIdx = (gMatte.a == 0)                       ? 0
                      : (gMatte.r==255 && gMatte.g==255 && gMatte.b==255) ? 1
                      : (gMatte.r==0   && gMatte.g==0   && gMatte.b==0)   ? 2
@@ -4038,9 +4737,9 @@ static void DrawTexSettings() {
         std::string hint = disabled
             ? Lang::T("settings.matte.disabled")
             : Lang::T("settings.matte.desc");
-        drawPillRow(3, sy, Lang::T("settings.matte"), hint, disabled);
+        drawPillRow(4, sy, Lang::T("settings.matte"), hint, disabled);
         const char* names[] = { "Transparent", "White", "Black" };
-        drawPills(sy, 3, 96, 28, matteIdx, disabled, 3, names, TSetMatte);
+        drawPills(sy, 3, 96, 28, matteIdx, disabled, 4, names, TSetMatte);
     }
 
     DrawFooter(Lang::T("settings.footer"));
@@ -4101,7 +4800,13 @@ static void DrawOnSwitch() {
         // so input/touch handlers stay aligned with the render.
         const int SEARCH_H   = UGC_SEARCH_H;
         const int SEARCH_GAP = UGC_SEARCH_GAP;
-        int sbX = LIST_X, sbY = LIST_Y, sbW = LIST_W;
+        // Reserve a slim chip on the right for the category filter. Width is
+        // sized to fit the longest category label and gives the search box
+        // ~80% of the row, the chip ~20%.
+        const int KIND_CHIP_W = 130;
+        const int KIND_CHIP_GAP = 6;
+        int sbX = LIST_X, sbY = LIST_Y;
+        int sbW = LIST_W - KIND_CHIP_W - KIND_CHIP_GAP;
         bool searchActive = !gUgcFilter.empty();
         // Hit-area: tap to open keyboard; clear button hits separately when active
         int clearW = searchActive ? 28 : 0;
@@ -4122,6 +4827,48 @@ static void DrawOnSwitch() {
             std::string placeholder = Lang::T("ugc.search.placeholder");
             int tw0=0; if (fsm0) TTF_SizeUTF8(fsm0, placeholder.c_str(), &tw0, &sh);
             DrawText(placeholder, sbX+8, sbY+(SEARCH_H-sh)/2, COL_DIM);
+        }
+
+        // Category-filter chip (right of the search box). Shows the active
+        // category label and a tiny funnel icon; tap opens the picker modal.
+        {
+            int chipX = sbX + sbW + KIND_CHIP_GAP;
+            int chipY = sbY;
+            int chipW = KIND_CHIP_W;
+            bool kindActive = (gUgcKindFilter >= 0);
+            HitAdd(chipX, chipY, chipW, SEARCH_H, TUgcOpenKindPicker, 0);
+            FillRect(chipX, chipY, chipW, SEARCH_H, COL_BG);
+            DrawRect(chipX, chipY, chipW, SEARCH_H,
+                     kindActive ? COL_ACCENT : COL_BORDER);
+            // Funnel icon — small inverted trapezoid.
+            int icSize = 12;
+            int icX = chipX + 8;
+            int icY = chipY + (SEARCH_H - icSize) / 2;
+            SDL_Color icCol = kindActive ? COL_ACCENT : COL_DIM;
+            FillRect(icX,         icY,       icSize,     2, icCol);  // top bar
+            FillRect(icX + 2,     icY + 3,   icSize - 4, 2, icCol);  // mid bar
+            FillRect(icX + 4,     icY + 6,   icSize - 8, 2, icCol);  // stem
+            FillRect(icX + icSize/2 - 1, icY + 8, 2, icSize - 8, icCol);
+            // Label.
+            std::string lbl = (gUgcKindFilter < 0)
+                ? Lang::T("ugc.kind.all")
+                : Lang::T(gUgcKinds[gUgcKindFilter].labelKey);
+            int lw = 0, lh = 0;
+            if (fsm0) TTF_SizeUTF8(fsm0, lbl.c_str(), &lw, &lh);
+            int textX = icX + icSize + 6;
+            int textW = chipW - (textX - chipX) - 8;
+            // Truncate with an ellipsis if the label outgrows the chip.
+            std::string disp = lbl;
+            if (fsm0 && lw > textW) {
+                while (disp.size() > 2) {
+                    disp.pop_back();
+                    int w2 = 0, h2 = 0;
+                    TTF_SizeUTF8(fsm0, (disp + "…").c_str(), &w2, &h2);
+                    if (w2 <= textW) { disp += "…"; break; }
+                }
+            }
+            DrawText(disp, textX, chipY + (SEARCH_H - lh) / 2,
+                     kindActive ? COL_ACCENT : COL_TEXT, Font::Sm);
         }
 
         // List panel below the search bar (with a clear gap so the two read as separate)
@@ -4175,11 +4922,49 @@ static void DrawOnSwitch() {
         }
         FillRect(PREVIEW_X,PREVIEW_Y,PREVIEW_W,PREVIEW_H,{8,8,8,255});
         DrawRect(PREVIEW_X,PREVIEW_Y,PREVIEW_W,PREVIEW_H,COL_BORDER);
-        // Header strip: show export/import message if active, else file stem
-        if (!gOnSwitchMsg.empty())
+        // Header strip: show export/import message if active, else the user-
+        // facing UGC name in a pill that adapts to the text width, plus a
+        // small pencil button on its right that opens the on-screen keyboard
+        // to rename the selected slot.
+        if (!gOnSwitchMsg.empty()) {
             DrawTextC(gOnSwitchMsg, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+14, gOnSwitchMsgCol);
-        else
-            DrawTextC(gPreviewStem, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+14, COL_TEXT);
+        } else if (!gPreviewStem.empty()) {
+            std::string shown = MiiManager::GetUgcName(gPreviewStem);
+            if (shown.empty()) shown = gPreviewStem;
+            TTF_Font* fmd = GetFont(Font::Md);
+            int tw = 0, th = 0;
+            if (fmd) TTF_SizeUTF8(fmd, shown.c_str(), &tw, &th);
+            const int PILL_PAD = 12;
+            const int ICON_BOX = 22;
+            const int ICON_GAP = 8;
+            const int PILL_H   = 24;
+            int maxPillW = PREVIEW_W - 24;
+            int pillW    = std::min(maxPillW, tw + PILL_PAD*2 + ICON_GAP + ICON_BOX);
+            int pillX    = PREVIEW_X + (PREVIEW_W - pillW) / 2;
+            int pillY    = PREVIEW_Y + 14 - PILL_H/2;
+            FillRect(pillX, pillY, pillW, PILL_H, COL_PANEL);
+            DrawRect(pillX, pillY, pillW, PILL_H, COL_BORDER);
+            // Text — left-aligned inside the pill, ellipsised if it overflows.
+            int textBudget = pillW - PILL_PAD - ICON_GAP - ICON_BOX - 6;
+            std::string disp = shown;
+            if (fmd && tw > textBudget) {
+                while (disp.size() > 4) {
+                    disp.pop_back();
+                    int w2 = 0, h2 = 0;
+                    TTF_SizeUTF8(fmd, (disp + "…").c_str(), &w2, &h2);
+                    if (w2 <= textBudget) { disp += "…"; break; }
+                }
+            }
+            DrawText(disp, pillX + PILL_PAD, pillY + (PILL_H - th) / 2, COL_TEXT, Font::Md);
+            // Pencil glyph at the right side of the pill — no box / border,
+            // just the icon so it reads as "tap to edit the name" and not as
+            // a separate UI element.
+            int iconX = pillX + pillW - ICON_BOX - 4;
+            int iconY = pillY + (PILL_H - ICON_BOX) / 2;
+            DrawPencilIcon(iconX + ICON_BOX/2, iconY + ICON_BOX/2,
+                           ICON_BOX - 2, COL_GOLD);
+            HitAdd(iconX - 4, pillY, ICON_BOX + 8, PILL_H, TUgcRenameTap, 0);
+        }
         {
             // Reserve space at the bottom for the import/export buttons
             const int kBtnH=46, kBtnGap=8, kBtnSlot=kBtnH+kBtnGap+4; // 58px total
@@ -4227,6 +5012,61 @@ static void DrawOnSwitch() {
                 HitAdd(bxGear, btnY, gearW, kBtnH, TSetMode, (int)OnSwitchMode::TexSettings);
             }
         }
+
+        // Category-picker modal — opened from the funnel chip next to the
+        // search bar. Dims the rest of the screen and lists "All" plus each
+        // gUgcKinds[] entry as tappable tiles. Sized to fit on Switch's 720p.
+        if (gShowUgcKindPicker) {
+            SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(gRen, 0, 0, 0, 190);
+            SDL_Rect full = { 0, 0, SCREEN_W, SCREEN_H };
+            SDL_RenderFillRect(gRen, &full);
+            // Absorb any tap not on a row tile — closes the modal without
+            // changing the filter. Added before the tiles so tile hits win.
+            HitAdd(0, 0, SCREEN_W, SCREEN_H, TUgcCloseKindPicker, 0);
+
+            const int ROWS    = gUgcKindCount + 1; // +1 for the "All" row
+            const int rowH    = 38;
+            const int rowGap  = 4;
+            const int padX    = 18;
+            const int padTop  = 56;
+            const int padBot  = 18;
+            const int mW      = 360;
+            const int listH   = ROWS * rowH + (ROWS - 1) * rowGap;
+            const int mH      = padTop + listH + padBot;
+            const int mx      = (SCREEN_W - mW) / 2;
+            const int my      = (SCREEN_H - mH) / 2;
+
+            FillRect(mx, my, mW, mH, {18, 18, 22, 255});
+            DrawRect(mx, my, mW, mH, COL_GOLD);
+            FillRect(mx, my, mW, 4, COL_GOLD);
+            DrawTextC(Lang::T("ugc.kind.picker.title"),
+                      mx + mW/2, my + 26, COL_GOLD, Font::Md);
+
+            int rowY = my + padTop;
+            for (int i = 0; i < ROWS; i++) {
+                bool isAll  = (i == 0);
+                bool active = isAll ? (gUgcKindFilter < 0)
+                                    : (gUgcKindFilter == i - 1);
+                bool sel    = (i == gUgcKindPickerSel);
+                int rx = mx + padX;
+                int rw = mW - padX*2;
+                FillRect(rx, rowY, rw, rowH, sel ? COL_SEL : COL_PANEL);
+                DrawRect(rx, rowY, rw, rowH,
+                         active ? COL_GOLD : (sel ? COL_ACCENT : COL_BORDER));
+                std::string label = isAll
+                    ? Lang::T("ugc.kind.all")
+                    : Lang::T(gUgcKinds[i - 1].labelKey);
+                SDL_Color col = active ? COL_GOLD : (sel ? COL_TEXT : COL_DIM);
+                // Centered both horizontally and vertically inside the row.
+                // DrawTextC anchors on the midpoint so we don't have to chase
+                // per-font ascender/descender values.
+                DrawTextC(label, rx + rw/2, rowY + rowH/2, col, Font::Md);
+                HitAdd(rx, rowY, rw, rowH, TUgcPickKind, i);
+                rowY += rowH + rowGap;
+            }
+        }
+
         DrawFooter(Lang::T("ugc.footer"));
     }
 
@@ -4294,11 +5134,16 @@ static void DrawOnSwitch() {
             DrawText("WiFi : ", sxBase, statusY, COL_DIM);
             DrawText(activeS, sxBase+lw, statusY, COL_GREEN);
 
-            // MTP status below WiFi status
+            // MTP status + start/stop button below WiFi status
+            int mtpRowBottom = statusY + lh + 8;
             {
-                bool mtpOn = MtpServer::IsSessionOpen();
-                std::string mtpVal = mtpOn ? activeS : inactiveS;
-                SDL_Color mtpCol = mtpOn ? COL_GREEN : COL_DIM;
+                bool mtpRunning = MtpServer::IsRunning();
+                bool mtpOn      = MtpServer::IsSessionOpen();
+                std::string mtpVal = mtpOn       ? activeS
+                                  : mtpRunning   ? Lang::T("webui.mtp.waiting")
+                                                 : inactiveS;
+                SDL_Color mtpCol = mtpOn ? COL_GREEN
+                                 : mtpRunning ? COL_GOLD : COL_DIM;
                 int lineH = (lh > 0) ? lh : 20;
                 int mtpY = statusY + lineH + 8;
                 int mw=0, mw2=0, mh=0;
@@ -4308,14 +5153,33 @@ static void DrawOnSwitch() {
                 int mxBase = rightX + (rightW - (mw + mw2)) / 2;
                 DrawText("MTP  : ", mxBase, mtpY, COL_DIM, Font::Sm);
                 DrawText(mtpVal, mxBase + mw, mtpY, mtpCol, Font::Sm);
+
+                // Start/Stop button right below the status line.
+                std::string btnLbl = "Y  " + (mtpRunning
+                    ? Lang::T("webui.mtp.stop")
+                    : Lang::T("webui.mtp.start"));
+                int btnW = 160, btnH = 28;
+                int bw = 0, bh = 0;
+                if (fss) TTF_SizeUTF8(fss, btnLbl.c_str(), &bw, &bh);
+                if (bw + 24 > btnW) btnW = bw + 24;
+                int bx = rightX + (rightW - btnW) / 2;
+                int by = mtpY + lineH + 8;
+                SDL_Color frame = mtpRunning ? COL_GOLD : COL_ACCENT;
+                FillRect(bx, by, btnW, btnH, COL_PANEL);
+                DrawRect(bx, by, btnW, btnH, frame);
+                DrawTextC(btnLbl, bx + btnW/2, by + btnH/2, frame, Font::Sm);
+                HitAdd(bx, by, btnW, btnH, TToggleMtp, 0);
+                mtpRowBottom = by + btnH;
             }
-            
-            // QR code below MTP status
+
+            // QR code below MTP status (anchored to the bottom of the MTP
+            // start/stop button so the layout stays tight regardless of how
+            // tall the button row turned out).
             QR::Mat mat;
             if (QR::build(url, mat)) {
-                int qrTop = statusY + lh + 8 + lh + 14;
+                int qrTop = mtpRowBottom + 14;
                 int qrAvailW = rightW;
-                int qrAvailH = contentY + contentH - qrTop;
+                int qrAvailH = contentY + contentH - qrTop - 8;
                 int ms = std::min(qrAvailW, qrAvailH) / (mat.N+4);
                 if (ms<3) ms=3;
                 int border=2;
@@ -4340,24 +5204,46 @@ static void DrawOnSwitch() {
             DrawText("WiFi : ",  rightX+(rightW-lw)/2-20, cy2, COL_DIM);
             DrawText(inactiveS, rightX+(rightW-lw)/2-20+lw, cy2, COL_RED);
 
-            // MTP status below
+            // MTP status + toggle button below
             {
-                bool mtpOn = MtpServer::IsSessionOpen();
-                std::string mtpVal = mtpOn ? activeS : inactiveS;
-                SDL_Color mtpCol = mtpOn ? COL_GREEN : COL_DIM;
+                bool mtpRunning = MtpServer::IsRunning();
+                bool mtpOn      = MtpServer::IsSessionOpen();
+                std::string mtpVal = mtpOn       ? activeS
+                                  : mtpRunning   ? Lang::T("webui.mtp.waiting")
+                                                 : inactiveS;
+                SDL_Color mtpCol = mtpOn ? COL_GREEN
+                                 : mtpRunning ? COL_GOLD : COL_DIM;
                 int lineH = (lh > 0) ? lh : 20;
+                int mtpY = cy2 + lineH + 8;
                 int mw=0, mw2=0, mh=0;
                 TTF_Font* fss = GetFont(Font::Sm);
                 if(fss) TTF_SizeUTF8(fss, "MTP  : ", &mw, &mh);
                 if(fss) TTF_SizeUTF8(fss, mtpVal.c_str(), &mw2, &mh);
                 int mxBase = rightX + (rightW - (mw + mw2)) / 2;
-                DrawText("MTP  : ", mxBase, cy2 + lineH + 8, COL_DIM, Font::Sm);
-                DrawText(mtpVal, mxBase + mw, cy2 + lineH + 8, mtpCol, Font::Sm);
+                DrawText("MTP  : ", mxBase, mtpY, COL_DIM, Font::Sm);
+                DrawText(mtpVal, mxBase + mw, mtpY, mtpCol, Font::Sm);
+
+                std::string btnLbl = "Y  " + (mtpRunning
+                    ? Lang::T("webui.mtp.stop")
+                    : Lang::T("webui.mtp.start"));
+                int btnW = 160, btnH = 28;
+                int bw = 0, bh = 0;
+                if (fss) TTF_SizeUTF8(fss, btnLbl.c_str(), &bw, &bh);
+                if (bw + 24 > btnW) btnW = bw + 24;
+                int bx = rightX + (rightW - btnW) / 2;
+                int by = mtpY + lineH + 8;
+                SDL_Color frame = mtpRunning ? COL_GOLD : COL_ACCENT;
+                FillRect(bx, by, btnW, btnH, COL_PANEL);
+                DrawRect(bx, by, btnW, btnH, frame);
+                DrawTextC(btnLbl, bx + btnW/2, by + btnH/2, frame, Font::Sm);
+                HitAdd(bx, by, btnW, btnH, TToggleMtp, 0);
             }
         }
 
         DrawFooter(Lang::T("webui.footer"));
     }
+
+    if (gShowMtpWarning) DrawMtpWarningModal();
 
     Present();
 }
@@ -4519,6 +5405,32 @@ static std::string MiiDescT    (const char* label) { return FieldKey("mii.desc."
 static std::string PlayerLabelT(const char* label) { return FieldKey("player.field.", label); }
 static std::string PlayerDescT (const char* label) { return FieldKey("player.desc.",  label); }
 
+// Open the number-pad keyboard on the currently-selected player field
+// (Money, etc.) and write the parsed value back. We clamp to UINT32_MAX so
+// a runaway 11-digit input can't wrap. Empty input = cancel = no-op.
+// Defined here (after ShowNumberKeyboard / PlayerLabelT are in scope) and
+// used by the Money panel below — the player input-handler invokes it on A.
+static void TPlayerNumKbd(int) {
+    if (!gPlayerSav.loaded) return;
+    if (gPlayerFieldSel < 0 || gPlayerFieldSel >= PLAYER_FIELD_COUNT) return;
+    const auto& fd = PLAYER_FIELDS[gPlayerFieldSel];
+    uint32_t h = PFHash(fd);
+    uint32_t cur = fd.isUInt ? SaveEditor::GetUInt(gPlayerSav, h)
+                             : SaveEditor::GetAnyScalar(gPlayerSav, h);
+    std::string s = ShowNumberKeyboard(PlayerLabelT(fd.label),
+                                       std::to_string(cur), 10);
+    if (s.empty()) return;
+    unsigned long long v = strtoull(s.c_str(), nullptr, 10);
+    if (v > 0xFFFFFFFFull) v = 0xFFFFFFFFull;
+    if (!gPlayerUndoValid[gPlayerFieldSel]) {
+        gPlayerUndoVal[gPlayerFieldSel]   = (int32_t)cur;
+        gPlayerUndoValid[gPlayerFieldSel] = true;
+    }
+    if (fd.isUInt) SaveEditor::SetUInt(gPlayerSav, h, (uint32_t)v);
+    else           SaveEditor::SetAnyScalar(gPlayerSav, h, (uint32_t)v);
+    gPlayerSavDirty = true;
+}
+
 static void DrawPlayer() {
     HitClear();
     SDL_SetRenderDrawColor(gRen,COL_BG.r,COL_BG.g,COL_BG.b,255);
@@ -4620,7 +5532,13 @@ static void DrawPlayer() {
         } else if (fd.isInt) {
             val = std::to_string((int32_t)SaveEditor::GetAnyScalar(gPlayerSav, fh));
         } else if (fd.isUInt) {
-            val = std::to_string(SaveEditor::GetUInt(gPlayerSav, fh));
+            // Money (and any future big-uint field) gets thousand separators
+            // for readability — "1,234,567" is much easier to parse at a
+            // glance than "1234567".
+            uint32_t uv = SaveEditor::GetUInt(gPlayerSav, fh);
+            val = (strcmp(fd.label, "Money") == 0)
+                    ? FormatThousands(uv)
+                    : std::to_string(uv);
         } else {
             val = std::to_string(SaveEditor::GetAnyScalar(gPlayerSav, fh));
         }
@@ -4776,6 +5694,21 @@ static void DrawPlayer() {
         DrawTextC(Lang::T("next") + " >", bxR+btnW/2, btnY+btnH/2, COL_DIM);
         DrawTextC(Lang::T("player.cycle.region"), cx, btnY+btnH+14, COL_DIM);
         EmitPrevNextHighlight(/*sub=player region*/114, bxL, bxR, btnY, btnW, btnH);
+    } else if (fd.isUInt && strcmp(fd.label, "Money") == 0) {
+        // Money gets the number-pad-keyboard treatment instead of the +/-
+        // stepper grid: nudging a 7-digit value 1/10/100/1000 at a time is
+        // unusable, and the formatted display ("1,234,567") makes typing
+        // the exact balance you want trivial.
+        uint32_t rawV = SaveEditor::GetUInt(gPlayerSav, ph);
+        DrawTextC(FormatThousands(rawV), cx, midY-40, COL_GOLD, Font::Lg);
+        const int bw = 280, bh = 48;
+        int bx = cx - bw / 2;
+        int by = midY + 16;
+        FillRect(bx, by, bw, bh, COL_SEL);
+        DrawRect(bx, by, bw, bh, COL_ACCENT);
+        DrawTextC("A  " + Lang::T("player.money.type"),
+                  cx, by + bh / 2, COL_ACCENT, Font::Md);
+        HitAdd(bx, by, bw, bh, TPlayerNumKbd, 0);
     } else {
         // Generic numeric: UInt, Int, RawEnum
         uint32_t rawV = fd.isUInt ? SaveEditor::GetUInt(gPlayerSav, ph) : SaveEditor::GetAnyScalar(gPlayerSav, ph);
@@ -5839,8 +6772,21 @@ static void DrawMiiStats() {
     // The Browse view is reached via the upload-icon button next to "export .ltd"
     // on the Stats sub-tab, not from the pill bar.
     {
-        int stW=76, stH=22, stGap=4, stX=editX+8, stY=SE_TOP_Y+6;
-        const char* stKeys[] = {"subtab.stats","subtab.items","subtab.habits","subtab.words","subtab.relations","subtab.housing","subtab.social"};
+        int stW=76, stH=22, stGap=4, stY=SE_TOP_Y+6;
+        const char* stKeys[] = {"subtab.stats","subtab.words","subtab.relations","subtab.items","subtab.habits","subtab.housing","subtab.social"};
+        // Right-align the strip to the panel's right edge with a small
+        // padding. Previously we tried two approaches that both felt off:
+        //   - editX+8 (anchored to the small panel) → strip looked stuck
+        //     to the right when on housing/social/etc. (wider panel)
+        //   - panelX + (panelW-totalStripW)/2 (centered on wider panel)
+        //     → strip drifted LEFT on housing because midHidden expands
+        //     panelX further left.
+        // Right-aligning splits the difference: tabs sit against the
+        // panel's right edge consistently regardless of midHidden, and
+        // the selected-tab highlight stays within the visible content
+        // area. Mirrors what most desktop tab bars do.
+        int totalStripW = MII_SUBTAB_COUNT * stW + (MII_SUBTAB_COUNT - 1) * stGap;
+        int stX = panelX + panelW - totalStripW - 12;
         int sulX = stX, sulY = stY + stH + 2;
         bool sulHave = false;
         for (int ti=0; ti<MII_SUBTAB_COUNT; ti++) {
@@ -6853,7 +7799,11 @@ static void DrawMiiStats() {
                     const int CARDS_PER_ROW = 3;
                     const int cardGap = 12;
                     const int cardW = (contentW - (CARDS_PER_ROW-1) * cardGap) / CARDS_PER_ROW;
-                    const int HEAD_H = 30, SLOT_H = 30, SLOT_GAP = 4, ADD_H = 28, CARD_PAD = 10;
+                    // ADD_H is gone with the add-resident button — leaving a
+                    // matching reservation in the row-height math would
+                    // print every card with a phantom blank strip at the
+                    // bottom.
+                    const int HEAD_H = 30, SLOT_H = 30, SLOT_GAP = 4, CARD_PAD = 10;
 
                     int rowStartCard = 0;
                     while (rowStartCard < (int)cards.size()) {
@@ -6862,7 +7812,7 @@ static void DrawMiiStats() {
                         int rowH = 0;
                         for (int ci = rowStartCard; ci < rowEnd; ci++) {
                             int rooms = std::max(cards[ci].maxRoom + 1, 1);
-                            int h = HEAD_H + rooms*(SLOT_H+SLOT_GAP) + ADD_H + CARD_PAD*2;
+                            int h = HEAD_H + rooms*(SLOT_H+SLOT_GAP) + CARD_PAD*2;
                             if (h > rowH) rowH = h;
                         }
                         // Draw each card in this row.
@@ -6956,17 +7906,13 @@ static void DrawMiiStats() {
                                 }
                             }
 
-                            // Add-resident / drop-here-next-free button at the bottom.
-                            int addY = yc + rowH - ADD_H - CARD_PAD;
-                            bool focusedAdd = (gHousingNavSel == (int)gHousingNav.size());
-                            SDL_Color addBd = focusedAdd ? COL_ACCENT : COL_BORDER;
-                            FillRect(slotXL, addY, slotW, ADD_H, {26,26,26,255});
-                            DrawRect(slotXL, addY, slotW, ADD_H, addBd);
-                            std::string addLbl = Lang::T((gHousingPicked >= 0) ? "housing.drop.here" : "housing.add.resident");
-                            SDL_Color addCol = (gHousingPicked >= 0) ? COL_GOLD : COL_DIM;
-                            DrawTextC(addLbl, slotXL + slotW/2, addY + ADD_H/2, addCol, Font::Sm);
-                            addNav(3, -1, c.houseId, std::max(c.maxRoom + 1, 0), -1,
-                                   slotXL, addY, slotW, ADD_H, false);
+                            // The "Add resident" / "drop here" button at the
+                            // bottom of each card was removed — it duplicated
+                            // the drag-target behaviour already provided by
+                            // dropping onto an existing Mii (swap) or onto
+                            // an empty room slot. Keeping it produced an
+                            // extra clickable hit zone with no useful
+                            // distinct outcome.
                         }
                         yc += rowH + cardGap;
                         rowStartCard = rowEnd;
@@ -7025,11 +7971,27 @@ static void DrawMiiStats() {
             int summaryH = 28;
             FillRect(panelX+2, panelTop, panelW-4, summaryH, {26,26,26,255});
             DrawRect(panelX+2, panelTop, panelW-4, summaryH, COL_BORDER);
+            // Right-aligned: "tomodachishare.com  ·  N miis" credits the
+            // data source on the top-right of the panel. Drawn separately
+            // from the centered status string so it stays anchored to the
+            // panel's right edge regardless of search/sort text length.
+            std::string srcStr = "tomodachishare.com  ·  "
+                               + std::to_string(gShareTotal) + " "
+                               + Lang::T("mii.miis.word");
+            TTF_Font* fsm_hdr = GetFont(Font::Sm);
+            int srcW = 0, srcH = 0;
+            if (fsm_hdr) TTF_SizeUTF8(fsm_hdr, srcStr.c_str(), &srcW, &srcH);
+            int srcX = panelX + panelW - 4 - srcW - 8;
+            DrawText(srcStr, srcX, panelTop + (summaryH - srcH) / 2,
+                     COL_DIM, Font::Sm);
+
+            // Centered: search query (if any), page count, sort, filter.
+            // No more Mii count here — it lives in the right-aligned strip
+            // above so the source-of-truth credit is always next to it.
             std::string hdr;
             if (!gShareQuery.empty()) hdr = Lang::T("share.search") + ": \"" + gShareQuery + "\"  ·  ";
             std::string sortKey = gShareSort==1?"share.sort.likes":(gShareSort==2?"share.sort.oldest":"share.sort.newest");
-            hdr += std::to_string(gShareTotal) + " " + Lang::T("mii.miis.word") + "  ·  "
-                 + Lang::T("share.page") + " " + std::to_string(gSharePage) + " / " + std::to_string(gShareLastPage)
+            hdr += Lang::T("share.page") + " " + std::to_string(gSharePage) + " / " + std::to_string(gShareLastPage)
                  + "  ·  " + Lang::T("share.sort") + ": " + Lang::T(sortKey)
                  + (gShareFromSavOnly ? ("  ·  " + Lang::T("share.importable.only")) : std::string(""));
             DrawTextC(hdr, panelX+panelW/2, panelTop+summaryH/2, COL_DIM, Font::Sm);
@@ -7494,7 +8456,6 @@ static void DrawAppletWarning() {
     int mx = (SCREEN_W - mW) / 2, my = (SCREEN_H - mH) / 2;
     FillRect(mx, my, mW, mH, {18, 14, 10, 255});
     DrawRect(mx, my, mW, mH, COL_GOLD);
-    FillRect(mx, my, mW, 4, COL_GOLD);
 
     DrawTextC(Lang::T("applet.title"), SCREEN_W/2, my + 36, COL_GOLD, Font::Lg);
 
@@ -7738,6 +8699,8 @@ static void TConfirmBgRemove(int) {
     opts.thumbPath          = e.thumbPath;
     opts.noSrgb             = gPreviewNoSrgb;
     opts.originalUgctexPath = e.ugctexPath;
+    opts.originalCanvasPath = e.canvasPath;
+    opts.canvasShape        = gCanvasShape;
     err = TextureProcessor::ImportRgbaImage(img, opts);
     if (!err.empty()) { gOnSwitchMsg = err; gOnSwitchMsgCol = COL_RED; return; }
 
@@ -7871,7 +8834,502 @@ static void DrawError() {
     DrawHeader("");
     DrawTextC(Lang::T("error.title"), SCREEN_W/2, SCREEN_H/2-20, COL_RED, Font::Lg);
     DrawTextC(gError,  SCREEN_W/2, SCREEN_H/2+16, COL_DIM);
-    DrawFooter(Lang::T("footer.quit"));
+    DrawFooter(Lang::T("error.footer"));
+    Present();
+}
+
+// ── Island Generator: no-save bootstrap prompt ───────────────────────────────
+//
+// Shown instead of Screen::Error when SaveMount::Mount fails with
+// 0x0007D402 (target user has no Tomodachi Life save container).
+// Pressing A invokes SaveMount::CreateAndSeed with the bin2s-embedded seed
+// .sav payloads; pressing B returns to the user picker.
+
+// bin2s emits one header per .bin and embeds the data/size as constexpr in C++
+// mode (size lives in the header, not as a linkable symbol). The Makefile's
+// `-I$(BUILD)` puts these on the include path.
+#include "seed_Mii_bin.h"
+#include "seed_Map_bin.h"
+#include "seed_Player_bin.h"
+
+static void DrawBundleCreate() {
+    HitClear();
+    SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
+    SDL_RenderClear(gRen);
+    DrawHeader("");
+    DrawTextC(Lang::T("bundle.create.title"), SCREEN_W/2, 88,  COL_GOLD, Font::Lg);
+    DrawTextC(Lang::T("bundle.create.body"),  SCREEN_W/2, 132, COL_DIM,  Font::Sm);
+
+    // Cards are wider than before so localized descriptions fit; the
+    // earlier 360-px box clipped longer English/French/German strings.
+    const int btnW = 620, btnH = 86, gap = 28;
+    int totalH = btnH*2 + gap;
+    int x = (SCREEN_W - btnW) / 2;
+    int y0 = (SCREEN_H - totalH) / 2 + 10;
+
+    struct Choice { const char* key; const char* desc; };
+    const Choice rows[2] = {
+        { "bundle.blank.title",     "bundle.blank.desc"     },
+        { "bundle.generated.title", "bundle.generated.desc" },
+    };
+
+    TTF_Font* fsm = GetFont(Font::Sm);
+    for (int i = 0; i < 2; i++) {
+        bool sel = (gBundleCreateSel == i);
+        int y = y0 + i * (btnH + gap);
+        if (sel) DrawShadow(x, y, btnW, btnH, gTheme.cornerRadius);
+        FillRect(x, y, btnW, btnH, sel ? COL_SEL : COL_PANEL);
+        DrawRect(x, y, btnW, btnH, sel ? COL_GOLD : COL_BORDER);
+        DrawTextC(Lang::T(rows[i].key), SCREEN_W/2, y + 26, sel ? COL_TEXT : COL_DIM, Font::Md);
+        // Ellipsise the description if a translation outgrows the card, so
+        // we never paint over the rounded corners again.
+        std::string desc = Lang::T(rows[i].desc);
+        int dw = 0, dh = 0;
+        if (fsm) TTF_SizeUTF8(fsm, desc.c_str(), &dw, &dh);
+        int maxDescW = btnW - 32;
+        while (fsm && dw > maxDescW && desc.size() > 4) {
+            desc.pop_back();
+            TTF_SizeUTF8(fsm, (desc + "…").c_str(), &dw, &dh);
+            if (dw <= maxDescW) { desc += "…"; break; }
+        }
+        DrawTextC(desc, SCREEN_W/2, y + 58, COL_DIM, Font::Sm);
+    }
+
+    RequestHighlight((int)Screen::BundleCreate, /*sub*/0,
+                     x, y0 + gBundleCreateSel * (btnH + gap),
+                     btnW, btnH, gDtSec);
+    DrawAnimatedHighlight();
+
+    DrawFooter(Lang::T("bundle.create.footer"));
+    Present();
+}
+
+// Touch handler — tap a user card to choose them as the apply target.
+static void TBundleApplyPickUser(int idx);
+// Yes/No taps on the overwrite-confirm modal.
+static void TBundleApplyOverwriteYes(int);
+static void TBundleApplyOverwriteNo(int);
+
+// User picker shown right after a bundle is written to BUNDLE_ROOT. The user
+// selects which Switch account the new island should be applied to — without
+// this screen the bundle is orphaned on disk with no UI to reach it.
+static void DrawBundleApply() {
+    HitClear();
+    SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
+    SDL_RenderClear(gRen);
+    DrawHeader("");
+
+    DrawTextC(Lang::T("bundle.apply.title"),
+              SCREEN_W/2, 44, COL_GOLD, Font::Md);
+    if (!gPendingBundleName.empty()) {
+        DrawTextC(gPendingBundleName, SCREEN_W/2, 70, COL_DIM, Font::Sm);
+    }
+
+    int n = (int)gUsers.size();
+    if (n == 0) {
+        DrawTextC(Lang::T("userpick.title"),
+                  SCREEN_W/2, SCREEN_H/2, COL_DIM, Font::Md);
+        DrawFooter(Lang::T("bundle.apply.footer"));
+        Present();
+        return;
+    }
+
+    const int GAP     = 24;
+    const int MAX_VIS = std::min(n, 5);
+    const int CARD_W  = std::min(220, (SCREEN_W - 120 - (MAX_VIS-1)*GAP) / MAX_VIS);
+    const int AV_SIZE = CARD_W - 30;
+    const int CARD_H  = AV_SIZE + 66;
+
+    if (gBundleApplyUserSel < 0) gBundleApplyUserSel = 0;
+    if (gBundleApplyUserSel >= n) gBundleApplyUserSel = n - 1;
+
+    int scroll = 0;
+    if (n > MAX_VIS) {
+        scroll = gBundleApplyUserSel - MAX_VIS/2;
+        scroll = std::max(0, std::min(scroll, n - MAX_VIS));
+    }
+
+    int totalW = MAX_VIS*CARD_W + (MAX_VIS-1)*GAP;
+    int startX = (SCREEN_W - totalW) / 2;
+    int startY = 100 + (SCREEN_H - 36 - 100 - CARD_H) / 2;
+
+    int selCardX = startX, selCardY = startY;
+    for (int i = 0; i < MAX_VIS; i++) {
+        int idx = scroll + i;
+        if (idx >= n) break;
+        bool sel = (idx == gBundleApplyUserSel);
+        int cx = startX + i*(CARD_W + GAP);
+        if (sel) { selCardX = cx; selCardY = startY; }
+        HitAdd(cx, startY, CARD_W, CARD_H, TBundleApplyPickUser, idx);
+
+        if (sel) DrawShadow(cx, startY, CARD_W, CARD_H, gTheme.cornerRadius);
+        FillRect(cx, startY, CARD_W, CARD_H, sel ? COL_SEL : COL_PANEL);
+        DrawRect(cx, startY, CARD_W, CARD_H,
+                 (sel && gTheme.cornerRadius == 0) ? COL_GOLD : COL_BORDER);
+
+        int avX = cx + (CARD_W - AV_SIZE)/2;
+        int avY = startY + 14;
+        if (idx < (int)gAvatarTextures.size() && gAvatarTextures[idx]) {
+            SDL_Rect dst{avX, avY, AV_SIZE, AV_SIZE};
+            SDL_RenderCopy(gRen, gAvatarTextures[idx], nullptr, &dst);
+        } else {
+            FillRect(avX, avY, AV_SIZE, AV_SIZE, COL_PANEL2);
+            DrawRect(avX, avY, AV_SIZE, AV_SIZE, COL_BORDER);
+            DrawTextC("?", cx+CARD_W/2, avY+AV_SIZE/2, COL_DIM, Font::Lg);
+        }
+        DrawTextC(gUsers[idx].nickname, cx+CARD_W/2, avY+AV_SIZE+20,
+                  sel ? COL_TEXT : COL_DIM, Font::Sm);
+    }
+
+    RequestHighlight((int)Screen::BundlePick, /*sub*/0,
+                     selCardX, selCardY, CARD_W, CARD_H, gDtSec);
+    DrawAnimatedHighlight();
+
+    if (scroll > 0)
+        DrawTextC("<", startX-18, startY+CARD_H/2, COL_DIM, Font::Md);
+    if (scroll + MAX_VIS < n)
+        DrawTextC(">", startX+totalW+18, startY+CARD_H/2, COL_DIM, Font::Md);
+
+    // Overwrite-confirm modal — shown when the currently-selected user
+    // already has a save and we're about to clobber it with the bundle.
+    if (gShowBundleOverwriteConfirm) {
+        SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(gRen, 0, 0, 0, 190);
+        SDL_Rect full = { 0, 0, SCREEN_W, SCREEN_H };
+        SDL_RenderFillRect(gRen, &full);
+
+        SDL_Color accent = {220, 80, 80, 255};
+        const int mW = 580, mH = 220;
+        const int mx = (SCREEN_W - mW) / 2;
+        const int my = (SCREEN_H - mH) / 2;
+        FillRect(mx, my, mW, mH, {22, 14, 14, 255});
+        DrawRect(mx, my, mW, mH, accent);
+
+        DrawTextC(Lang::T("bundle.apply.overwrite.title"),
+                  SCREEN_W/2, my + 34, accent, Font::Lg);
+        std::string nick = (gBundleApplyUserSel >= 0 && gBundleApplyUserSel < n)
+                         ? gUsers[gBundleApplyUserSel].nickname : "";
+        DrawTextC(nick, SCREEN_W/2, my + 72, COL_TEXT, Font::Md);
+        DrawTextC(Lang::T("bundle.apply.overwrite.l1"),
+                  SCREEN_W/2, my + 104, COL_DIM, Font::Sm);
+        DrawTextC(Lang::T("bundle.apply.overwrite.l2"),
+                  SCREEN_W/2, my + 126, COL_DIM, Font::Sm);
+
+        bool overwriteReady = (gBundleOverwriteCountdown <= 0);
+        const int bW = 200, bH = 42, gap = 16;
+        int by = my + mH - bH - 18;
+        int bxA = SCREEN_W/2 - gap/2 - bW;
+        int bxB = SCREEN_W/2 + gap/2;
+        FillRect(bxA, by, bW, bH, COL_SEL);
+        DrawRect(bxA, by, bW, bH, overwriteReady ? accent : COL_BORDER);
+        int owSecs = (gBundleOverwriteCountdown + 59) / 60;
+        std::string yesLbl = "A  " + Lang::T("bundle.apply.overwrite.yes");
+        if (!overwriteReady) yesLbl += "  (" + std::to_string(owSecs) + ")";
+        DrawTextC(yesLbl,
+                  bxA + bW/2, by + bH/2,
+                  overwriteReady ? accent : COL_DIM, Font::Md);
+        // Only register the touch hit once the cooldown elapses, so a
+        // mistaken tap during the countdown does nothing.
+        if (overwriteReady) HitAdd(bxA, by, bW, bH, TBundleApplyOverwriteYes, 0);
+        FillRect(bxB, by, bW, bH, COL_PANEL);
+        DrawRect(bxB, by, bW, bH, COL_BORDER);
+        DrawTextC("B  " + Lang::T("bundle.apply.overwrite.no"),
+                  bxB + bW/2, by + bH/2, COL_DIM, Font::Md);
+        HitAdd(bxB, by, bW, bH, TBundleApplyOverwriteNo, 0);
+    }
+
+    DrawFooter(Lang::T("bundle.apply.footer"));
+    Present();
+}
+
+static void DrawIslandGenPrompt() {
+    SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
+    SDL_RenderClear(gRen);
+    DrawHeader("");
+    DrawTextC(Lang::T("islandgen.title"),  SCREEN_W/2, SCREEN_H/2 - 64, COL_GOLD, Font::Lg);
+    DrawTextC(Lang::T("islandgen.body1"),  SCREEN_W/2, SCREEN_H/2 - 8,  COL_TEXT, Font::Md);
+    DrawTextC(Lang::T("islandgen.body2"),  SCREEN_W/2, SCREEN_H/2 + 24, COL_DIM,  Font::Sm);
+    // Real seeds are MB-scale. Anything tiny (the 4-byte "STUB" placeholder
+    // shipped by default) means the dev hasn't dropped real bytes into
+    // data/seed_*.bin yet — surface that clearly instead of writing junk.
+    if (seed_Mii_bin_size < 1024 || seed_Map_bin_size < 1024 || seed_Player_bin_size < 1024)
+        DrawTextC(Lang::T("islandgen.no_seed"), SCREEN_W/2, SCREEN_H/2 + 60, COL_RED, Font::Sm);
+    DrawFooter(Lang::T("islandgen.footer"));
+    Present();
+}
+
+// ── On-Switch Island Generator config + run screens ─────────────────────────
+
+// Pretty label for the current map-mode value. Only two modes exist now:
+// "classic" — keep the seed map's terrain unchanged (the 100% save's
+// pre-existing island layout). "random" — fully procedural terrain.
+static std::string IslandGenMapModeLabel() {
+    if (gIslandGenMapMode == "random")  return Lang::T("islandgen.map.random");
+    if (gIslandGenMapMode == "classic") return Lang::T("islandgen.map.classic");
+    return gIslandGenMapMode;
+}
+
+static void IslandGenCycleMap(int dir) {
+    static const char* vals[] = { "classic", "random" };
+    constexpr int n = (int)(sizeof(vals) / sizeof(vals[0]));
+    int cur = 0;
+    for (int i = 0; i < n; i++) if (gIslandGenMapMode == vals[i]) { cur = i; break; }
+    cur = (cur + (dir > 0 ? 1 : -1) + n) % n;
+    gIslandGenMapMode = vals[cur];
+}
+
+static void DrawIslandGenConfig() {
+    HitClear();
+    SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
+    SDL_RenderClear(gRen);
+    DrawHeader(Lang::T("islandgen.cfg.header"));
+
+    DrawTextC(Lang::T("islandgen.cfg.title"),
+              SCREEN_W/2, 76, COL_GOLD, Font::Lg);
+    DrawTextC(Lang::T("islandgen.cfg.body"),
+              SCREEN_W/2, 110, COL_DIM, Font::Sm);
+
+    const int rowW = 720;
+    const int rowH = 68;
+    const int rowGap = 10;
+    const int rowX = (SCREEN_W - rowW) / 2;
+    int rowY = 150;
+
+    auto drawRow = [&](int idx,
+                       const std::string& label,
+                       const std::string& desc,
+                       const std::string& value,
+                       bool cycleable) {
+        bool sel = (gIslandGenSel == idx);
+        SDL_Color border = sel ? COL_GOLD : COL_BORDER;
+        FillRect(rowX, rowY, rowW, rowH, sel ? COL_SEL : COL_PANEL);
+        DrawRect(rowX, rowY, rowW, rowH, border);
+
+        // Label on top, description underneath — matches the Settings row
+        // layout so the two screens read the same way.
+        SDL_Color labelCol = sel ? COL_TEXT : COL_DIM;
+        DrawText(label, rowX + 16, rowY + 10, labelCol, Font::Md);
+        DrawText(desc,  rowX + 16, rowY + 40, COL_DIM,  Font::Sm);
+
+        // Right-side value (centered vertically in the row) + < / > arrows
+        // when cycleable. DrawTextC handles the vertical centering for us
+        // so the value sits exactly on the row's midline.
+        int midY = rowY + rowH / 2;
+        if (cycleable) {
+            DrawTextC("<", rowX + rowW - 200, midY,
+                      sel ? COL_GOLD : COL_DIM, Font::Md);
+            DrawTextC(value, rowX + rowW - 110, midY,
+                      sel ? COL_ACCENT : COL_DIM, Font::Md);
+            DrawTextC(">", rowX + rowW - 30,  midY,
+                      sel ? COL_GOLD : COL_DIM, Font::Md);
+        } else {
+            DrawTextC(value, rowX + rowW - 80, midY,
+                      sel ? COL_ACCENT : COL_DIM, Font::Md);
+        }
+        HitAdd(rowX, rowY, rowW, rowH, [](int i){ gIslandGenSel = i; }, idx);
+        rowY += rowH + rowGap;
+    };
+
+    drawRow(0,
+            Lang::T("islandgen.cfg.row.map"),
+            Lang::T("islandgen.cfg.row.map.desc"),
+            IslandGenMapModeLabel(), true);
+    drawRow(1,
+            Lang::T("islandgen.cfg.row.rels"),
+            Lang::T("islandgen.cfg.row.rels.desc"),
+            gIslandGenRelMode == "none"
+                ? Lang::T("islandgen.cfg.rels.none")
+                : Lang::T("islandgen.cfg.rels.dense"),
+            true);
+    drawRow(2,
+            Lang::T("islandgen.cfg.row.batch"),
+            Lang::T("islandgen.cfg.row.batch.desc"),
+            gIslandGenBatchLtd
+                ? Lang::T("islandgen.cfg.batch.yes")
+                : Lang::T("islandgen.cfg.batch.no"),
+            true);
+
+    // Go / Skip buttons at the bottom.
+    const int bW = 220, bH = 48, bGap = 18;
+    int by = SCREEN_H - bH - 70;
+    int bxGo   = SCREEN_W/2 - bGap/2 - bW;
+    int bxSkip = SCREEN_W/2 + bGap/2;
+    bool selGo = (gIslandGenSel == 3);
+    FillRect(bxGo,   by, bW, bH, COL_SEL);
+    DrawRect(bxGo,   by, bW, bH, selGo ? COL_GOLD : COL_ACCENT);
+    DrawTextC("A  " + Lang::T("islandgen.cfg.go"),
+              bxGo + bW/2, by + bH/2, COL_GOLD, Font::Md);
+    HitAdd(bxGo, by, bW, bH, [](int){ gIslandGenSel = 3; gSimKDown |= HidNpadButton_A; }, 0);
+
+    FillRect(bxSkip, by, bW, bH, COL_PANEL);
+    DrawRect(bxSkip, by, bW, bH, COL_BORDER);
+    DrawTextC("B  " + Lang::T("islandgen.cfg.skip"),
+              bxSkip + bW/2, by + bH/2, COL_DIM, Font::Md);
+    HitAdd(bxSkip, by, bW, bH, [](int){ gSimKDown |= HidNpadButton_B; }, 0);
+
+    DrawFooter(Lang::T("islandgen.cfg.footer"));
+    Present();
+}
+
+// Drop-files-via-MTP gate that runs between IslandGenConfig and the worker
+// thread when the user picked "Batch LTD = Yes". Y toggles MTP (with the
+// same emulator-warning modal used on the WebUI tab), A confirms and kicks
+// off the generator, B returns to the config screen.
+static void DrawIslandGenBatchLtd() {
+    HitClear();
+    SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
+    SDL_RenderClear(gRen);
+    DrawHeader(Lang::T("islandgen.batchltd.header"));
+
+    // Make sure the destination folder exists BEFORE the user enables MTP
+    // — otherwise they'd connect, see no folder, and have to create it by
+    // hand on their PC (or worse, drop .ltd files into the wrong place).
+    // mkdir is idempotent here: 0777 fallback if /switch/TomoToolNX is
+    // missing for any reason, and the leaf is created either way.
+    mkdir("/switch/TomoToolNX",      0777);
+    mkdir("/switch/TomoToolNX/Miis", 0777);
+
+    DrawTextC(Lang::T("islandgen.batchltd.title"),
+              SCREEN_W/2, 90, COL_GOLD, Font::Lg);
+    DrawTextC(Lang::T("islandgen.batchltd.body1"),
+              SCREEN_W/2, 140, COL_TEXT, Font::Md);
+    DrawTextC(Lang::T("islandgen.batchltd.body2"),
+              SCREEN_W/2, 170, COL_DIM, Font::Sm);
+
+    // The folder path itself, monospaced-ish in a panel so it's easy to
+    // copy/paste from a screenshot if needed.
+    {
+        const int pW = 560, pH = 50;
+        int px = (SCREEN_W - pW) / 2;
+        int py = 210;
+        FillRect(px, py, pW, pH, COL_PANEL);
+        DrawRect(px, py, pW, pH, COL_BORDER);
+        DrawTextC("/switch/TomoToolNX/Miis/",
+                  px + pW / 2, py + pH / 2, COL_ACCENT, Font::Md);
+    }
+
+    // MTP status (mirrors the readout on the WebUI tab so the user can
+    // tell at a glance whether their PC will see the Switch yet).
+    {
+        bool mtpRunning = MtpServer::IsRunning();
+        bool mtpOpen    = MtpServer::IsSessionOpen();
+        std::string mtpVal = mtpOpen    ? Lang::T("webui.mtp.active")
+                           : mtpRunning ? Lang::T("webui.mtp.waiting")
+                                        : Lang::T("webui.mtp.inactive");
+        SDL_Color mtpCol = mtpOpen    ? COL_GREEN
+                         : mtpRunning ? COL_GOLD
+                                      : COL_DIM;
+        DrawTextC("MTP: " + mtpVal, SCREEN_W/2, 290, mtpCol, Font::Md);
+    }
+
+    // Two buttons: Y to toggle MTP, A to confirm and run.
+    const int bW = 240, bH = 50, bGap = 24;
+    int by = SCREEN_H - bH - 80;
+    int bxMtp  = SCREEN_W/2 - bGap/2 - bW;
+    int bxGo   = SCREEN_W/2 + bGap/2;
+
+    bool mtpRunning = MtpServer::IsRunning();
+    SDL_Color mtpBorder = mtpRunning ? COL_GREEN : COL_ACCENT;
+    FillRect(bxMtp, by, bW, bH, COL_SEL);
+    DrawRect(bxMtp, by, bW, bH, mtpBorder);
+    DrawTextC("Y  " + Lang::T(mtpRunning ? "islandgen.batchltd.mtp_off"
+                                         : "islandgen.batchltd.mtp_on"),
+              bxMtp + bW / 2, by + bH / 2, mtpBorder, Font::Md);
+    HitAdd(bxMtp, by, bW, bH, [](int){ gSimKDown |= HidNpadButton_Y; }, 0);
+
+    FillRect(bxGo, by, bW, bH, COL_SEL);
+    DrawRect(bxGo, by, bW, bH, COL_GOLD);
+    // Confirm uses X (not A) so it doesn't collide with the MTP warning
+    // modal's "A = Yes" handler — pressing A while the modal is up should
+    // only ack the modal, not also kick off the generator.
+    DrawTextC("X  " + Lang::T("islandgen.batchltd.go"),
+              bxGo + bW / 2, by + bH / 2, COL_GOLD, Font::Md);
+    HitAdd(bxGo, by, bW, bH, [](int){ gSimKDown |= HidNpadButton_X; }, 0);
+
+    DrawFooter(Lang::T("islandgen.batchltd.footer"));
+    // The MTP warning modal is drawn on top of this screen when armed —
+    // we DON'T Present here so the caller can layer it without flicker.
+    if (gShowMtpWarning) DrawMtpWarningModal();
+    Present();
+}
+
+static void DrawIslandGenRun() {
+    HitClear();
+    SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
+    SDL_RenderClear(gRen);
+    DrawHeader(Lang::T("islandgen.run.header"));
+
+    DrawTextC(Lang::T("islandgen.run.title"),
+              SCREEN_W/2, SCREEN_H/2 - 80, COL_GOLD, Font::Lg);
+
+    const IslandGenRunner::Progress& p = gIslandGenProgress;
+    std::string label = p.label.empty() ? Lang::T("islandgen.run.starting") : p.label;
+    DrawTextC(label, SCREEN_W/2, SCREEN_H/2 - 16, COL_TEXT, Font::Md);
+
+    // Progress bar — animated. The worker hops from step 1 to step 5 in
+    // a couple of frames because most pipeline stages are I/O bound and
+    // finish almost instantly, which left the bar looking frozen at 1/5
+    // and then snapping to 5/5. We track a separate `gDisplayedStep`
+    // that eases toward the worker's real step count at ~3 step-units
+    // per second, so the bar visibly slides between checkpoints.
+    const int barW = 560, barH = 18;
+    int bx = (SCREEN_W - barW) / 2;
+    int by = SCREEN_H/2 + 18;
+    FillRect(bx, by, barW, barH, COL_PANEL);
+    DrawRect(bx, by, barW, barH, COL_BORDER);
+    int total = std::max(1, p.total);
+    static float gDisplayedStep = 0.0f;
+    if (p.step == 0 && !p.done) gDisplayedStep = 0.0f;  // reset on new run
+    float target = (float)p.step;
+    // Snap to target if very close (avoid permanent residual 0.001 lag).
+    // Ease at ~3 step-units/sec — fast enough not to feel sluggish on
+    // long pipelines, slow enough to read across 200ms of one fast step.
+    float maxDelta = gDtSec * 3.0f;
+    if (target > gDisplayedStep) {
+        gDisplayedStep = std::min(target, gDisplayedStep + maxDelta);
+    } else if (target < gDisplayedStep) {
+        gDisplayedStep = std::max(target, gDisplayedStep - maxDelta);
+    }
+    // Snap to full when the run is done so the bar always finishes at 100%.
+    if (p.done && p.error.empty() && !p.cancelled) gDisplayedStep = (float)total;
+    float frac = gDisplayedStep / (float)total;
+    if (frac < 0.0f) frac = 0.0f;
+    if (frac > 1.0f) frac = 1.0f;
+    int fillW = (int)((float)barW * frac);
+    if (fillW > 2) FillRect(bx + 1, by + 1, fillW - 2, barH - 2, COL_GOLD);
+    char stepBuf[64];
+    std::snprintf(stepBuf, sizeof(stepBuf), "%d / %d", p.step, p.total);
+    DrawTextC(stepBuf, SCREEN_W/2, by + barH + 18, COL_DIM, Font::Sm);
+
+    // Cancel — only registered while still running. Once the runner is
+    // done, the input handler picks A to dismiss instead.
+    if (!p.done) {
+        const int bW = 220, bH = 44;
+        int cx = SCREEN_W/2 - bW/2;
+        int cy = SCREEN_H - bH - 70;
+        FillRect(cx, cy, bW, bH, COL_PANEL);
+        DrawRect(cx, cy, bW, bH, COL_BORDER);
+        DrawTextC("B  " + Lang::T("islandgen.run.cancel"),
+                  cx + bW/2, cy + bH/2, COL_DIM, Font::Md);
+        HitAdd(cx, cy, bW, bH, [](int){ gSimKDown |= HidNpadButton_B; }, 0);
+    } else {
+        const int bW = 220, bH = 44;
+        int cx = SCREEN_W/2 - bW/2;
+        int cy = SCREEN_H - bH - 70;
+        FillRect(cx, cy, bW, bH, COL_SEL);
+        DrawRect(cx, cy, bW, bH, COL_GOLD);
+        std::string lbl = !p.error.empty()
+            ? Lang::T("islandgen.run.dismiss_error")
+            : (p.cancelled ? Lang::T("islandgen.run.dismiss_cancel")
+                           : Lang::T("islandgen.run.dismiss_done"));
+        DrawTextC("A  " + lbl, cx + bW/2, cy + bH/2, COL_GOLD, Font::Md);
+        HitAdd(cx, cy, bW, bH, [](int){ gSimKDown |= HidNpadButton_A; }, 0);
+        if (!p.error.empty()) {
+            DrawTextC(p.error, SCREEN_W/2, cy - 32, SDL_Color{220, 90, 90, 255}, Font::Sm);
+        }
+    }
+
+    DrawFooter(Lang::T("islandgen.run.footer"));
     Present();
 }
 
@@ -7890,16 +9348,25 @@ static struct {
 // scroll step is invisible to the tap-fire logic.
 static void ApplyTouchScroll(float ddx, float ddy) {
     if (gScreen == Screen::UserPick) {
+        // The restore picker modal owns the screen — don't let horizontal
+        // swipes secretly change the user selection behind it.
+        if (gShowRestorePicker) return;
+        // The picker now exposes one extra "+" slot past the real users; allow
+        // the swipe scroll to land on it (gUsers.size() inclusive).
         int prev = gUserSel;
         s_touch.accumX += ddx;
         while (s_touch.accumX >=  100.f && gUserSel > 0)
             { s_touch.accumX -= 100.f; gUserSel--; }
-        while (s_touch.accumX <= -100.f && gUserSel < (int)gUsers.size()-1)
+        while (s_touch.accumX <= -100.f && gUserSel < (int)gUsers.size())
             { s_touch.accumX += 100.f; gUserSel++; }
         if (gUserSel != prev) s_touch.dragging = true;
         return;
     }
     if (gScreen != Screen::OnSwitch) return;
+
+    // Modal pickers swallow drag-to-scroll so the UGC list doesn't jitter
+    // underneath them while the user is just picking a category.
+    if (gShowUgcKindPicker) return;
 
     if (gShowFileBrowser) {
         int itemTop = gBrowseForExportDir ? 106 : 88;
@@ -8065,6 +9532,61 @@ static void ProcessTouch(int tx, int ty, u64& kDown) {
 }
 
 
+// Finishes the bundle-apply path after Mount + (optionally) BackingUp have
+// already run for `userIdx`. Handles: overlay the bundle's files on top of
+// the now-mounted save, stamp the region/language, drop the WebUI sentinel
+// when "+ Generator" was picked, commit, refresh gBackupFull / gUserSel,
+// and transition to whichever screen comes next.
+//
+// Shared by:
+//   • Screen::BundlePick A-press (no-save branch) — calls directly after
+//     CreateAndSeed succeeds.
+//   • Screen::BackingUp completion handler — calls when an automatic
+//     pre-overwrite backup finished.
+static void FinishBundleApply(int userIdx) {
+    if (userIdx < 0 || userIdx >= (int)gUsers.size()) {
+        gError = "Bundle apply: user index out of range";
+        gScreen = Screen::Error;
+        gApplyBundleAfterBackup = false;
+        return;
+    }
+    std::string aerr = BackupService::ApplyBundleToMount(
+        gPendingBundleName, "tomodata:/");
+    if (!aerr.empty()) {
+        gError = "Apply bundle: " + aerr;
+        gScreen = Screen::Error;
+        gShowBundleOverwriteConfirm = false;
+        gApplyBundleAfterBackup = false;
+        return;
+    }
+    std::string lerr = PatchSeedLanguageInPlace("tomodata:/Player.sav");
+    if (!lerr.empty()) LogERR("Region/language patch (apply): " + lerr);
+    if (gPendingBundleGenerated) {
+        if (FILE* f = fopen("tomodata:/.tomotool_first_run", "wb")) fclose(f);
+    }
+    SaveMount::Commit();
+    gUserSel = userIdx;
+    gBackupFull = (BackupService::CountBackups(
+        SaveMount::SafeUserFolder(gUsers[userIdx])) >= gMaxBackups);
+    // The bundle was a transient staging directory for this apply — wipe
+    // it now so we don't leave a ~4.5 MB ghost in BUNDLE_ROOT for every
+    // generation. The save we just wrote is the only copy that matters
+    // going forward; it lives in the user's actual save data on the
+    // console, separate from SD-card bundle staging.
+    if (!gPendingBundleName.empty()) {
+        BackupService::DeleteBundleByName(gPendingBundleName);
+    }
+    gPendingBundleName.clear();
+    gShowBundleOverwriteConfirm = false;
+    gApplyBundleAfterBackup = false;
+    if (gPendingBundleGenerated) {
+        gIslandGenSel = 2;
+        gScreen = Screen::IslandGenConfig;
+    } else {
+        gScreen = Screen::BackupPrompt;
+    }
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 int main(int,char**) {
@@ -8095,6 +9617,14 @@ int main(int,char**) {
     rename("/switch/TomoToolNX/exports", "/switch/TomoToolNX/__exports_tmp__");
     rename("/switch/TomoToolNX/__exports_tmp__", "/switch/TomoToolNX/Exports");
     mkdir("/switch/TomoToolNX/Exports", 0777);
+    // Bundles are intentionally ephemeral — the apply flow deletes them
+    // after success/cancel, but a crash mid-flow can leave one behind.
+    // Sweep BUNDLE_ROOT at startup so leftovers don't accumulate ~4.5 MB
+    // each across sessions.
+    {
+        int swept = BackupService::DeleteAllBundles();
+        if (swept > 0) LogINF("Cleaned " + std::to_string(swept) + " stale bundle(s)");
+    }
     LoadConfig();
     // LoadConfig may have picked a non-Latin language (saved config or system
     // language detection on first launch). Reload glyphs so ru/zh actually
@@ -8256,28 +9786,11 @@ int main(int,char**) {
             DrawUpdateAvailable();
             break;
 
-        case Screen::UserPick:
-            if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))   { gUserSel = (gUserSel>0) ? gUserSel-1 : (int)gUsers.size()-1; }
-            if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) { gUserSel = (gUserSel+1<(int)gUsers.size()) ? gUserSel+1 : 0; }
-            if (kDown&HidNpadButton_X) { TOpenSettings(0); break; }
-            if (kDown&HidNpadButton_A) {
-                // Mount save first so we can check backup state
-                gScreen=Screen::Mounting;
-                DrawMounting();
-                {
-                    std::string err=SaveMount::Mount(gUsers[gUserSel].uid);
-                    if (!err.empty()){gError=err;gScreen=Screen::Error;break;}
-                }
-                gBackupFull = (BackupService::CountBackups() >= gMaxBackups);
-                gScreen=Screen::BackupPrompt;
-            }
-            DrawUserPick();
-            break;
-
-        case Screen::Settings:
+        case Screen::UserPick: {
+            // While the per-user restore picker is open it owns input.
             if (gShowRestorePicker) {
                 const int RVIS = 7;
-                // ── Confirmation modal handling (A = confirm, B = cancel) ───
+                // Confirmation modal (A = confirm, B = cancel)
                 if (gRestoreConfirmKind != 0) {
                     if (kDown & HidNpadButton_B) {
                         gRestoreConfirmKind = 0;
@@ -8287,56 +9800,64 @@ int main(int,char**) {
                         if (gRestoreSel < 0 || gRestoreSel >= (int)gRestoreList.size()) {
                             // nothing to do
                         } else if (kind == 2) {
-                            // Delete the selected backup
                             std::string target = gRestoreList[gRestoreSel];
                             bool ok = BackupService::DeleteBackupAt(target);
                             if (ok) {
-                                gRestoreList = BackupService::ListBackups();
+                                gRestoreList = BackupService::ListBackups(gRestorePickerUid);
                                 if (gRestoreList.empty()) {
                                     gShowRestorePicker = false;
-                                    gSettingsMsg = "Backup deleted (no backups left).";
-                                    gSettingsMsgCol = COL_GREEN;
+                                    gBundleMsg = Lang::T("restore.toast.deleted_last");
+                                    gBundleMsgCol = {120, 220, 120, 255};
+                                    gBundleMsgFrames = 180;
                                 } else {
                                     if (gRestoreSel >= (int)gRestoreList.size())
                                         gRestoreSel = (int)gRestoreList.size() - 1;
                                     if (gRestoreSel < gRestoreScroll) gRestoreScroll = gRestoreSel;
                                     int maxScroll = std::max(0, (int)gRestoreList.size() - RVIS);
                                     if (gRestoreScroll > maxScroll) gRestoreScroll = maxScroll;
-                                    gSettingsMsg = "Backup deleted.";
-                                    gSettingsMsgCol = COL_GREEN;
                                 }
-                            } else {
-                                gSettingsMsg = "Delete failed."; gSettingsMsgCol = COL_RED;
                             }
                         } else if (kind == 1) {
-                            // Restore the selected backup
-                            if (gUsers.empty()) {
-                                gSettingsMsg = "No user selected."; gSettingsMsgCol = COL_RED;
+                            // Restore the selected backup onto the user the
+                            // picker was opened for (NOT gUserSel — the user
+                            // may have D-padded away while the picker was up).
+                            int u = gRestorePickerUserIdx;
+                            if (u < 0 || u >= (int)gUsers.size()) {
                                 gShowRestorePicker = false;
                             } else {
-                                std::string merr = SaveMount::Mount(gUsers[gUserSel].uid);
-                                if (!merr.empty()) {
-                                    gSettingsMsg = "Mount failed: " + merr; gSettingsMsgCol = COL_RED;
-                                    gShowRestorePicker = false;
-                                } else {
+                                std::string merr = SaveMount::Mount(gUsers[u].uid);
+                                if (merr.empty()) {
                                     SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
                                     SDL_RenderClear(gRen);
                                     DrawTextC(Lang::T("restore.progress.title"), SCREEN_W/2, SCREEN_H/2 - 18, COL_ACCENT, Font::Lg);
-                                    DrawTextC(Lang::T("restore.progress.wait"), SCREEN_W/2, SCREEN_H/2 + 22, COL_DIM, Font::Md);
+                                    DrawTextC(Lang::T("restore.progress.wait"),  SCREEN_W/2, SCREEN_H/2 + 22, COL_DIM,    Font::Md);
                                     Present();
-                                    std::string rerr = BackupService::RestoreBackup(gRestoreList[gRestoreSel], "tomodata:/");
+                                    std::string rerr = BackupService::RestoreBackup(
+                                        gRestoreList[gRestoreSel], "tomodata:/");
                                     SaveMount::Commit();
                                     SaveMount::Unmount();
                                     gShowRestorePicker = false;
-                                    if (rerr.empty()) { gSettingsMsg = "Backup restored successfully."; gSettingsMsgCol = COL_GREEN; }
-                                    else              { gSettingsMsg = "Restore failed: " + rerr;       gSettingsMsgCol = COL_RED; }
+                                    if (rerr.empty()) {
+                                        gBundleMsg = Lang::T("restore.toast.ok");
+                                        gBundleMsgCol = {120, 220, 120, 255};
+                                    } else {
+                                        gBundleMsg = Lang::T("restore.toast.fail") + " " + rerr;
+                                        gBundleMsgCol = {220, 90, 90, 255};
+                                    }
+                                    gBundleMsgFrames = 240;
+                                } else {
+                                    gShowRestorePicker = false;
+                                    gBundleMsg = Lang::T("restore.toast.mount_fail") + " " + merr;
+                                    gBundleMsgCol = {220, 90, 90, 255};
+                                    gBundleMsgFrames = 240;
                                 }
                             }
                         }
                     }
+                    DrawUserPick();
                     break;
                 }
-                // ── Normal picker navigation (no modal) ─────────────────────
+                // Normal picker navigation
                 if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp)) {
                     if (gRestoreSel > 0) { gRestoreSel--; if (gRestoreSel < gRestoreScroll) gRestoreScroll = gRestoreSel; }
                 }
@@ -8347,13 +9868,66 @@ int main(int,char**) {
                     }
                 }
                 if (kDown&HidNpadButton_B) { gShowRestorePicker = false; }
-                if (kDown&HidNpadButton_A && !gRestoreList.empty()) {
-                    gRestoreConfirmKind = 1; // ask before restoring
+                if (kDown&HidNpadButton_A && !gRestoreList.empty()) gRestoreConfirmKind = 1;
+                if (kDown&HidNpadButton_X && !gRestoreList.empty()) gRestoreConfirmKind = 2;
+                DrawUserPick();
+                break;
+            }
+
+            // gridLen = real users + the trailing "+" tile. Navigation wraps
+            // 0..n inclusive so the user can D-pad onto the "+" card.
+            int gridLen = (int)gUsers.size() + 1;
+            if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))   { gUserSel = (gUserSel>0) ? gUserSel-1 : gridLen-1; }
+            if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) { gUserSel = (gUserSel+1<gridLen) ? gUserSel+1 : 0; }
+            // Minus opens Settings (was X — repurposed for per-user restore).
+            if (kDown&HidNpadButton_Minus) { TOpenSettings(0); break; }
+            // X opens the restore picker scoped to the selected user. The "+"
+            // tile has no account, so skip it.
+            if (kDown&HidNpadButton_X) {
+                if (!gUsers.empty() && gUserSel < (int)gUsers.size()) {
+                    gRestorePickerUserIdx = gUserSel;
+                    gRestorePickerUid     = SaveMount::SafeUserFolder(gUsers[gUserSel]);
+                    gRestoreList          = BackupService::ListBackups(gRestorePickerUid);
+                    gRestoreSel           = 0;
+                    gRestoreScroll        = 0;
+                    gRestoreConfirmKind   = 0;
+                    gShowRestorePicker    = true;
                 }
-                if (kDown&HidNpadButton_X && !gRestoreList.empty()) {
-                    gRestoreConfirmKind = 2; // ask before deleting
+                break;
+            }
+            if (kDown&HidNpadButton_A) {
+                if (gUserSel == (int)gUsers.size()) {
+                    // "+" tile — open the bundle-create modal instead of
+                    // mounting an account.
+                    gBundleCreateSel = 0;
+                    gScreen = Screen::BundleCreate;
+                    break;
                 }
-            } else if (gShowFileBrowser) {
+                // Mount save first so we can check backup state. If the mount
+                // fails with 0x0007D402 (the user has no Tomodachi Life save
+                // yet) we don't dead-end on Screen::Error — we offer the
+                // Island Generator bootstrap instead.
+                gScreen=Screen::Mounting;
+                DrawMounting();
+                {
+                    std::string err=SaveMount::Mount(gUsers[gUserSel].uid);
+                    if (!err.empty()){
+                        if (err.find("0x0007D402") != std::string::npos) {
+                            gScreen = Screen::IslandGenPrompt;
+                            break;
+                        }
+                        gError=err;gScreen=Screen::Error;break;
+                    }
+                }
+                gBackupFull = (BackupService::CountBackups(SaveMount::SafeUserFolder(gUsers[gUserSel])) >= gMaxBackups);
+                gScreen=Screen::BackupPrompt;
+            }
+            DrawUserPick();
+            break;
+        }
+
+        case Screen::Settings:
+            if (gShowFileBrowser) {
                 int pvis = (SCREEN_H - 148) / 26;
                 if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp)) {
                     if (gBrowseSel > 0) { gBrowseSel--; if (gBrowseSel < gBrowseScroll) gBrowseScroll = gBrowseSel; }
@@ -8395,17 +9969,12 @@ int main(int,char**) {
                     gSettingsSel = std::max(0, gSettingsSel - 1);
                 }
                 if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown)) {
-                    gSettingsSel = std::min(4, gSettingsSel + 1);
+                    gSettingsSel = std::min(3, gSettingsSel + 1);
                 }
                 // Row mapping: 0 = Language, 1 = Theme, 2 = Export Path,
-                //              3 = Max Backups, 4 = Restore Backup.
-                if (gSettingsSel == 4 && kDown&HidNpadButton_A) {
-                    gRestoreList        = BackupService::ListBackups();
-                    gRestoreSel         = 0;
-                    gRestoreScroll      = 0;
-                    gRestoreConfirmKind = 0;
-                    gShowRestorePicker  = true;
-                }
+                //              3 = Max Backups. The old "Restore Backup" row
+                //              moved out — restore is now a per-user floppy
+                //              button on the user picker.
                 if (gSettingsSel == 2 && kDown&HidNpadButton_A) {
                     gBrowseForExportDir = true; gBrowseForMii = false;
                     std::string sp = gExportPath;
@@ -8467,8 +10036,10 @@ int main(int,char**) {
 
         case Screen::BackupPrompt:
             if (kDown&HidNpadButton_A) {
-                if (gBackupFull) BackupService::DeleteOldestBackup();
-                BackupService::StartFullBackup("tomodata:/");
+                std::string uTag = (gUserSel >= 0 && gUserSel < (int)gUsers.size())
+                                 ? SaveMount::SafeUserFolder(gUsers[gUserSel]) : std::string();
+                if (gBackupFull) BackupService::DeleteOldestBackup(uTag);
+                BackupService::StartFullBackup("tomodata:/", uTag);
                 gScreen=Screen::BackingUp;
             }
             if (kDown&HidNpadButton_B) {
@@ -8479,7 +10050,19 @@ int main(int,char**) {
 
         case Screen::BackingUp:
             if (BackupService::BackupDone()) {
-                gScreen=Screen::OnSwitch;
+                // The bundle-apply path uses this same screen to snapshot
+                // a user's existing save before the overwrite. When that
+                // flag is set, hand off to FinishBundleApply instead of
+                // dropping straight into OnSwitch.
+                if (gApplyBundleAfterBackup) {
+                    BackupService::Cleanup();
+                    int idx = gApplyBundleUserIdx;
+                    gApplyBundleAfterBackup = false;
+                    gApplyBundleUserIdx     = -1;
+                    FinishBundleApply(idx);
+                } else {
+                    gScreen=Screen::OnSwitch;
+                }
             }
             DrawBackingUp();
             break;
@@ -8500,6 +10083,7 @@ int main(int,char**) {
                 gEntries=UgcScanner::Scan(SAVE_UGC_PATH);
                 MiiManager::LoadUgcNames();
                 gUgcFilter.clear();
+                gUgcKindFilter = -1;
                 RebuildUgcFilter();
                 gMiis=MiiManager::ListMiis();
                 gEntrySel=0; gEntryScroll=0;
@@ -8613,6 +10197,25 @@ int main(int,char**) {
                 if (kDown & HidNpadButton_B) TAckBackNo(0);
                 if (kDown & HidNpadButton_X) gShowBackPrompt = false;
                 if (gShowBackPrompt) DrawBackPrompt();
+                break;
+            }
+            // Category picker (UGC tab) — modal owns input while open. We
+            // still need to render the UGC tab so the modal overlay shows;
+            // DrawOnSwitch handles the overlay itself when the flag is set.
+            if (gShowUgcKindPicker) {
+                const int ROWS = gUgcKindCount + 1;
+                if (kNav & (HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))
+                    gUgcKindPickerSel = (gUgcKindPickerSel > 0) ? gUgcKindPickerSel - 1 : ROWS - 1;
+                if (kNav & (HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
+                    gUgcKindPickerSel = (gUgcKindPickerSel + 1 < ROWS) ? gUgcKindPickerSel + 1 : 0;
+                if (kDown & HidNpadButton_A) {
+                    int i = gUgcKindPickerSel;
+                    TUgcApplyKind(i == 0 ? -1 : (i - 1));
+                    gShowUgcKindPicker = false;
+                }
+                if (kDown & (HidNpadButton_B | HidNpadButton_X))
+                    gShowUgcKindPicker = false;
+                DrawOnSwitch();
                 break;
             }
             // File browser takes priority
@@ -8766,6 +10369,27 @@ int main(int,char**) {
                         gShowBgRemovePrompt = true;
                     }
                 }
+                if (gUgcRenameKbdReq) {
+                    gUgcRenameKbdReq = false;
+                    if (!gPreviewStem.empty()) {
+                        std::string cur = MiiManager::GetUgcName(gPreviewStem);
+                        // Game name fields hold up to 63 UTF-16 code units;
+                        // be conservative on the swkbd codepoint limit so
+                        // multi-byte UTF-8 still round-trips.
+                        std::string nv = ShowKeyboard(Lang::T("ugc.rename.guide"), cur, 30);
+                        if (nv != cur) {
+                            std::string err = MiiManager::RenameUgc(gPreviewStem, nv);
+                            if (err.empty()) {
+                                gOnSwitchMsg    = Lang::T("ugc.rename.ok");
+                                gOnSwitchMsgCol = COL_GREEN;
+                                RebuildUgcFilter();
+                            } else {
+                                gOnSwitchMsg    = Lang::T("ugc.rename.fail") + " " + err;
+                                gOnSwitchMsgCol = COL_RED;
+                            }
+                        }
+                    }
+                }
                 if (kDown&(HidNpadButton_B|HidNpadButton_Plus)){
                     bool hasDirty = gPlayerSavDirty || gMiiSavDirty || gUgcDirty || gWebUiDirty;
                     bool toUserPick = (kDown&HidNpadButton_Plus) == 0;
@@ -8818,8 +10442,17 @@ int main(int,char**) {
                     const auto& fd = PLAYER_FIELDS[gPlayerFieldSel];
                     uint32_t h = PFHash(fd);
 
-                    // Numeric nudge: UInt, Int, RawEnum
-                    bool isNumeric = fd.isUInt || fd.isInt || fd.isRawEnum;
+                    // Money is the one numeric field that uses a number-pad
+                    // keyboard instead of the +/- stepper grid (the value
+                    // ranges into the millions; nudging is unusable). Press
+                    // A on it to open the swkbd numpad.
+                    bool isMoney = fd.isUInt && strcmp(fd.label, "Money") == 0;
+                    if (isMoney) {
+                        if (kDown & HidNpadButton_A) TPlayerNumKbd(0);
+                    }
+                    // Numeric nudge: UInt, Int, RawEnum (skipped for Money,
+                    // which has its own keyboard handler just above).
+                    bool isNumeric = !isMoney && (fd.isUInt || fd.isInt || fd.isRawEnum);
                     if (isNumeric) {
                         int scale = gTouchScale; gTouchScale = 1;
                         auto getV = [&]() -> uint32_t {
@@ -9034,14 +10667,27 @@ int main(int,char**) {
                 // ZL/ZR switch selected mii
                 if (!gMiis.empty()) {
                     int mseVis2=(SCREEN_H-SE_TOP_Y-32)/ITEM_H;
+                    // Both lambdas adjust the scroll window in BOTH directions —
+                    // the wraparound (Up at top → last, Down at bottom → first)
+                    // jumps the selection past the current window, so only the
+                    // matching wrap branch keeps the new pick visible. The
+                    // earlier one-sided check left the user staring at the
+                    // top of the list while their selection had wrapped to
+                    // the bottom.
+                    auto followScroll = [&](){
+                        if (gMiiStatsMiiSel < gMiiStatsScroll)
+                            gMiiStatsScroll = gMiiStatsMiiSel;
+                        else if (gMiiStatsMiiSel >= gMiiStatsScroll + mseVis2)
+                            gMiiStatsScroll = std::max(0, gMiiStatsMiiSel - mseVis2 + 1);
+                    };
                     auto prevMii = [&](){
                         gMiiStatsMiiSel = (gMiiStatsMiiSel>0) ? gMiiStatsMiiSel-1 : (int)gMiis.size()-1;
-                        if (gMiiStatsMiiSel < gMiiStatsScroll) gMiiStatsScroll=gMiiStatsMiiSel;
+                        followScroll();
                         gWordUndo.valid = false; gMiiRelSel=0; gMiiRelScroll=0; gBlPickerOpen=false;
                     };
                     auto nextMii = [&](){
                         gMiiStatsMiiSel = (gMiiStatsMiiSel+1<(int)gMiis.size()) ? gMiiStatsMiiSel+1 : 0;
-                        if (gMiiStatsMiiSel >= gMiiStatsScroll+mseVis2) gMiiStatsScroll=gMiiStatsMiiSel-mseVis2+1;
+                        followScroll();
                         gWordUndo.valid = false; gMiiRelSel=0; gMiiRelScroll=0; gBlPickerOpen=false;
                     };
                     // Browse uses ZL/ZR for pagination, so don't also step the slot there.
@@ -9776,37 +11422,48 @@ int main(int,char**) {
                 if (kDown&HidNpadButton_R) {
                     gOnSwitchMode=OnSwitchMode::UGC; gOnSwitchMsg=""; break;
                 }
-                // Row navigation: 0 = Encoder, 1 = BC1 Mode, 2 = Fit, 3 = Background.
+                // Row navigation: 0 = Shape, 1 = Encoder, 2 = BC1 Mode,
+                // 3 = Fit, 4 = Background.
                 if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))
                     gTexSettingsSel = std::max(0, gTexSettingsSel - 1);
                 if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
-                    gTexSettingsSel = std::min(3, gTexSettingsSel + 1);
+                    gTexSettingsSel = std::min(4, gTexSettingsSel + 1);
                 bool left  = (kNav&(HidNpadButton_Left |HidNpadButton_StickLLeft |HidNpadButton_StickRLeft))  != 0;
                 bool right = (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) != 0;
                 bool a     = (kDown&HidNpadButton_A) != 0;
-                // Row 0: Encoder — Left/Right (and A) toggle Custom <-> PCA.
-                if (gTexSettingsSel == 0 && (left || right || a)) {
+                // Row 0: Canvas shape — cycle Square -> Book -> TV.
+                if (gTexSettingsSel == 0) {
+                    int cur = (int)gCanvasShape;
+                    if (right || a) cur = (cur + 1) % 3;
+                    if (left)       cur = (cur + 2) % 3;
+                    if (left || right || a) {
+                        gCanvasShape = (TextureProcessor::CanvasShape)cur;
+                        SaveConfig();
+                    }
+                }
+                // Row 1: Encoder — Left/Right (and A) toggle Custom <-> PCA.
+                if (gTexSettingsSel == 1 && (left || right || a)) {
                     gEncMode = (gEncMode == TextureProcessor::Bc1Encoder::Custom)
                              ? TextureProcessor::Bc1Encoder::PCA
                              : TextureProcessor::Bc1Encoder::Custom;
                     SaveConfig();
                 }
-                // Row 1: BC1 Mode — active only with Custom encoder.
-                if (gTexSettingsSel == 1 && gEncMode == TextureProcessor::Bc1Encoder::Custom) {
+                // Row 2: BC1 Mode — active only with Custom encoder.
+                if (gTexSettingsSel == 2 && gEncMode == TextureProcessor::Bc1Encoder::Custom) {
                     int cur = (int)gBc1Mode;
                     if (right) cur = (cur + 1) % 3;
                     if (left)  cur = (cur + 2) % 3;
                     if (right || left) { gBc1Mode = (TextureProcessor::Bc1Mode)cur; SaveConfig(); }
                 }
-                // Row 2: Fit mode — cycle Cover -> Contain -> Fill.
-                if (gTexSettingsSel == 2) {
+                // Row 3: Fit mode — cycle Cover -> Contain -> Fill.
+                if (gTexSettingsSel == 3) {
                     int cur = (int)gFitMode;
                     if (right) cur = (cur + 1) % 3;
                     if (left)  cur = (cur + 2) % 3;
                     if (right || left) { gFitMode = (TextureProcessor::FitMode)cur; SaveConfig(); }
                 }
-                // Row 3: Background — Transparent / White / Black, only with Contain.
-                if (gTexSettingsSel == 3 && gFitMode == TextureProcessor::FitMode::Contain) {
+                // Row 4: Background — Transparent / White / Black, only with Contain.
+                if (gTexSettingsSel == 4 && gFitMode == TextureProcessor::FitMode::Contain) {
                     int cur = (gMatte.a == 0) ? 0
                             : (gMatte.r == 255 && gMatte.g == 255 && gMatte.b == 255) ? 1
                             : (gMatte.r == 0   && gMatte.g == 0   && gMatte.b == 0)   ? 2 : 0;
@@ -10001,11 +11658,22 @@ int main(int,char**) {
                 }
 
             } else { // WebUI tab
+                // MTP first-time warning modal owns input while open.
+                if (gShowMtpWarning) {
+                    if (kDown & HidNpadButton_A) TAckMtpWarningYes(0);
+                    if (kDown & HidNpadButton_B) TAckMtpWarningNo(0);
+                    DrawOnSwitch();
+                    break;
+                }
                 // X = restart HTTP server
                 if (kDown&HidNpadButton_X) {
                     HttpServer::Stop();
                     HttpServer::Start(HTTP_PORT, SAVE_UGC_PATH);
                     LogOK("WebUI restarted");
+                }
+                // Y = toggle MTP USB file-sharing
+                if (kDown & HidNpadButton_Y) {
+                    TToggleMtp(0);
                 }
                 // Tab switch. The on-Switch bar wraps WebUI ↔ Map on the
                 // outside; from WebUI, L goes to Map (the last tab) and R
@@ -10089,8 +11757,375 @@ int main(int,char**) {
         }
 
         case Screen::Error:
+            if (kDown & HidNpadButton_B) {
+                gError.clear();
+                gScreen = Screen::UserPick;
+                break;
+            }
             DrawError();
             break;
+
+        case Screen::IslandGenPrompt:
+            if (kDown & HidNpadButton_B) {
+                gScreen = Screen::UserPick;
+            } else if (kDown & HidNpadButton_A) {
+                if (seed_Mii_bin_size < 1024 || seed_Map_bin_size < 1024 || seed_Player_bin_size < 1024) {
+                    // Build was made without dropping real seed bytes into
+                    // data/seed_*.bin — refuse rather than create a corrupt save.
+                    gError = Lang::T("islandgen.err_no_seed");
+                    gScreen = Screen::Error;
+                    break;
+                }
+                gScreen = Screen::Mounting;
+                DrawMounting();
+                std::string err = SaveMount::CreateAndSeed(
+                    gUsers[gUserSel].uid,
+                    seed_Mii_bin,     seed_Mii_bin_size,
+                    seed_Map_bin,     seed_Map_bin_size,
+                    seed_Player_bin,  seed_Player_bin_size);
+                if (!err.empty()) { gError = err; gScreen = Screen::Error; break; }
+                // Stamp the new island with the console's region/language so
+                // the bundler's locale doesn't bleed into every seeded save.
+                // Best-effort: log on failure but keep going — wrong language
+                // is annoying, not corrupting.
+                {
+                    std::string lerr = PatchSeedLanguageInPlace("tomodata:/Player.sav");
+                    if (!lerr.empty()) LogERR("Region/language patch: " + lerr);
+                }
+                // Drop a one-shot sentinel so the web UI knows to auto-open
+                // the generator panel on first load.
+                if (FILE* f = fopen("tomodata:/.tomotool_first_run", "wb")) fclose(f);
+                SaveMount::Commit();
+                gBackupFull = (BackupService::CountBackups(SaveMount::SafeUserFolder(gUsers[gUserSel])) >= gMaxBackups);
+                gScreen = Screen::BackupPrompt;
+            }
+            DrawIslandGenPrompt();
+            break;
+
+        case Screen::BundleCreate:
+            if (kDown & HidNpadButton_B) { gScreen = Screen::UserPick; break; }
+            if (kNav & (HidNpadButton_Up|HidNpadButton_Down|
+                        HidNpadButton_StickLUp|HidNpadButton_StickLDown|
+                        HidNpadButton_StickRUp|HidNpadButton_StickRDown))
+                gBundleCreateSel = 1 - gBundleCreateSel;
+            if (kDown & HidNpadButton_A) {
+                // Build a fresh bundle directory under
+                // /switch/TomoToolNX/Bundles/island_<timestamp>/. "Generated"
+                // additionally drops a sentinel so the next user that adopts
+                // the bundle gets the web-UI overlay on first load.
+                if (seed_Mii_bin_size < 1024 || seed_Map_bin_size < 1024 || seed_Player_bin_size < 1024) {
+                    gError = Lang::T("islandgen.err_no_seed");
+                    gScreen = Screen::Error;
+                    break;
+                }
+                time_t now = time(nullptr);
+                struct tm* t = localtime(&now);
+                char nameBuf[64];
+                std::snprintf(nameBuf, sizeof(nameBuf), "island_%04d%02d%02d_%02d%02d%02d",
+                              t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+                              t->tm_hour, t->tm_min, t->tm_sec);
+                std::string werr = BackupService::WriteBundleFromSeed(
+                    nameBuf,
+                    seed_Mii_bin,     seed_Mii_bin_size,
+                    seed_Map_bin,     seed_Map_bin_size,
+                    seed_Player_bin,  seed_Player_bin_size);
+                if (!werr.empty()) {
+                    gError = werr;
+                    gScreen = Screen::Error;
+                    break;
+                }
+                // Stamp the bundle with the console's region/language. Same
+                // logic as IslandGenPrompt; we patch the bundle's on-disk
+                // Player.sav so subsequent ApplyBundleToMount copies the
+                // correct values in.
+                {
+                    std::string bundlePlayer = std::string(BUNDLE_ROOT) + "/" + nameBuf + "/Player.sav";
+                    std::string lerr = PatchSeedLanguageInPlace(bundlePlayer);
+                    if (!lerr.empty()) LogERR("Region/language patch (bundle): " + lerr);
+                }
+                // Mark "needs generation" by dropping the sentinel inside the
+                // bundle dir. When the bundle is later assigned to a real user
+                // via Settings → Restore, RestoreBackup copies the file in and
+                // the web-UI panel auto-pops as it does for the no-save path.
+                if (gBundleCreateSel == 1) {
+                    std::string sentinel = std::string(BUNDLE_ROOT) + "/" + nameBuf + "/.tomotool_first_run";
+                    if (FILE* sf = fopen(sentinel.c_str(), "wb")) fclose(sf);
+                }
+                // Bundle is on disk — now route to the "apply to which user?"
+                // picker. The previous flow dropped the bundle and bailed to
+                // UserPick with only a toast, leaving the bundle orphaned
+                // (the "Settings → Restore" entry point was removed when we
+                // moved restore under each user card).
+                gPendingBundleName       = nameBuf;
+                gPendingBundleGenerated  = (gBundleCreateSel == 1);
+                gBundleApplyUserSel      = std::min(gUserSel, std::max(0, (int)gUsers.size() - 1));
+                gShowBundleOverwriteConfirm = false;
+                gScreen = Screen::BundlePick;
+            }
+            DrawBundleCreate();
+            break;
+
+        case Screen::BundlePick: {
+            // Overwrite-confirm modal owns input when shown.
+            if (gShowBundleOverwriteConfirm) {
+                // Tick the cooldown down each frame the modal is visible.
+                // A is ignored entirely until it reaches 0 — same UX as the
+                // save-data warning prompt.
+                if (gBundleOverwriteCountdown > 0) gBundleOverwriteCountdown--;
+                bool ready = (gBundleOverwriteCountdown <= 0);
+                if (kDown & HidNpadButton_B) {
+                    gShowBundleOverwriteConfirm = false;
+                } else if (ready && (kDown & HidNpadButton_A)) {
+                    // Fall through to the apply path with gShowBundleOverwriteConfirm
+                    // still true so the rest of this case knows to skip the
+                    // exists-check.
+                }
+                if (gShowBundleOverwriteConfirm
+                    && !(ready && (kDown & HidNpadButton_A))) {
+                    DrawBundleApply();
+                    break;
+                }
+            }
+            int n = (int)gUsers.size();
+            if (n == 0) {
+                // No users to apply to — bundle stays on disk, bail back.
+                gScreen = Screen::UserPick;
+                break;
+            }
+            if (kDown & HidNpadButton_B) {
+                // User dismissed the apply screen without picking anyone.
+                // Bundles are now ephemeral — we delete the staged copy so
+                // BUNDLE_ROOT doesn't accumulate ~4.5 MB per generation
+                // the user didn't end up using. (Previously this path
+                // left the bundle on disk under "keep for later" semantics
+                // — that path no longer exists.)
+                if (!gPendingBundleName.empty()) {
+                    BackupService::DeleteBundleByName(gPendingBundleName);
+                }
+                gBundleMsg    = Lang::T("bundle.dismissed");
+                gBundleMsgCol = {180, 180, 180, 255};
+                gBundleMsgFrames = 180;
+                gPendingBundleName.clear();
+                gShowBundleOverwriteConfirm = false;
+                gScreen = Screen::UserPick;
+                break;
+            }
+            if (kNav & (HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))
+                gBundleApplyUserSel = (gBundleApplyUserSel > 0) ? gBundleApplyUserSel - 1 : n - 1;
+            if (kNav & (HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight))
+                gBundleApplyUserSel = (gBundleApplyUserSel + 1 < n) ? gBundleApplyUserSel + 1 : 0;
+
+            if (kDown & HidNpadButton_A) {
+                int u = gBundleApplyUserSel;
+                if (u < 0 || u >= n) { DrawBundleApply(); break; }
+
+                // First time A is pressed for a user that already has a
+                // save: surface the confirm modal so we don't silently wipe
+                // their progress.
+                if (!gShowBundleOverwriteConfirm && SaveMount::SaveExists(gUsers[u].uid)) {
+                    gShowBundleOverwriteConfirm = true;
+                    gBundleOverwriteCountdown   = 120;   // ~2 seconds at 60 fps
+                    DrawBundleApply();
+                    break;
+                }
+
+                // Two paths depending on whether the slot already has a
+                // save:
+                //   • No save: CreateAndSeed builds a fresh container, mounts
+                //     it, and lays down the seed bytes. The bundle Apply
+                //     below then overwrites those files with the bundle's
+                //     copy — strictly redundant for "blank" since they're
+                //     identical, but harmless.
+                //   • Has save (confirmed overwrite): just Mount the
+                //     existing container and skip CreateAndSeed entirely.
+                //     fsCreateSaveDataFileSystem returns 0x402 in this
+                //     situation (not the 0x4ce02 path the old code tried to
+                //     tolerate), so attempting it produced
+                //     "fsCreateSaveDataFileSystem failed: 0x00000402".
+                gScreen = Screen::Mounting;
+                DrawMounting();
+                bool hadSave = SaveMount::SaveExists(gUsers[u].uid);
+                std::string err;
+                if (hadSave) {
+                    err = SaveMount::Mount(gUsers[u].uid);
+                    if (!err.empty()) err = "Mount: " + err;
+                } else {
+                    err = SaveMount::CreateAndSeed(
+                        gUsers[u].uid,
+                        seed_Mii_bin,     seed_Mii_bin_size,
+                        seed_Map_bin,     seed_Map_bin_size,
+                        seed_Player_bin,  seed_Player_bin_size);
+                    if (!err.empty()) err = "Create save: " + err;
+                }
+                if (!err.empty()) {
+                    gError = err;
+                    gScreen = Screen::Error;
+                    gShowBundleOverwriteConfirm = false;
+                    break;
+                }
+                if (hadSave) {
+                    // Pre-overwrite safety net: snapshot the user's existing
+                    // save before we clobber it with the bundle. Routes
+                    // through Screen::BackingUp like the standard pre-edit
+                    // backup; gApplyBundleAfterBackup makes that screen
+                    // resume the apply flow once the snapshot is done
+                    // instead of jumping straight to OnSwitch.
+                    std::string uTag = SaveMount::SafeUserFolder(gUsers[u]);
+                    if (BackupService::CountBackups(uTag) >= gMaxBackups)
+                        BackupService::DeleteOldestBackup(uTag);
+                    BackupService::StartFullBackup("tomodata:/", uTag);
+                    gApplyBundleAfterBackup = true;
+                    gApplyBundleUserIdx     = u;
+                    gScreen = Screen::BackingUp;
+                    break;
+                }
+                // No prior save → nothing to back up, finish inline.
+                FinishBundleApply(u);
+                break;
+            }
+            DrawBundleApply();
+            break;
+        }
+
+        case Screen::IslandGenConfig: {
+            // 4 navigable rows: 0=Map, 1=Rels, 2=Batch LTD, 3=Go button.
+            const int kRowCount = 4;
+            if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))
+                gIslandGenSel = (gIslandGenSel > 0) ? gIslandGenSel - 1 : kRowCount - 1;
+            if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
+                gIslandGenSel = (gIslandGenSel + 1 < kRowCount) ? gIslandGenSel + 1 : 0;
+            bool left  = (kNav & (HidNpadButton_Left | HidNpadButton_StickLLeft  | HidNpadButton_StickRLeft))  != 0;
+            bool right = (kNav & (HidNpadButton_Right| HidNpadButton_StickLRight | HidNpadButton_StickRRight)) != 0;
+            if (gIslandGenSel == 0 && (left || right))
+                IslandGenCycleMap(right ? +1 : -1);
+            if (gIslandGenSel == 1 && (left || right))
+                gIslandGenRelMode = (gIslandGenRelMode == "dense") ? "none" : "dense";
+            if (gIslandGenSel == 2 && (left || right))
+                gIslandGenBatchLtd = !gIslandGenBatchLtd;
+            if (kDown & HidNpadButton_B) {
+                // Skip — go straight to OnSwitch with the bundle as-is.
+                gScreen = Screen::OnSwitch;
+                break;
+            }
+            if (kDown & HidNpadButton_A) {
+                // If the user chose "Yes" on the Batch LTD row, detour to
+                // the BatchLtd screen so they can drop .ltd files via MTP
+                // and confirm before the worker starts. Otherwise launch
+                // the worker thread directly.
+                if (gIslandGenBatchLtd) {
+                    gScreen = Screen::IslandGenBatchLtd;
+                    break;
+                }
+                IslandGenRunner::Options opts;
+                opts.mapMode = gIslandGenMapMode;  // "classic" or "random"
+                opts.mapId   = std::string();
+                opts.relMode = gIslandGenRelMode;
+                opts.batchLtdMiis = false;
+                gIslandGenProgress = IslandGenRunner::Progress{};
+                if (!IslandGenRunner::Start(opts)) {
+                    gError = "Generator already running.";
+                    gScreen = Screen::Error;
+                    break;
+                }
+                gScreen = Screen::IslandGenRun;
+                break;
+            }
+            DrawIslandGenConfig();
+            break;
+        }
+
+        case Screen::IslandGenBatchLtd: {
+            // MTP first-time-warning modal owns input while it's open —
+            // route A/B to its ack handlers and skip the rest of the
+            // page's bindings so they don't fire underneath. Same pattern
+            // the WebUI tab uses (see ~line 11589).
+            if (gShowMtpWarning) {
+                if (kDown & HidNpadButton_A) TAckMtpWarningYes(0);
+                if (kDown & HidNpadButton_B) TAckMtpWarningNo(0);
+                DrawIslandGenBatchLtd();
+                break;
+            }
+            // Y toggles MTP (goes through the same warning modal as the
+            // WebUI tab — TToggleMtp sets gShowMtpWarning the first time
+            // and the modal's Yes handler then actually starts MTP).
+            if (kDown & HidNpadButton_Y) TToggleMtp(0);
+            // B returns to the config so the user can flip the toggle off
+            // if they change their mind. Don't tear down MTP here — they
+            // might want it left running.
+            if (kDown & HidNpadButton_B) {
+                gScreen = Screen::IslandGenConfig;
+                break;
+            }
+            // X confirms — A is reserved for the MTP-warning-modal's "Yes"
+            // button so the two never collide on a first-time MTP enable.
+            // Stop MTP if it's still open so the FS isn't mid-write when
+            // StepMiiReplace opens the folder, then launch the generator
+            // with batch-LTD enabled.
+            if (kDown & HidNpadButton_X) {
+                if (MtpServer::IsRunning()) MtpServer::Exit();
+                IslandGenRunner::Options opts;
+                opts.mapMode      = gIslandGenMapMode;
+                opts.mapId        = std::string();
+                opts.relMode      = gIslandGenRelMode;
+                opts.batchLtdMiis = true;
+                gIslandGenProgress = IslandGenRunner::Progress{};
+                if (!IslandGenRunner::Start(opts)) {
+                    gError = "Generator already running.";
+                    gScreen = Screen::Error;
+                    break;
+                }
+                gScreen = Screen::IslandGenRun;
+                break;
+            }
+            DrawIslandGenBatchLtd();
+            break;
+        }
+
+        case Screen::IslandGenRun: {
+            // Refresh the snapshot each frame so the progress bar advances
+            // as the worker walks the pipeline.
+            gIslandGenProgress = IslandGenRunner::Snapshot();
+            // While running, B requests cancel. Once done, A dismisses the
+            // screen and transitions to OnSwitch (or Error on a fatal err).
+            if (!gIslandGenProgress.done) {
+                if (kDown & HidNpadButton_B) IslandGenRunner::RequestCancel();
+            } else {
+                if (kDown & HidNpadButton_A) {
+                    IslandGenRunner::Cleanup();
+                    if (!gIslandGenProgress.error.empty()) {
+                        gError = "Island generator: " + gIslandGenProgress.error;
+                        gScreen = Screen::Error;
+                    } else {
+                        // The runner mutated Mii.sav / Map.sav / Player.sav
+                        // and the per-slot UGC names on disk, but every
+                        // on-Switch tab still holds the *pre-run* caches
+                        // (gMiis populated when we first entered OnSwitch
+                        // after the bundle apply, etc.). Without this
+                        // refresh the MiiStats list would still show
+                        // "Resident N" placeholders instead of the freshly
+                        // fetched TomoShare names.
+                        MiiManager::LoadUgcNames();
+                        gMiis = MiiManager::ListMiis();
+                        gEntries = UgcScanner::Scan(SAVE_UGC_PATH);
+                        gUgcFilter.clear();
+                        RebuildUgcFilter();
+                        gEntrySel = 0;
+                        gEntryScroll = 0;
+                        // Force Player.sav / Mii.sav reloads on next tab
+                        // entry — they may have already been loaded by an
+                        // earlier visit during this OnSwitch session.
+                        gPlayerSav = SaveEditor::SavFile{};
+                        gMiiSav    = SaveEditor::SavFile{};
+                        gPlayerSavDirty = false;
+                        gMiiSavDirty    = false;
+                        gScreen = Screen::OnSwitch;
+                    }
+                    break;
+                }
+            }
+            DrawIslandGenRun();
+            break;
+        }
         }
     }
 
@@ -10107,6 +12142,10 @@ int main(int,char**) {
     ShareWorkerStopFn();
     HttpServer::Stop();
     MtpServer::Exit();
+    // Best-effort join: if the user quit mid-run we still want the worker
+    // thread to finish before tearing down libnx services it depends on.
+    IslandGenRunner::RequestCancel();
+    IslandGenRunner::Cleanup();
     BackupService::Cleanup();
     SaveMount::Unmount();
     Updater::Cleanup();

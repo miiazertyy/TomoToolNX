@@ -14,7 +14,25 @@
 
 // ─── POSIX helpers ────────────────────────────────────────────────────────────
 
-static void MkdirP(const std::string& path) { mkdir(path.c_str(), 0777); }
+// True recursive `mkdir -p`: walks every `/`-separated component and
+// creates it if missing. The old single-call version assumed every
+// ancestor of `path` already existed, which is true on real Switch SDs
+// (the homebrew menu pre-creates /switch/), but not in Ryujinx fresh
+// SD emulation — so a first-run write into /switch/TomoToolNX/Bundles
+// silently failed with the parent never having been created, and the
+// subsequent fopen for Mii.sav produced "open … failed".
+static void MkdirP(const std::string& path) {
+    if (path.empty()) return;
+    // Skip a leading slash so we don't loop over /<empty>.
+    size_t i = (path[0] == '/') ? 1 : 0;
+    while (i <= path.size()) {
+        if (i == path.size() || path[i] == '/') {
+            std::string sub = path.substr(0, i);
+            if (!sub.empty()) mkdir(sub.c_str(), 0777);
+        }
+        i++;
+    }
+}
 
 [[maybe_unused]] static std::string Filename(const std::string& path) {
     size_t sl = path.find_last_of("/\\");
@@ -27,27 +45,35 @@ static bool DirExists(const std::string& p) {
     struct stat st; return stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
 }
 
-// Returns path for a new timestamped backup folder: BACKUP_ROOT/save_DD-MM-YYYY_HH-MM
-static std::string MakeTimestampedBackupPath() {
+// Root directory holding backups for a particular user (or the legacy global
+// root when uidTag is empty). Callers are expected to MkdirP this before use.
+static std::string BackupRootFor(const std::string& uidTag) {
+    if (uidTag.empty()) return BACKUP_ROOT;
+    return std::string(BACKUP_ROOT) + "/" + uidTag;
+}
+
+// Returns path for a new timestamped backup folder under the per-user root.
+static std::string MakeTimestampedBackupPath(const std::string& uidTag) {
     time_t now = time(nullptr);
     struct tm* t = localtime(&now);
-    char buf[64];
+    char buf[96];
     snprintf(buf, sizeof(buf), "%s/save_%02d-%02d-%04d_%02d-%02d",
-             BACKUP_ROOT,
+             BackupRootFor(uidTag).c_str(),
              t->tm_mday, t->tm_mon + 1, t->tm_year + 1900,
              t->tm_hour, t->tm_min);
     return buf;
 }
 
-// Returns all save_* backup folders under BACKUP_ROOT, sorted oldest-first by mtime.
-static std::vector<std::string> ListSaveBackups() {
+// Returns all save_* backup folders inside the per-user root, sorted oldest-first by mtime.
+static std::vector<std::string> ListSaveBackups(const std::string& uidTag) {
     std::vector<std::pair<time_t,std::string>> entries;
-    DIR* d = opendir(BACKUP_ROOT);
+    std::string root = BackupRootFor(uidTag);
+    DIR* d = opendir(root.c_str());
     if (!d) return {};
     struct dirent* de;
     while ((de = readdir(d)) != nullptr) {
         if (strncmp(de->d_name, "save_", 5) != 0) continue;
-        std::string full = std::string(BACKUP_ROOT) + "/" + de->d_name;
+        std::string full = root + "/" + de->d_name;
         struct stat st;
         if (stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
             entries.push_back({st.st_mtime, full});
@@ -144,11 +170,15 @@ static void CopyTree(const std::string& src, const std::string& dst,
     closedir(d);
 }
 
+static std::string s_backupParent;
+
 static void BackupThreadFunc(void*) {
     std::string root = s_saveRoot;
     std::string dest = s_backupDest;
 
     MkdirP(BACKUP_ROOT);
+    if (!s_backupParent.empty() && s_backupParent != BACKUP_ROOT)
+        MkdirP(s_backupParent);
     MkdirP(dest);
 
     int total = CountFiles(root);
@@ -165,13 +195,15 @@ static void BackupThreadFunc(void*) {
 
 namespace BackupService {
 
-void StartFullBackup(const std::string& saveMountRoot) {
+void StartFullBackup(const std::string& saveMountRoot,
+                     const std::string& uidTag) {
     mutexInit(&s_mutex);
-    s_progress   = 0.0f;
-    s_done       = false;
-    s_error      = "";
-    s_saveRoot   = saveMountRoot;
-    s_backupDest = MakeTimestampedBackupPath();
+    s_progress     = 0.0f;
+    s_done         = false;
+    s_error        = "";
+    s_saveRoot     = saveMountRoot;
+    s_backupParent = BackupRootFor(uidTag);
+    s_backupDest   = MakeTimestampedBackupPath(uidTag);
     threadCreate(&s_thread, BackupThreadFunc, nullptr, nullptr, 256*1024, 0x2C, -2);
     threadStart(&s_thread);
     s_threadActive = true;
@@ -205,12 +237,16 @@ std::string BackupError() {
     return v;
 }
 
-bool HasExistingBackup() { return !ListSaveBackups().empty(); }
+bool HasExistingBackup(const std::string& uidTag) {
+    return !ListSaveBackups(uidTag).empty();
+}
 
-int CountBackups() { return (int)ListSaveBackups().size(); }
+int CountBackups(const std::string& uidTag) {
+    return (int)ListSaveBackups(uidTag).size();
+}
 
-void DeleteOldestBackup() {
-    auto backups = ListSaveBackups();
+void DeleteOldestBackup(const std::string& uidTag) {
+    auto backups = ListSaveBackups(uidTag);
     if (!backups.empty()) RmRf(backups[0]);
 }
 
@@ -252,8 +288,8 @@ static std::string RestoreCopyTree(const std::string& src, const std::string& ds
     return "";
 }
 
-std::vector<std::string> ListBackups() {
-    auto v = ListSaveBackups();
+std::vector<std::string> ListBackups(const std::string& uidTag) {
+    auto v = ListSaveBackups(uidTag);
     std::reverse(v.begin(), v.end()); // newest first
     return v;
 }
@@ -261,6 +297,103 @@ std::vector<std::string> ListBackups() {
 std::string RestoreBackup(const std::string& backupPath, const std::string& saveMountRoot) {
     if (!DirExists(backupPath)) return "Backup folder not found";
     return RestoreCopyTree(backupPath, saveMountRoot);
+}
+
+// ── Save bundles ────────────────────────────────────────────────────────────
+
+static bool BundleNameSafe(const std::string& name) {
+    if (name.empty() || name.size() > 64) return false;
+    if (name.find("..") != std::string::npos) return false;
+    for (char c : name) {
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+              || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.'))
+            return false;
+    }
+    return true;
+}
+
+static std::string WriteBlob(const std::string& path, const uint8_t* data, size_t len) {
+    if (!data || len < 1024) return ""; // skip — caller may pass placeholder
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) return "open " + path + " failed";
+    size_t n = fwrite(data, 1, len, f);
+    fclose(f);
+    if (n != len) return "short write " + path;
+    return "";
+}
+
+std::string WriteBundleFromSeed(const std::string& name,
+                                const uint8_t* mii,    size_t miiLen,
+                                const uint8_t* map,    size_t mapLen,
+                                const uint8_t* player, size_t playerLen) {
+    if (!BundleNameSafe(name)) return "Invalid bundle name";
+    MkdirP(BUNDLE_ROOT);
+    std::string root = std::string(BUNDLE_ROOT) + "/" + name;
+    MkdirP(root);
+    MkdirP(root + "/Ugc");
+    MkdirP(root + "/PhotoStudio");
+    std::string e;
+    e = WriteBlob(root + "/Mii.sav",    mii,    miiLen);    if (!e.empty()) return e;
+    e = WriteBlob(root + "/Map.sav",    map,    mapLen);    if (!e.empty()) return e;
+    e = WriteBlob(root + "/Player.sav", player, playerLen); if (!e.empty()) return e;
+    return "";
+}
+
+std::vector<std::string> ListBundles() {
+    std::vector<std::pair<time_t, std::string>> entries;
+    DIR* d = opendir(BUNDLE_ROOT);
+    if (!d) return {};
+    struct dirent* de;
+    while ((de = readdir(d)) != nullptr) {
+        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
+        std::string full = std::string(BUNDLE_ROOT) + "/" + de->d_name;
+        struct stat st;
+        if (stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
+            entries.push_back({ st.st_mtime, std::string(de->d_name) });
+    }
+    closedir(d);
+    std::sort(entries.begin(), entries.end(),
+              [](const auto& a, const auto& b) { return a.first > b.first; });
+    std::vector<std::string> out;
+    out.reserve(entries.size());
+    for (auto& e2 : entries) out.push_back(e2.second);
+    return out;
+}
+
+std::string ApplyBundleToMount(const std::string& bundleName,
+                               const std::string& saveMountRoot) {
+    if (!BundleNameSafe(bundleName)) return "Invalid bundle name";
+    std::string root = std::string(BUNDLE_ROOT) + "/" + bundleName;
+    if (!DirExists(root)) return "Bundle not found: " + bundleName;
+    return RestoreCopyTree(root, saveMountRoot);
+}
+
+bool DeleteBundleByName(const std::string& bundleName) {
+    if (!BundleNameSafe(bundleName)) return false;
+    std::string root = std::string(BUNDLE_ROOT) + "/" + bundleName;
+    if (!DirExists(root)) return true;        // already gone — caller intent satisfied
+    // Reuse the generic recursive delete used for backups; only refuses to
+    // touch anything outside its BUNDLE_ROOT scope by construction of the
+    // path we just built.
+    RmRf(root);
+    return !DirExists(root);
+}
+
+int DeleteAllBundles() {
+    int removed = 0;
+    DIR* d = opendir(BUNDLE_ROOT);
+    if (!d) return 0;
+    struct dirent* de;
+    while ((de = readdir(d)) != nullptr) {
+        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
+        std::string full = std::string(BUNDLE_ROOT) + "/" + de->d_name;
+        struct stat st;
+        if (stat(full.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) continue;
+        RmRf(full);
+        removed++;
+    }
+    closedir(d);
+    return removed;
 }
 
 } // namespace BackupService

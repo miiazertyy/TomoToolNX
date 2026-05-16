@@ -1346,12 +1346,85 @@ std::string ImportRgbaImage(const RgbaImage& src, const ImportOptions& opts) {
         }
     }
 
+    // Shape → inner content aspect inside the always-square target buffer.
+    // Book is ~3:4 portrait (256×256 → 200-wide inner), TV is 16:9 wide
+    // (256×256 → 144-tall inner). The remaining area gets filled with
+    // opaque black bars so the in-game mesh — which renders the canvas
+    // 1:1 — shows the source image fitted into the right aspect with
+    // pillarbox / letterbox bars around it. Earlier attempts pre-stretched
+    // the source into the full square assuming the mesh would un-stretch
+    // it; that was wrong (the mesh doesn't stretch), which is why imports
+    // came back visibly squashed.
+    auto innerSizeFor = [&](CanvasShape shape, int boxW, int boxH,
+                            int& iw, int& ih) {
+        if (shape == CanvasShape::Book) {
+            // ~3:4 (200/256). Round to multiples of 4 so BC blocks stay
+            // aligned when this size is used for the ugctex pass too.
+            iw = ((boxW * 200) / 256) & ~3;
+            ih = boxH;
+        } else if (shape == CanvasShape::Tv) {
+            // 16:9 — derived from height so the wider edge sits at the
+            // canvas's full width.
+            iw = boxW;
+            ih = ((boxH * 144) / 256) & ~3;
+        } else {
+            iw = boxW;
+            ih = boxH;
+        }
+        if (iw < 1) iw = 1;
+        if (ih < 1) ih = 1;
+    };
+    auto pasteCentered = [&](const RgbaImage& inner, int outW, int outH,
+                             bool transparentBars) -> RgbaImage {
+        RgbaImage out(outW, outH);
+        if (!transparentBars) {
+            for (int i = 0; i < outW * outH; i++) {
+                out.pixels[i*4+0] = 0;
+                out.pixels[i*4+1] = 0;
+                out.pixels[i*4+2] = 0;
+                out.pixels[i*4+3] = 255;
+            }
+        }
+        int offX = (outW - inner.width) / 2;
+        int offY = (outH - inner.height) / 2;
+        for (int y = 0; y < inner.height; y++) {
+            int dy = y + offY;
+            if (dy < 0 || dy >= outH) continue;
+            int copyW = std::min(inner.width, outW - offX);
+            if (copyW <= 0) continue;
+            memcpy(out.pixels.data() + (dy * outW + std::max(0, offX)) * 4,
+                   inner.pixels.data() + (y * inner.width + std::max(0, -offX)) * 4,
+                   (size_t)copyW * 4);
+        }
+        return out;
+    };
+
     // ── Canvas ──
     if (opts.writeCanvas) {
-        const int cW=256, cH=256;
-        RgbaImage ci = (src.width!=cW||src.height!=cH)
-            ? ResizeWithFit(src, cW, cH, opts.fitMode, opts.matte)
-            : src;
+        // Upstream ltd-save-editor's encoder writes every UGC canvas as
+        // 256×256 regardless of mesh type (see codec.ts:258); we match
+        // that. For Book / TV the source is fit-resized into an inner
+        // book/TV-shaped rectangle and pasted centered into 256×256, with
+        // the rest of the buffer left as opaque-black bars.
+        const int cW = 256, cH = 256;
+        int innerW, innerH;
+        innerSizeFor(opts.canvasShape, cW, cH, innerW, innerH);
+        RgbaImage ci;
+        if (innerW == cW && innerH == cH) {
+            // Square — preserve the existing fit-mode behaviour.
+            ci = (src.width != cW || src.height != cH)
+                 ? ResizeWithFit(src, cW, cH, opts.fitMode, opts.matte)
+                 : src;
+        } else {
+            // Book / TV — stretch the source to exactly fill the inner
+            // rect, then pillarbox / letterbox the result. The user
+            // explicitly wants the image to fill the book / TV cutout
+            // (cropping it would lose content), so we override the fit
+            // mode to Fill here regardless of the canvas matte preset.
+            RgbaImage inner = ResizeWithFit(src, innerW, innerH,
+                                            FitMode::Fill, opts.matte);
+            ci = pasteCentered(inner, cW, cH, /*transparentBars=*/false);
+        }
         auto rgba = ci.pixels;
         ThresholdAlpha(rgba);
         ConvertSrgbToLinear(rgba);
@@ -1366,9 +1439,24 @@ std::string ImportRgbaImage(const RgbaImage& src, const ImportOptions& opts) {
     // stored as linear RGBA8 on disk, needs the pre-linearization step.
     {
         int uW=layout.Width, uH=layout.Height;
-        RgbaImage ui = (src.width!=uW||src.height!=uH)
-            ? ResizeWithFit(src, uW, uH, opts.fitMode, opts.matte)
-            : src;
+        // Same letterbox/pillarbox treatment as the canvas — the ugctex
+        // sits on the same mesh and gets rendered at distance, so it
+        // needs to show the same aspect with the same black bars.
+        int innerW, innerH;
+        innerSizeFor(opts.canvasShape, uW, uH, innerW, innerH);
+        RgbaImage ui;
+        if (innerW == uW && innerH == uH) {
+            ui = (src.width != uW || src.height != uH)
+                 ? ResizeWithFit(src, uW, uH, opts.fitMode, opts.matte)
+                 : src;
+        } else {
+            // Same Fill override as the canvas pass above — keeps the
+            // ugctex (used at distance) visually consistent with the
+            // canvas (used at close range).
+            RgbaImage inner = ResizeWithFit(src, innerW, innerH,
+                                            FitMode::Fill, opts.matte);
+            ui = pasteCentered(inner, uW, uH, /*transparentBars=*/false);
+        }
         auto rgba = ui.pixels;
         ThresholdAlpha(rgba);
 

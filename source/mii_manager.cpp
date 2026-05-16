@@ -749,6 +749,86 @@ std::string GetUgcName(const std::string& stem) {
     return FormatUgcStem(stem);
 }
 
+// Re-encode `utf8` into a fixed-size UTF-16LE buffer. The buffer is zero-filled
+// first, so unused tail bytes act as the terminating null pair the game
+// expects. Anything past `maxCodeUnits-1` is truncated.
+static void WriteUtf16LeFixed(const std::string& utf8, uint8_t* buf,
+                              size_t maxCodeUnits) {
+    memset(buf, 0, maxCodeUnits * 2);
+    if (maxCodeUnits == 0) return;
+    size_t out = 0;
+    for (size_t i = 0; i < utf8.size() && out + 1 < maxCodeUnits; ) {
+        uint8_t c = (uint8_t)utf8[i];
+        uint32_t cp;
+        if (c < 0x80) {
+            cp = c; i += 1;
+        } else if ((c & 0xE0) == 0xC0 && i + 1 < utf8.size()) {
+            cp = ((c & 0x1F) << 6) | ((uint8_t)utf8[i+1] & 0x3F);
+            i += 2;
+        } else if ((c & 0xF0) == 0xE0 && i + 2 < utf8.size()) {
+            cp = ((c & 0x0F) << 12) | (((uint8_t)utf8[i+1] & 0x3F) << 6)
+               | ((uint8_t)utf8[i+2] & 0x3F);
+            i += 3;
+        } else {
+            cp = '?'; i += 1;
+        }
+        if (cp <= 0xFFFF) {
+            buf[out*2]     = (uint8_t)(cp & 0xFF);
+            buf[out*2 + 1] = (uint8_t)((cp >> 8) & 0xFF);
+            out++;
+        }
+    }
+}
+
+// Parse a stem like "UgcFood003" into (kind index, slot index). Returns false
+// on any prefix/number mismatch.
+static bool ParseUgcStem(const std::string& stem, int& outKind, int& outSlot) {
+    if (stem.size() < 4 || stem.compare(0, 3, "Ugc") != 0) return false;
+    for (int k = 0; k < UGC_KIND_COUNT; k++) {
+        const char* prefix = UGC_KIND_DATA[k].prefix;
+        size_t pl = strlen(prefix);
+        if (stem.size() < 3 + pl) continue;
+        if (stem.compare(3, pl, prefix) != 0) continue;
+        std::string tail = stem.substr(3 + pl);
+        if (tail.empty()) continue;
+        for (char c : tail) if (c < '0' || c > '9') return false;
+        int n = atoi(tail.c_str());
+        if (n < 0 || n >= UGC_KIND_DATA[k].maxSlots) return false;
+        outKind = k;
+        outSlot = n;
+        return true;
+    }
+    return false;
+}
+
+std::string RenameUgc(const std::string& stem, const std::string& newName) {
+    int kind = -1, slot = -1;
+    if (!ParseUgcStem(stem, kind, slot))
+        return "Unrecognised UGC stem: " + stem;
+
+    std::vector<uint8_t> psav;
+    if (!ReadFile(SAVE_PLAYER_SAV, psav)) return "Cannot read Player.sav";
+
+    int offset = OffsetLocator(psav, UGC_KIND_DATA[kind].hashHex);
+    if (offset < 0) return "UGC name table not found in Player.sav";
+
+    // 4-byte array header, then maxSlots * 128 bytes (64 UTF-16LE code units).
+    int nameOff = offset + 4 + slot * 128;
+    if (nameOff + 128 > (int)psav.size()) return "UGC name slot out of bounds";
+
+    WriteUtf16LeFixed(newName, psav.data() + nameOff, 64);
+
+    if (!WriteFile(SAVE_PLAYER_SAV, psav)) return "Failed to write Player.sav";
+    // Keep the in-memory cache aligned with what's now on disk so callers
+    // that don't immediately re-scan still see the new name.
+    char canonicalStem[32];
+    snprintf(canonicalStem, sizeof(canonicalStem), "Ugc%s%03d",
+             UGC_KIND_DATA[kind].prefix, slot);
+    if (newName.empty()) s_ugcNames.erase(canonicalStem);
+    else                 s_ugcNames[canonicalStem] = newName;
+    return "";
+}
+
 std::string ExportUgc(int ugcKind, int slot, const std::string& destPath) {
     if (ugcKind < 0 || ugcKind >= 7)
         return "Invalid UGC kind";

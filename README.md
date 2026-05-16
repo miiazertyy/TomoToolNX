@@ -2,7 +2,12 @@
 
 A Nintendo Switch homebrew tool for editing Tomodachi Life save data directly from the console — no PC required. WebUI and on-Switch modes are both supported.
 
-> If you need help or wanna request a feature, [click here](https://github.com/miiazertyy/TomoToolNX/issues/new) to make a New issue! There's never any dumb questions.
+---
+
+### Need help?
+If you need help or wanna request a feature, [click here](https://github.com/miiazertyy/TomoToolNX/issues/new) to make a New issue! There's never any dumb questions.
+
+---
 
 > Based on [LivinTheDreamToolkit](https://gamebanana.com/tools/22435) by the UGC editor contributors.
 > Mii sharing based on [ShareMii](https://github.com/Star-F0rce/ShareMii) by Star-F0rce.

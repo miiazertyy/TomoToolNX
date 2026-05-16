@@ -13,6 +13,25 @@ $(error "Please set DEVKITPRO in your environment. export DEVKITPRO=<path to dev
 endif
 
 TOPDIR ?= $(CURDIR)
+
+# Windows-native toolchain (gcc.exe / ld.exe) reads TMP/TEMP from the
+# environment. If they're unset or point at unwritable locations, GCC falls
+# back to C:\WINDOWS and fails with "Cannot create temporary file". Pin them
+# to the user's local temp here so plain `make` works regardless of the
+# launching shell's environment.
+ifeq ($(strip $(TMP)),)
+TMP := /tmp
+endif
+ifeq ($(strip $(TEMP)),)
+TEMP := /tmp
+endif
+ifeq ($(strip $(TMPDIR)),)
+TMPDIR := /tmp
+endif
+export TMP
+export TEMP
+export TMPDIR
+
 include $(DEVKITPRO)/libnx/switch_rules
 
 #---------------------------------------------------------------------------------
@@ -27,7 +46,7 @@ include $(DEVKITPRO)/libnx/switch_rules
 TARGET      := TomoToolNX
 APP_TITLE   := TomoToolNX
 APP_AUTHOR  := Imprimante
-APP_VERSION := 1.3.2
+APP_VERSION := 1.3.4
 # Title ID intentionally left blank for emulator compatibility:
 # Ryubing 1.3.279's Discord-integration module reacts to the "active title
 # changed" event during NRO load and dereferences the not-yet-registered
@@ -114,6 +133,7 @@ export DEPSDIR	:=	$(CURDIR)/$(BUILD)
 CFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
 CPPFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
 SFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
+BINFILES	:=	$(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.bin)))
 
 #---------------------------------------------------------------------------------
 # use CXX for linking C++ projects, CC for standard C
@@ -125,8 +145,9 @@ else
 endif
 
 export OFILES_SRC	:= $(CPPFILES:.cpp=.o) $(CFILES:.c=.o) $(SFILES:.s=.o)
-export OFILES 		:= $(OFILES_SRC)
-export HFILES_BIN	:=
+export OFILES_BIN	:= $(addsuffix .o,$(BINFILES))
+export OFILES 		:= $(OFILES_BIN) $(OFILES_SRC)
+export HFILES_BIN	:= $(addsuffix .h,$(subst .,_,$(BINFILES)))
 
 export INCLUDE	:=	$(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
 					$(foreach dir,$(LIBDIRS),-I$(dir)/include) \
@@ -163,7 +184,14 @@ ifneq ($(strip $(APP_TITLEID)),)
 endif
 
 ifneq ($(ROMFS),)
-	export NROFLAGS += --romfsdir=$(shell cygpath -m $(CURDIR)/$(ROMFS) 2>/dev/null || echo $(CURDIR)/$(ROMFS))
+	# elf2nro is a Windows-native binary that requires a Windows-form path. On
+	# MSYS / devkitPro's bundled msys2 `$(CURDIR)` is unix-style ("/c/…") and
+	# `cygpath -m` correctly converts it. On Git-Bash there's a fallback alias
+	# `/home/<user>` pointing under "C:\Program Files\Git\…", so cygpath
+	# produces a path with a space that breaks elf2nro's argv split. Prefer
+	# bash's builtin `pwd -W` (always gives a Windows path) and fall back to
+	# cygpath only when we're not in a shell that supports it.
+	export NROFLAGS += --romfsdir='$(shell pwd -W 2>/dev/null || cygpath -m $(CURDIR)/$(ROMFS) 2>/dev/null || echo $(CURDIR))/$(ROMFS)'
 endif
 
 .PHONY: $(BUILD) clean all setup
