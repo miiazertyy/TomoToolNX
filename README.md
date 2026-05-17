@@ -14,11 +14,9 @@ If you need help or wanna request a feature, [click here](https://github.com/mii
 > The save-file parser, generated data tables (wishes, habits, clothes, coordinates, treasures), Map.sav schema hashes, UGC kind table, housing-edit safety rules, and the Custom BC1/BC3 texture encoder are derived from [alexislours/ltd-save-editor](https://github.com/alexislours/ltd-save-editor) (AGPL-3.0-or-later).
 > And big thanks to [tlmodding/ltd-gamedata](https://github.com/tlmodding/ltd-gamedata) for early reference for save key hashes.
 
-(Outdated Pictures)
-
-<img src="https://i.imgur.com/FO7lZ3o.png" width="600">
-<img src="https://i.imgur.com/upNJWY0.png" width="600">
-<img src="https://i.imgur.com/aHBKPVO.png" width="600">
+<img src="https://i.imgur.com/xriEpkt.png" width="600">
+<img src="https://i.imgur.com/qgJD6YF.png" width="600">
+<img src="https://i.imgur.com/MaJJacf.png" width="600">
 
 ---
 
@@ -93,7 +91,7 @@ Both the **WebUI** and the **on-Switch homebrew UI** are translatable, and you d
 
 ### WebUI
 
-Every translatable string lives in a single JavaScript block at the top of [`source/http_server.cpp`](source/http_server.cpp). Search the file for `── Translations ──` to find it.
+Every translatable string lives in a single JavaScript block at the top of [`data/webui.html`](data/webui.html). Search the file for `── Translations ──` to find it.
 
 1. Find the `LOCALE_META` array and add your locale code + display name:
 

@@ -91,14 +91,27 @@ void Unmount() {
 bool IsMounted() { return s_mounted; }
 
 // Write `len` bytes of `data` to the file at the given fsdev path. Returns ""
-// on success or a short error string. Empty input is treated as "skip".
+// on success or a short error string. A null buffer is treated as "skip", but
+// a zero-length write is reported — it almost always means the caller passed
+// a moved-from / empty vector by mistake.
 static std::string WriteSeedFile(const std::string& path, const uint8_t* data, size_t len) {
-    if (!data || len == 0) return "";
+    if (!data) return "";
+    if (len == 0) return "zero-length seed for " + path;
     FILE* f = fopen(path.c_str(), "wb");
     if (!f) return "open " + path + " failed";
     size_t n = fwrite(data, 1, len, f);
-    fclose(f);
-    if (n != len) return "short write " + path;
+    int closeRc = fclose(f);
+    if (n != len) return "short write " + path
+        + " (" + std::to_string(n) + "/" + std::to_string(len) + ")";
+    if (closeRc != 0) return "fclose " + path + " failed";
+    // Verify the file landed at the expected size — fsdev sometimes reports
+    // a clean fwrite + fclose + commit but loses the file if the underlying
+    // savedata partition rejects it. Reading the stat back is the only
+    // signal we have on-device.
+    struct stat st{};
+    if (stat(path.c_str(), &st) != 0) return "post-write stat " + path + " failed";
+    if ((size_t)st.st_size != len) return "post-write size mismatch " + path
+        + " (" + std::to_string((size_t)st.st_size) + "/" + std::to_string(len) + ")";
     return "";
 }
 
@@ -119,8 +132,10 @@ std::string CreateAndSeed(AccountUid uid,
     if (s_mounted) Unmount();
 
     // Create the save container. Tomodachi Life's account save: 32 MiB data,
-    // 1 MiB journal — comfortably above the ~4.5 MiB of real-save payload and
-    // safe for future patches that grow the format.
+    // 8 MiB journal — every uncommitted seed file (Mii ~2.8 MiB, Player
+    // ~1.3 MiB, Map ~0.2 MiB) has to fit in the journal until the next
+    // fsdevCommitDevice flush; 1 MiB short-wrote the first file. The data
+    // partition is still 32 MiB, comfortably above the ~4.5 MiB payload.
     FsSaveDataAttribute attr = {};
     attr.application_id  = (u64)TOMODACHI_TITLE_ID;
     attr.uid             = uid;
@@ -128,9 +143,28 @@ std::string CreateAndSeed(AccountUid uid,
     attr.save_data_rank  = FsSaveDataRank_Primary;
     attr.save_data_index = 0;
 
+    // Force-delete any existing container before creating, so the journal
+    // size we set below actually takes effect. A container created by a
+    // previous (failed) attempt keeps its original journal_size — that's
+    // baked into the container metadata at creation and can't be resized.
+    // Without this delete-first step, the user's first failed attempt with
+    // a 1 MiB journal would haunt every subsequent retry: fsCreate returns
+    // "already exists" (which we tolerate), we mount the old container,
+    // and Mii.sav writes still short-write into the original tiny journal.
+    // Every caller of CreateAndSeed has already decided to overwrite (no
+    // save / partial save / bundle apply), so destroying the existing
+    // container here is the intended behaviour.
+    Result drc = fsDeleteSaveDataFileSystemBySaveDataAttribute(
+        FsSaveDataSpaceId_User, &attr);
+    // 0x7D402 = no save data exists for this (titleId, uid), which is the
+    // happy path for a brand-new user. Anything else is fine to ignore too
+    // (e.g. permission edge cases) — we'll surface the real error from
+    // fsCreateSaveDataFileSystem if creation itself fails afterwards.
+    (void)drc;
+
     FsSaveDataCreationInfo info = {};
     info.save_data_size     = 32 * 1024 * 1024;
-    info.journal_size       = 1  * 1024 * 1024;
+    info.journal_size       = 8  * 1024 * 1024;
     info.available_size     = 0;
     info.owner_id           = (u64)TOMODACHI_TITLE_ID;
     info.flags              = 0;
@@ -141,15 +175,9 @@ std::string CreateAndSeed(AccountUid uid,
     meta.type = FsSaveDataMetaType_None;
 
     Result rc = fsCreateSaveDataFileSystem(&attr, &info, &meta);
-    // Tolerate "save data already exists" — caller verifies emptiness or
-    // accepts overwrite. Two different result codes show up in practice
-    // depending on firmware/path:
-    //   0x4ce02 — MAKERESULT(FS, 615), classic FsError_PathAlreadyExists
-    //   0x00402 — MAKERESULT(FS, 2),   newer firmwares emit this when the
-    //             save container for (titleId, uid) already exists. Without
-    //             tolerating it the "overwrite an existing user's save"
-    //             flow fails with "fsCreateSaveDataFileSystem failed:
-    //             0x00000402".
+    // We just deleted the container, so "already exists" tolerance is now
+    // a backstop rather than the main path (some firmwares may race the
+    // delete + create on the same tick).
     if (R_FAILED(rc)
         && (u32)rc != 0x4ce02
         && (u32)rc != 0x00402) {
@@ -171,17 +199,26 @@ std::string CreateAndSeed(AccountUid uid,
     mkdir(SAVE_MOUNT_NAME ":/Ugc", 0777);
     mkdir(SAVE_MOUNT_NAME ":/PhotoStudio", 0777);
 
-    std::string e;
-    e = WriteSeedFile(SAVE_MOUNT_NAME ":/Mii.sav",    mii,    miiLen);    if (!e.empty()) return e;
-    e = WriteSeedFile(SAVE_MOUNT_NAME ":/Map.sav",    map,    mapLen);    if (!e.empty()) return e;
-    e = WriteSeedFile(SAVE_MOUNT_NAME ":/Player.sav", player, playerLen); if (!e.empty()) return e;
+    // Commit after each file so the journal doesn't accumulate the full
+    // ~4.5 MiB payload in one transaction. This is belt-and-suspenders on
+    // top of the bumped journal_size above — even a smaller journal would
+    // recycle cleanly between writes once each commit lands.
+    auto seedAndCommit = [](const char* path, const uint8_t* data, size_t len) -> std::string {
+        std::string e = WriteSeedFile(path, data, len);
+        if (!e.empty()) return e;
+        Result r = fsdevCommitDevice(SAVE_MOUNT_NAME);
+        if (R_FAILED(r)) {
+            char buf[96];
+            snprintf(buf, sizeof(buf), "commit after %s failed: 0x%08X", path, r);
+            return std::string(buf);
+        }
+        return "";
+    };
 
-    Result crc = fsdevCommitDevice(SAVE_MOUNT_NAME);
-    if (R_FAILED(crc)) {
-        char buf[80];
-        snprintf(buf, sizeof(buf), "commit after seed failed: 0x%08X", crc);
-        return std::string(buf);
-    }
+    std::string e;
+    e = seedAndCommit(SAVE_MOUNT_NAME ":/Mii.sav",    mii,    miiLen);    if (!e.empty()) return e;
+    e = seedAndCommit(SAVE_MOUNT_NAME ":/Map.sav",    map,    mapLen);    if (!e.empty()) return e;
+    e = seedAndCommit(SAVE_MOUNT_NAME ":/Player.sav", player, playerLen); if (!e.empty()) return e;
     return "";
 }
 

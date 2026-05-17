@@ -92,6 +92,23 @@ std::vector<std::string> ListBundles();
 std::string ApplyBundleToMount(const std::string& bundleName,
                                const std::string& saveMountRoot);
 
+// Load a bundle's three .sav payloads into memory so the caller can route
+// them through SaveMount::CreateAndSeed instead of CopyFile. Tomodachi
+// Life's NACP caps the savedata journal at 1 MiB; ApplyBundleToMount's
+// chunked file-copy hits that cap and can't reliably drain it mid-write
+// (fsdevCommitDevice mid-file returns non-Result-shaped errors). Going
+// through CreateAndSeed avoids the cap because each .sav is its own
+// single fwrite + commit cycle.
+struct BundleSavs {
+    std::vector<uint8_t> mii;
+    std::vector<uint8_t> map;
+    std::vector<uint8_t> player;
+    bool ok() const {
+        return mii.size() >= 1024 && map.size() >= 1024 && player.size() >= 1024;
+    }
+};
+std::string LoadBundleSavs(const std::string& bundleName, BundleSavs& out);
+
 // Recursively delete a bundle directory by name. No-op if it doesn't exist.
 // Used to keep bundles ephemeral — once a bundle has been applied (or the
 // user dismissed the apply picker), the on-disk copy is no longer needed

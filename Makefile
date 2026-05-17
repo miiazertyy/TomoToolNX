@@ -88,7 +88,7 @@ LIBHAZE_LIB  := $(TOPDIR)/$(BUILD)/libhaze.a
 #---------------------------------------------------------------------------------
 ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 
-CFLAGS	:=	-g -Wall -O2 -ffunction-sections \
+CFLAGS	:=	-g -Wall -O2 -ffunction-sections -fdata-sections \
 			$(ARCH) $(DEFINES)
 
 CFLAGS	+=	$(INCLUDE) -D__SWITCH__ \
@@ -106,7 +106,11 @@ HAZE_CXXFLAGS := -g -Os -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -f
                  -Wno-tautological-compare
 
 ASFLAGS	:=	-g $(ARCH)
-LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
+# --gc-sections strips unreferenced functions and data emitted under
+# -ffunction-sections / -fdata-sections. The other devkitPro Switch
+# templates pair these the same way; without --gc-sections the per-section
+# emission only bloats relocation tables and saves nothing.
+LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map),--gc-sections
 
 LIBS	:= -lSDL2_ttf -lfreetype -lharfbuzz -lbz2 -lSDL2_image -lSDL2_mixer -lvorbisidec -lmodplug -lmpg123 -lopusfile -lopus -lFLAC -logg -lSDL2 -lpng -ljpeg -lwebp -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -lz -lzstd -lEGL -lglapi -ldrm_nouveau -lnx
 
@@ -134,6 +138,10 @@ CFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
 CPPFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
 SFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
 BINFILES	:=	$(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.bin)))
+# Raw seed_*.bin payloads are the source-of-truth fed to the outer-Makefile
+# zstd step; the compressed seed_*_z.bin derivatives are what actually gets
+# linked into the NRO. Embedding both would add ~4.4 MB of dead .rodata.
+BINFILES	:=	$(filter-out seed_Mii.bin seed_Map.bin seed_Player.bin,$(BINFILES))
 
 #---------------------------------------------------------------------------------
 # use CXX for linking C++ projects, CC for standard C
@@ -213,7 +221,35 @@ setup:
 		echo "libhaze ready."; \
 	fi
 
-$(BUILD): | $(LIBHAZE_LIB)
+#---------------------------------------------------------------------------------
+# Pre-compressed data assets. The Switch links zstd already (-lzstd in LIBS),
+# so we compress the seed .sav payloads at build time and decompress them on
+# demand at runtime. Each seed compresses to <3% of its raw size (mostly
+# zeros / repetitive data), shrinking the NRO by ~4.4 MB.
+#
+# The WebUI HTML/JS blob is shipped pre-gzipped and served verbatim with
+# `Content-Encoding: gzip`; the browser decompresses, so the Switch pays
+# zero CPU on this path while NRO size drops by ~340 KB.
+#
+# Source-of-truth files live in data/. Generated *_z.bin / *_gz.bin
+# derivatives are .gitignored and rebuilt whenever the source is newer.
+#---------------------------------------------------------------------------------
+DATA_DIR := $(TOPDIR)/data
+GENERATED_DATA := \
+	$(DATA_DIR)/seed_Mii_z.bin \
+	$(DATA_DIR)/seed_Map_z.bin \
+	$(DATA_DIR)/seed_Player_z.bin \
+	$(DATA_DIR)/webui_gz.bin
+
+$(DATA_DIR)/seed_%_z.bin: $(DATA_DIR)/seed_%.bin
+	@echo "  [zstd] $(notdir $@)"
+	@zstd -19 -q -f $< -o $@
+
+$(DATA_DIR)/webui_gz.bin: $(DATA_DIR)/webui.html
+	@echo "  [gzip] $(notdir $@)"
+	@gzip -9 -n -c $< > $@
+
+$(BUILD): $(GENERATED_DATA) | $(LIBHAZE_LIB)
 	@[ -d $@ ] || mkdir -p $@
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 
@@ -241,6 +277,7 @@ $(LIBHAZE_LIB): $(HAZE_OBJS)
 clean:
 	@echo clean ...
 	@rm -fr $(BUILD) $(TARGET).pfs0 $(TARGET).nso $(TARGET).nro $(TARGET).nacp $(TARGET).elf
+	@rm -f $(GENERATED_DATA)
 
 #---------------------------------------------------------------------------------
 else

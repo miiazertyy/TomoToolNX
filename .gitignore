@@ -31,3 +31,9 @@ desktop.ini
 *.swp
 *.swo
 *~
+
+# Generated compressed data assets (zstd seeds + gzipped WebUI)
+data/seed_Mii_z.bin
+data/seed_Map_z.bin
+data/seed_Player_z.bin
+data/webui_gz.bin

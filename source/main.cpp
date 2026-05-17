@@ -1170,7 +1170,7 @@ static bool gThumbTipSeen      = false;
 static bool gShowBgRemovePrompt = false;
 
 static constexpr const char* kBgModelPath = "romfs:/u2netp.bin";
-static int  gMaxBackups        = 8;
+static int  gMaxBackups        = 5;
 
 
 static int         gSettingsSel    = 0;
@@ -8848,9 +8848,39 @@ static void DrawError() {
 // bin2s emits one header per .bin and embeds the data/size as constexpr in C++
 // mode (size lives in the header, not as a linkable symbol). The Makefile's
 // `-I$(BUILD)` puts these on the include path.
-#include "seed_Mii_bin.h"
-#include "seed_Map_bin.h"
-#include "seed_Player_bin.h"
+//
+// The seed payloads are shipped zstd-compressed (raw data/seed_*.bin → built
+// by the outer Makefile to data/seed_*_z.bin via `zstd -19`). Each seed is
+// >97% zeros / repeating game-init bytes, so this trims ~4.4 MB off the NRO.
+// LoadSeeds() below decompresses into vectors at the moment a save is being
+// created — never resident outside that brief window.
+#include "seed_Mii_z_bin.h"
+#include "seed_Map_z_bin.h"
+#include "seed_Player_z_bin.h"
+#include <zstd.h>
+
+namespace {
+struct SeedBlobs {
+    std::vector<uint8_t> mii, map, player;
+    bool ok() const { return mii.size() >= 1024 && map.size() >= 1024 && player.size() >= 1024; }
+};
+std::vector<uint8_t> ZstdDecompressBlob(const void* src, size_t srcSize) {
+    unsigned long long expected = ZSTD_getFrameContentSize(src, srcSize);
+    if (expected == ZSTD_CONTENTSIZE_ERROR || expected == ZSTD_CONTENTSIZE_UNKNOWN) return {};
+    std::vector<uint8_t> out((size_t)expected);
+    size_t produced = ZSTD_decompress(out.data(), out.size(), src, srcSize);
+    if (ZSTD_isError(produced)) return {};
+    out.resize(produced);
+    return out;
+}
+SeedBlobs LoadSeeds() {
+    return {
+        ZstdDecompressBlob(seed_Mii_z_bin,    seed_Mii_z_bin_size),
+        ZstdDecompressBlob(seed_Map_z_bin,    seed_Map_z_bin_size),
+        ZstdDecompressBlob(seed_Player_z_bin, seed_Player_z_bin_size),
+    };
+}
+} // namespace
 
 static void DrawBundleCreate() {
     HitClear();
@@ -9049,10 +9079,11 @@ static void DrawIslandGenPrompt() {
     DrawTextC(Lang::T("islandgen.title"),  SCREEN_W/2, SCREEN_H/2 - 64, COL_GOLD, Font::Lg);
     DrawTextC(Lang::T("islandgen.body1"),  SCREEN_W/2, SCREEN_H/2 - 8,  COL_TEXT, Font::Md);
     DrawTextC(Lang::T("islandgen.body2"),  SCREEN_W/2, SCREEN_H/2 + 24, COL_DIM,  Font::Sm);
-    // Real seeds are MB-scale. Anything tiny (the 4-byte "STUB" placeholder
-    // shipped by default) means the dev hasn't dropped real bytes into
-    // data/seed_*.bin yet — surface that clearly instead of writing junk.
-    if (seed_Mii_bin_size < 1024 || seed_Map_bin_size < 1024 || seed_Player_bin_size < 1024)
+    // Real seeds compress to KB-scale (Mii ~10K, Map ~5K, Player ~27K via
+    // zstd -19). The 4-byte "STUB" placeholder compresses to ~13 bytes —
+    // any of the _z payloads being sub-kilobyte still means the dev hasn't
+    // dropped real bytes into data/seed_*.bin yet.
+    if (seed_Mii_z_bin_size < 1024 || seed_Map_z_bin_size < 1024 || seed_Player_z_bin_size < 1024)
         DrawTextC(Lang::T("islandgen.no_seed"), SCREEN_W/2, SCREEN_H/2 + 60, COL_RED, Font::Sm);
     DrawFooter(Lang::T("islandgen.footer"));
     Present();
@@ -9550,8 +9581,37 @@ static void FinishBundleApply(int userIdx) {
         gApplyBundleAfterBackup = false;
         return;
     }
-    std::string aerr = BackupService::ApplyBundleToMount(
-        gPendingBundleName, "tomodata:/");
+    // Load the bundle's three .sav files into memory and route them through
+    // CreateAndSeed instead of CopyFile. The chunked CopyFile path can't
+    // drain Tomodachi's 1 MiB savedata journal mid-write — fsdevCommitDevice
+    // on an open or freshly-closed handle returns non-Result errors like
+    // 0xE2F27202 / 0xE3746402 on real hardware. CreateAndSeed writes each
+    // .sav as a single fwrite/fclose/commit, which the firmware tolerates
+    // and which we already know works (the regular Generate Island flow
+    // uses it). Side benefit: CreateAndSeed force-deletes the existing
+    // container first, so a previous failed attempt's metadata never
+    // haunts a retry.
+    BackupService::BundleSavs bs;
+    std::string bundleLoadErr = BackupService::LoadBundleSavs(gPendingBundleName, bs);
+    if (!bundleLoadErr.empty()) {
+        gError = "Load bundle: " + bundleLoadErr;
+        gScreen = Screen::Error;
+        gShowBundleOverwriteConfirm = false;
+        gApplyBundleAfterBackup = false;
+        return;
+    }
+    if (!bs.ok()) {
+        gError = "Bundle " + gPendingBundleName + " is missing seed files";
+        gScreen = Screen::Error;
+        gShowBundleOverwriteConfirm = false;
+        gApplyBundleAfterBackup = false;
+        return;
+    }
+    std::string aerr = SaveMount::CreateAndSeed(
+        gUsers[userIdx].uid,
+        bs.mii.data(),    bs.mii.size(),
+        bs.map.data(),    bs.map.size(),
+        bs.player.data(), bs.player.size());
     if (!aerr.empty()) {
         gError = "Apply bundle: " + aerr;
         gScreen = Screen::Error;
@@ -9917,6 +9977,27 @@ int main(int,char**) {
                             break;
                         }
                         gError=err;gScreen=Screen::Error;break;
+                    }
+                    // Auto-heal: a save container that was created but never
+                    // finished seeding (e.g. an earlier short-write aborted
+                    // CreateAndSeed half-way through) mounts fine but is
+                    // missing one or more of the three .sav files. The rest
+                    // of the app assumes those are present; without this
+                    // check the user would silently drop into BackupPrompt
+                    // and the island generator / save editors would fail
+                    // later with a misleading "Cannot open" error. Detect
+                    // it here and route through IslandGenPrompt instead,
+                    // which will overwrite the partial container with a
+                    // fresh CreateAndSeed.
+                    struct stat st{};
+                    bool partial =
+                        stat("tomodata:/Mii.sav",    &st) != 0 || st.st_size == 0 ||
+                        stat("tomodata:/Map.sav",    &st) != 0 || st.st_size == 0 ||
+                        stat("tomodata:/Player.sav", &st) != 0 || st.st_size == 0;
+                    if (partial) {
+                        SaveMount::Unmount();
+                        gScreen = Screen::IslandGenPrompt;
+                        break;
                     }
                 }
                 gBackupFull = (BackupService::CountBackups(SaveMount::SafeUserFolder(gUsers[gUserSel])) >= gMaxBackups);
@@ -11769,7 +11850,8 @@ int main(int,char**) {
             if (kDown & HidNpadButton_B) {
                 gScreen = Screen::UserPick;
             } else if (kDown & HidNpadButton_A) {
-                if (seed_Mii_bin_size < 1024 || seed_Map_bin_size < 1024 || seed_Player_bin_size < 1024) {
+                SeedBlobs sb = LoadSeeds();
+                if (!sb.ok()) {
                     // Build was made without dropping real seed bytes into
                     // data/seed_*.bin — refuse rather than create a corrupt save.
                     gError = Lang::T("islandgen.err_no_seed");
@@ -11780,9 +11862,9 @@ int main(int,char**) {
                 DrawMounting();
                 std::string err = SaveMount::CreateAndSeed(
                     gUsers[gUserSel].uid,
-                    seed_Mii_bin,     seed_Mii_bin_size,
-                    seed_Map_bin,     seed_Map_bin_size,
-                    seed_Player_bin,  seed_Player_bin_size);
+                    sb.mii.data(),    sb.mii.size(),
+                    sb.map.data(),    sb.map.size(),
+                    sb.player.data(), sb.player.size());
                 if (!err.empty()) { gError = err; gScreen = Screen::Error; break; }
                 // Stamp the new island with the console's region/language so
                 // the bundler's locale doesn't bleed into every seeded save.
@@ -11813,7 +11895,8 @@ int main(int,char**) {
                 // /switch/TomoToolNX/Bundles/island_<timestamp>/. "Generated"
                 // additionally drops a sentinel so the next user that adopts
                 // the bundle gets the web-UI overlay on first load.
-                if (seed_Mii_bin_size < 1024 || seed_Map_bin_size < 1024 || seed_Player_bin_size < 1024) {
+                SeedBlobs sb = LoadSeeds();
+                if (!sb.ok()) {
                     gError = Lang::T("islandgen.err_no_seed");
                     gScreen = Screen::Error;
                     break;
@@ -11826,9 +11909,9 @@ int main(int,char**) {
                               t->tm_hour, t->tm_min, t->tm_sec);
                 std::string werr = BackupService::WriteBundleFromSeed(
                     nameBuf,
-                    seed_Mii_bin,     seed_Mii_bin_size,
-                    seed_Map_bin,     seed_Map_bin_size,
-                    seed_Player_bin,  seed_Player_bin_size);
+                    sb.mii.data(),    sb.mii.size(),
+                    sb.map.data(),    sb.map.size(),
+                    sb.player.data(), sb.player.size());
                 if (!werr.empty()) {
                     gError = werr;
                     gScreen = Screen::Error;
@@ -11836,8 +11919,9 @@ int main(int,char**) {
                 }
                 // Stamp the bundle with the console's region/language. Same
                 // logic as IslandGenPrompt; we patch the bundle's on-disk
-                // Player.sav so subsequent ApplyBundleToMount copies the
-                // correct values in.
+                // Player.sav so when FinishBundleApply loads it back through
+                // LoadBundleSavs + CreateAndSeed, the correct language ends
+                // up in the user's seeded save.
                 {
                     std::string bundlePlayer = std::string(BUNDLE_ROOT) + "/" + nameBuf + "/Player.sav";
                     std::string lerr = PatchSeedLanguageInPlace(bundlePlayer);
@@ -11931,17 +12015,19 @@ int main(int,char**) {
 
                 // Two paths depending on whether the slot already has a
                 // save:
-                //   • No save: CreateAndSeed builds a fresh container, mounts
-                //     it, and lays down the seed bytes. The bundle Apply
-                //     below then overwrites those files with the bundle's
-                //     copy — strictly redundant for "blank" since they're
-                //     identical, but harmless.
-                //   • Has save (confirmed overwrite): just Mount the
-                //     existing container and skip CreateAndSeed entirely.
-                //     fsCreateSaveDataFileSystem returns 0x402 in this
-                //     situation (not the 0x4ce02 path the old code tried to
-                //     tolerate), so attempting it produced
-                //     "fsCreateSaveDataFileSystem failed: 0x00000402".
+                //   • No save: skip straight to FinishBundleApply, which
+                //     loads the bundle's .sav payloads into memory and
+                //     hands them to SaveMount::CreateAndSeed. CreateAndSeed
+                //     itself handles container creation, journal sizing,
+                //     and per-file writes — no separate "create then copy
+                //     bundle" two-pass needed.
+                //   • Has save (confirmed overwrite): Mount the existing
+                //     container so the pre-overwrite backup below can
+                //     snapshot it. After the backup lands, FinishBundleApply
+                //     runs and calls CreateAndSeed which force-deletes the
+                //     old container and recreates it with the bundle's
+                //     bytes. The user's old save is safe on the SD card by
+                //     then.
                 gScreen = Screen::Mounting;
                 DrawMounting();
                 bool hadSave = SaveMount::SaveExists(gUsers[u].uid);
@@ -11949,13 +12035,6 @@ int main(int,char**) {
                 if (hadSave) {
                     err = SaveMount::Mount(gUsers[u].uid);
                     if (!err.empty()) err = "Mount: " + err;
-                } else {
-                    err = SaveMount::CreateAndSeed(
-                        gUsers[u].uid,
-                        seed_Mii_bin,     seed_Mii_bin_size,
-                        seed_Map_bin,     seed_Map_bin_size,
-                        seed_Player_bin,  seed_Player_bin_size);
-                    if (!err.empty()) err = "Create save: " + err;
                 }
                 if (!err.empty()) {
                     gError = err;

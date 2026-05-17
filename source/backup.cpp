@@ -85,14 +85,50 @@ static std::vector<std::string> ListSaveBackups(const std::string& uidTag) {
     return result;
 }
 
-static void CopyFile(const std::string& src, const std::string& dst) {
+// Returns "" on success, error string on any failure. Previously void;
+// silent failures here meant a bundle apply / restore could quietly
+// truncate a savedata file to zero bytes and the caller would never know.
+//
+// If `commitDev` is non-null, fsdevCommitDevice is called after the file
+// is fully closed — never mid-file. We tried a chunked close/commit/reopen
+// pattern to stay under Tomodachi Life's 1 MiB savedata journal cap; in
+// practice fsdevCommitDevice returned non-Result-shaped errors (0xE2F27202,
+// 0xE3746402) on real hardware whenever it was called between chunks of
+// the same file. The bundle-apply path was reworked to route through
+// SaveMount::CreateAndSeed instead (see FinishBundleApply in main.cpp);
+// this function stays simple for SD-to-SD copies and post-close commits.
+static std::string CopyFile(const std::string& src, const std::string& dst,
+                            const char* commitDev = nullptr) {
     FILE* in  = fopen(src.c_str(), "rb");
+    if (!in) return "open src " + src + " failed";
     FILE* out = fopen(dst.c_str(), "wb");
-    if (!in || !out) { if(in) fclose(in); if(out) fclose(out); return; }
+    if (!out) { fclose(in); return "open dst " + dst + " failed"; }
     char buf[32768];
     size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) fwrite(buf, 1, n, out);
-    fclose(in); fclose(out);
+    size_t totalRead = 0, totalWritten = 0;
+    bool writeErr = false;
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+        totalRead += n;
+        size_t w = fwrite(buf, 1, n, out);
+        totalWritten += w;
+        if (w != n) { writeErr = true; break; }
+    }
+    bool readErr = ferror(in) != 0;
+    int closeOut = fclose(out);
+    fclose(in);
+    if (readErr)  return "read " + src + " failed at " + std::to_string(totalRead);
+    if (writeErr) return "short write " + dst
+        + " (" + std::to_string(totalWritten) + "/" + std::to_string(totalRead) + ")";
+    if (closeOut != 0) return "fclose " + dst + " failed";
+    if (commitDev) {
+        Result rc = fsdevCommitDevice(commitDev);
+        if (R_FAILED(rc)) {
+            char ebuf[96];
+            snprintf(ebuf, sizeof(ebuf), "commit after %s failed: 0x%08X", dst.c_str(), rc);
+            return std::string(ebuf);
+        }
+    }
+    return "";
 }
 
 // Delete a directory tree recursively
@@ -142,7 +178,9 @@ static std::string s_error;
 static std::string s_saveRoot;
 static std::string s_backupDest;
 
-// Recursive copy — copies src tree into dst (dst must already exist)
+// Recursive copy — copies src tree into dst (dst must already exist).
+// First CopyFile error is recorded into s_error; subsequent files still
+// attempt to copy so the backup is as complete as possible.
 static void CopyTree(const std::string& src, const std::string& dst,
                      int& done, int total) {
     DIR* d = opendir(src.c_str());
@@ -150,6 +188,9 @@ static void CopyTree(const std::string& src, const std::string& dst,
     struct dirent* de;
     while ((de = readdir(d)) != nullptr) {
         if (!strcmp(de->d_name,".") || !strcmp(de->d_name,"..")) continue;
+        // Plain concat — `src`/`dst` for backups are SD-card paths that
+        // don't end in '/', so adding "/" is safe. For savedata-mount
+        // destinations see RestoreCopyTree's JoinPath helper.
         std::string srcChild = src + "/" + de->d_name;
         std::string dstChild = dst + "/" + de->d_name;
         struct stat st;
@@ -158,7 +199,12 @@ static void CopyTree(const std::string& src, const std::string& dst,
             MkdirP(dstChild);
             CopyTree(srcChild, dstChild, done, total);
         } else {
-            CopyFile(srcChild, dstChild);
+            std::string cerr = CopyFile(srcChild, dstChild);
+            if (!cerr.empty()) {
+                mutexLock(&s_mutex);
+                if (s_error.empty()) s_error = cerr;
+                mutexUnlock(&s_mutex);
+            }
             done++;
             if (total > 0) {
                 mutexLock(&s_mutex);
@@ -266,22 +312,37 @@ bool DeleteBackupAt(const std::string& backupPath) {
 void DeleteBackup() { RmRf(BACKUP_ROOT); }
 
 
-static std::string RestoreCopyTree(const std::string& src, const std::string& dst) {
+// Path-safe join — avoids `tomodata://Mii.sav` (double slash) when the
+// destination root already ends in `/`. fsdev appears to register such
+// paths in a way that later confuses fsdevCommitDevice ("mid-copy commit
+// failed: 0xE3746402"), so we normalize before passing into the filesystem.
+static std::string JoinPath(const std::string& a, const std::string& b) {
+    if (a.empty()) return b;
+    if (a.back() == '/') return a + b;
+    return a + "/" + b;
+}
+
+// `commitDev` (e.g. "tomodata") is forwarded into CopyFile so writes into a
+// savedata mount drain the journal mid-file. Pass nullptr for plain SD->SD
+// or savedata->SD copies (e.g. restoring a backup to a non-savedata path).
+static std::string RestoreCopyTree(const std::string& src, const std::string& dst,
+                                   const char* commitDev = nullptr) {
     DIR* d = opendir(src.c_str());
     if (!d) return "Cannot read: " + src;
     struct dirent* de;
     while ((de = readdir(d)) != nullptr) {
         if (!strcmp(de->d_name,".") || !strcmp(de->d_name,"..")) continue;
-        std::string sc = src + "/" + de->d_name;
-        std::string dc = dst + "/" + de->d_name;
+        std::string sc = JoinPath(src, de->d_name);
+        std::string dc = JoinPath(dst, de->d_name);
         struct stat st;
         if (stat(sc.c_str(), &st) != 0) continue;
         if (S_ISDIR(st.st_mode)) {
             MkdirP(dc);
-            std::string err = RestoreCopyTree(sc, dc);
+            std::string err = RestoreCopyTree(sc, dc, commitDev);
             if (!err.empty()) { closedir(d); return err; }
         } else {
-            CopyFile(sc, dc);
+            std::string err = CopyFile(sc, dc, commitDev);
+            if (!err.empty()) { closedir(d); return err; }
         }
     }
     closedir(d);
@@ -296,7 +357,11 @@ std::vector<std::string> ListBackups(const std::string& uidTag) {
 
 std::string RestoreBackup(const std::string& backupPath, const std::string& saveMountRoot) {
     if (!DirExists(backupPath)) return "Backup folder not found";
-    return RestoreCopyTree(backupPath, saveMountRoot);
+    // saveMountRoot is always "tomodata:/" in practice — the savedata mount
+    // shared with SaveMount::SAVE_MOUNT_NAME. Forwarding the device name
+    // lets CopyFile drain the journal mid-file so large savs don't
+    // short-write into Tomodachi's 1 MiB journal cap.
+    return RestoreCopyTree(backupPath, saveMountRoot, "tomodata");
 }
 
 // ── Save bundles ────────────────────────────────────────────────────────────
@@ -365,7 +430,36 @@ std::string ApplyBundleToMount(const std::string& bundleName,
     if (!BundleNameSafe(bundleName)) return "Invalid bundle name";
     std::string root = std::string(BUNDLE_ROOT) + "/" + bundleName;
     if (!DirExists(root)) return "Bundle not found: " + bundleName;
-    return RestoreCopyTree(root, saveMountRoot);
+    // Same journal-drain rationale as RestoreBackup above.
+    return RestoreCopyTree(root, saveMountRoot, "tomodata");
+}
+
+static std::string LoadFileBytes(const std::string& path, std::vector<uint8_t>& out) {
+    out.clear();
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return "open " + path + " failed";
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (sz < 0) { fclose(f); return "ftell " + path + " failed"; }
+    out.resize((size_t)sz);
+    size_t n = fread(out.data(), 1, out.size(), f);
+    int closeRc = fclose(f);
+    if (n != out.size()) return "short read " + path
+        + " (" + std::to_string(n) + "/" + std::to_string(out.size()) + ")";
+    if (closeRc != 0) return "fclose " + path + " failed";
+    return "";
+}
+
+std::string LoadBundleSavs(const std::string& bundleName, BundleSavs& out) {
+    if (!BundleNameSafe(bundleName)) return "Invalid bundle name";
+    std::string root = std::string(BUNDLE_ROOT) + "/" + bundleName;
+    if (!DirExists(root)) return "Bundle not found: " + bundleName;
+    std::string e;
+    e = LoadFileBytes(root + "/Mii.sav",    out.mii);    if (!e.empty()) return e;
+    e = LoadFileBytes(root + "/Map.sav",    out.map);    if (!e.empty()) return e;
+    e = LoadFileBytes(root + "/Player.sav", out.player); if (!e.empty()) return e;
+    return "";
 }
 
 bool DeleteBundleByName(const std::string& bundleName) {

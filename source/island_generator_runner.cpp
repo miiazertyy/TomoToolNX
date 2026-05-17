@@ -195,8 +195,11 @@ std::string StepInteriors() {
 }
 
 // User-fillable Mii pool: scan /switch/TomoToolNX/Miis/ for *.ltd files
-// and overwrite slots 2..70 with shuffled imports. The folder is the user's
-// (MTP / SD) way to seed any pool of community Miis they like without
+// and overwrite slots 2..70 with shuffled imports. The folder persists
+// across runs — drop your .ltd collection once and reuse it on every
+// regeneration. (Pre-2026-05 builds deleted the folder after each pass;
+// users had to re-copy their collection every time.) The folder is the
+// user's (MTP / SD) way to seed any pool of community Miis they like without
 // hitting the TomoShare API's hard rate limit. Slot 1 is the founder so we
 // always keep it. Empty / missing folder → silent skip, seed Miis stay.
 std::string StepMiiReplace() {
@@ -246,12 +249,10 @@ std::string StepMiiReplace() {
         (void)MiiManager::ImportMii(kFirstSlot + i, files[(size_t)i]);
     }
 
-    // Folder is meant to be ephemeral: delete every .ltd we listed (even
-    // the unused tail beyond slot 70) and remove the folder itself so the
-    // next generation run starts from a clean slate. If rmdir fails for
-    // any reason (stray file we don't recognise, etc.) we let it slide.
-    for (const auto& p : files) ::remove(p.c_str());
-    rmdir(kPoolDir);
+    // Pool is now persistent: dropped .ltd files survive across runs so the
+    // user doesn't have to re-copy their Mii collection every time they
+    // regenerate an island. (Previously this step deleted every .ltd it
+    // listed and rmdir'd the folder.)
     return "";
 }
 

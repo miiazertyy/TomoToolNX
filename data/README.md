@@ -24,8 +24,14 @@ yet. To prepare them:
 5. Rebuild with `make`.
 
 The empty placeholder files in this directory let the build succeed without a seed; the
-"Generate Island" path checks `seed_Mii_bin_size > 0` at runtime and refuses gracefully
+"Generate Island" path checks the embedded seed size at runtime and refuses gracefully
 if the seed is missing.
+
+The raw `seed_*.bin` are **never linked directly** — the outer Makefile zstd-compresses
+them to `seed_*_z.bin` (gitignored) and only the compressed payloads are bin2s-embedded.
+Real seeds compress to roughly 0.3–3 % of their raw size, so this shaves several
+megabytes off the NRO. `main.cpp::LoadSeeds()` decompresses them into vectors only when
+a save is actually being created.
 
 ## Map templates
 
