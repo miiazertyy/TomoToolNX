@@ -46,7 +46,7 @@ include $(DEVKITPRO)/libnx/switch_rules
 TARGET      := TomoToolNX
 APP_TITLE   := TomoToolNX
 APP_AUTHOR  := Imprimante
-APP_VERSION := 1.3.4
+APP_VERSION := 1.3.5
 # Title ID intentionally left blank for emulator compatibility:
 # Ryubing 1.3.279's Discord-integration module reacts to the "active title
 # changed" event during NRO load and dereferences the not-yet-registered
