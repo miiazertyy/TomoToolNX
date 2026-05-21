@@ -1888,7 +1888,7 @@ static void TSelHabitCat(int c) {
 // doesn't depend on cross-frame gSimKDown ordering.
 static void TSelHabitItem(int posInCat) {
     gHabitItemSel = posInCat;
-    if (!gMiiSav.loaded || gMiis.empty() || gMiiStatsMiiSel >= (int)gMiis.size()) return;
+    if (!gMiiSav.loaded || gMiis.empty() || gMiiStatsMiiSel < 0 || gMiiStatsMiiSel >= (int)gMiis.size()) return;
     EnsureHabitHashes();
     int miiIdx = gMiis[gMiiStatsMiiSel].slot - 1;
     std::vector<int> items = HabitsInCategory(gHabitCatSel);
@@ -1916,7 +1916,7 @@ static void TSelHabitItem(int posInCat) {
 }
 static void TToggleHabitOwn(int posInCat) {
     gHabitItemSel = posInCat;
-    if (!gMiiSav.loaded || gMiis.empty() || gMiiStatsMiiSel >= (int)gMiis.size()) return;
+    if (!gMiiSav.loaded || gMiis.empty() || gMiiStatsMiiSel < 0 || gMiiStatsMiiSel >= (int)gMiis.size()) return;
     EnsureHabitHashes();
     int miiIdx = gMiis[gMiiStatsMiiSel].slot - 1;
     std::vector<int> items = HabitsInCategory(gHabitCatSel);
@@ -3438,7 +3438,7 @@ static std::string SanitizeFilename(const std::string& in) {
     return out;
 }
 static void TDoMiiExport(int) {
-    if (gMiis.empty() || gMiiStatsMiiSel >= (int)gMiis.size()) return;
+    if (gMiis.empty() || gMiiStatsMiiSel < 0 || gMiiStatsMiiSel >= (int)gMiis.size()) return;
     int slot=gMiis[gMiiStatsMiiSel].slot;
     std::string stem = SanitizeFilename(gMiis[gMiiStatsMiiSel].name);
     if (stem.empty()) stem = "Mii_slot" + std::to_string(slot);
@@ -3477,7 +3477,7 @@ static void DoMiiImport(const std::string& ltdPath) {
         gMiiSavDirty = true;
     }
     gMiis = MiiManager::ListMiis();
-    if (gMiiStatsMiiSel >= (int)gMiis.size()) gMiiStatsMiiSel=(int)gMiis.size()-1;
+    if (gMiiStatsMiiSel >= (int)gMiis.size()) gMiiStatsMiiSel = std::max(0, (int)gMiis.size()-1);
     gMiiStatsMsg="Mii imported — save or discard on exit"; gMiiStatsMsgCol=COL_GREEN;
     LogOK("Mii import OK: slot "+std::to_string(slot));
 }
@@ -3513,7 +3513,7 @@ static void DoOnSwitchImport(const std::string& pngPath) {
     gEntries = UgcScanner::Scan(SAVE_UGC_PATH);
     MiiManager::LoadUgcNames();
     RebuildUgcFilter();
-    if (gEntrySel >= (int)gEntries.size()) gEntrySel=(int)gEntries.size()-1;
+    if (gEntrySel >= (int)gEntries.size()) gEntrySel = std::max(0, (int)gEntries.size()-1);
     if (!gEntries.empty()) LoadPreview(gEntries[gEntrySel]);
     gOnSwitchMsg="Imported — save or discard on exit"; gOnSwitchMsgCol=COL_GREEN;
     LogOK("Import OK: "+stem);
@@ -3589,7 +3589,7 @@ static void DoUgcImportLtd(const std::string& ltdPath) {
     gPlayerSavDirty = true;
     gEntries = UgcScanner::Scan(SAVE_UGC_PATH);
     RebuildUgcFilter();
-    if (gEntrySel >= (int)gEntries.size()) gEntrySel = (int)gEntries.size()-1;
+    if (gEntrySel >= (int)gEntries.size()) gEntrySel = std::max(0, (int)gEntries.size()-1);
     if (!gEntries.empty()) LoadPreview(gEntries[gEntrySel]);
     gOnSwitchMsg = "Imported " + stem + " — save or discard on exit";
     gOnSwitchMsgCol = COL_GREEN;
@@ -5090,9 +5090,30 @@ static void DrawOnSwitch() {
             int logY=contentY+26, logMaxY=contentY+logBoxH-10, lineH=20;
             int maxLines=(logMaxY-logY)/lineH;
             int startLine=(int)gLog.size()>maxLines?(int)gLog.size()-maxLines:0;
+            // Available pixel width for the text — keeps long MTP paths from
+            // bleeding past the right edge of the log box.
+            int logTextMaxW = logBoxW - 16;
+            TTF_Font* fLog = GetFont(Font::Sm);
+            auto fitLog = [&](const std::string& s) -> std::string {
+                if (!fLog || s.empty()) return s;
+                int w=0, h=0; TTF_SizeUTF8(fLog, s.c_str(), &w, &h);
+                if (w <= logTextMaxW) return s;
+                std::string t = s;
+                while (t.size() > 1) {
+                    // Trim one UTF-8 code-point off the end at a time so we
+                    // don't slice a multi-byte char in half.
+                    size_t b = t.size() - 1;
+                    while (b > 0 && ((unsigned char)t[b] & 0xC0) == 0x80) b--;
+                    t.erase(b);
+                    std::string cand = t + "...";
+                    TTF_SizeUTF8(fLog, cand.c_str(), &w, &h);
+                    if (w <= logTextMaxW) return cand;
+                }
+                return "...";
+            };
             for (int i=startLine;i<(int)gLog.size();i++) {
                 if (logY+lineH>logMaxY) break;
-                DrawText(gLog[i].text, margin+8, logY, gLog[i].col);
+                DrawText(fitLog(gLog[i].text), margin+8, logY, gLog[i].col);
                 logY+=lineH;
             }
             if (gLog.empty())
@@ -5968,11 +5989,16 @@ static void BlOpenPicker(int blSel, int miiIdx) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum class MapMode : uint8_t {
-    Idle    = 0,
-    Inspect = 1,
-    Picker  = 2,
-    Place   = 3,
+    Idle       = 0,
+    Inspect    = 1,
+    Picker     = 2,   // actor picker
+    Place      = 3,
+    TilePicker = 4,   // floor-tile picker (paint tool)
 };
+// Tool selector for the Map tab. Orthogonal to MapMode: Select is the
+// classic inspect/place workflow, Paint lets the user lay floor tiles, and
+// Stats swaps the inspector card for an aggregate breakdown of the island.
+enum class MapTool : uint8_t { Select = 0, Paint = 1, Stats = 2 };
 
 static int       gMapCursorX     = 60;
 static int       gMapCursorY     = 40;
@@ -5990,6 +6016,29 @@ static int       gMapInsField    = 0;  // focused inspector field (0..N-1)
 static int       gMapDelConfirm  = 0;  // 0 idle, 1 awaiting Y/A confirm
 static int       gMapStickXAcc   = 0;
 static int       gMapStickYAcc   = 0;
+
+// ── Tools / zoom / pan / paint / history (added for parity with ltd) ────────
+static MapTool   gMapTool        = MapTool::Select;
+static int       gMapZoom        = 1;   // 1..4, integer pixel-perfect zoom
+static int       gMapViewX       = 0;   // top-left visible tile column
+static int       gMapViewY       = 0;   // top-left visible tile row
+static uint32_t  gMapPaintTile   = 0;   // FloorKeyHash the paint tool stamps
+static int       gMapBrush       = 1;   // square brush edge (1, 3 or 5)
+static int       gMapTileSel     = 0;   // tile-picker selection index
+static int       gMapTileScroll  = 0;
+
+// Undo / redo. Object field ids: 0 actor, 1 x, 2 y, 3 rot(deg), 4 link.
+struct MapTileChange { int idx;  uint32_t oldv, newv; };
+struct MapObjChange  { int slot; int field; int64_t  oldv, newv; };
+struct MapHistEntry  { std::string label; std::vector<MapTileChange> tiles; std::vector<MapObjChange> objs; };
+static std::vector<MapHistEntry> gMapUndo, gMapRedo;
+// Active paint stroke (idx -> tile hash before this stroke touched it).
+static std::map<int, uint32_t>   gMapStroke;
+static bool                      gMapStroking  = false;
+static int                       gMapStrokeLastX = -1;
+static int                       gMapStrokeLastY = -1;
+// Cached list of paintable terrain tiles (TILE_INFO entries with internal==false).
+static std::vector<uint32_t>     gMapPaintTiles;
 
 // On-screen geometry (1280×720). Canvas at 7 px/tile fills the height between
 // the tab bar and footer; inspector is sized to the form's actual content.
@@ -6142,18 +6191,264 @@ static void MapRebuildPicker() {
     gMapPickerScroll = std::max(0, std::min(gMapPickerScroll, std::max(0, (int)gMapPickerActors.size() - 1)));
 }
 
+// ── Editor helpers: zoom/pan, tool/zoom cycling, painting, history, PNG ────
+// Build the list of paintable terrain tiles once (skips the engine-internal
+// Seaside/RoomInvalid/UGC entries) and pick a sensible default if none was
+// chosen yet.
+static void MapBuildPaintTiles() {
+    if (!gMapPaintTiles.empty()) return;
+    for (int i = 0; i < MapData::TILE_INFO_COUNT; i++) {
+        const auto& t = MapData::TILE_INFO[i];
+        if (t.internal) continue;
+        gMapPaintTiles.push_back(t.hash);
+    }
+    if (gMapPaintTile == 0 && !gMapPaintTiles.empty()) {
+        gMapPaintTile = gMapPaintTiles[0];
+        for (uint32_t h : gMapPaintTiles) {
+            const MapData::TileInfo* ti = MapData::TileLookup(h);
+            if (ti && ti->code && std::string(ti->code) == "Grass") { gMapPaintTile = h; break; }
+        }
+    }
+}
+
+// Visible tile counts and on-screen tile size for the current zoom level.
+// 7,14,21,28 px keeps the canvas pixel-perfect (840 / px is exact at 1×/2×).
+static void MapViewMetrics(int& cols, int& rows, int& px) {
+    px   = 7 * gMapZoom;
+    cols = MAP_CANVAS_W / px;
+    rows = MAP_CANVAS_H / px;
+    if (cols > MAP_WIDTH)  cols = MAP_WIDTH;
+    if (rows > MAP_HEIGHT) rows = MAP_HEIGHT;
+}
+// Pan so the cursor stays inside the viewport and the view never scrolls
+// past the island bounds.
+static void MapClampView() {
+    int cols, rows, ppx; MapViewMetrics(cols, rows, ppx);
+    if (gMapCursorX < gMapViewX)               gMapViewX = gMapCursorX;
+    if (gMapCursorX >= gMapViewX + cols)       gMapViewX = gMapCursorX - cols + 1;
+    if (gMapCursorY < gMapViewY)               gMapViewY = gMapCursorY;
+    if (gMapCursorY >= gMapViewY + rows)       gMapViewY = gMapCursorY - rows + 1;
+    if (gMapViewX > MAP_WIDTH  - cols)         gMapViewX = MAP_WIDTH  - cols;
+    if (gMapViewY > MAP_HEIGHT - rows)         gMapViewY = MAP_HEIGHT - rows;
+    if (gMapViewX < 0) gMapViewX = 0;
+    if (gMapViewY < 0) gMapViewY = 0;
+}
+
+static void MapSetTool(MapTool tool) {
+    gMapTool = tool;
+    gMapMode = MapMode::Idle;
+    gMapDelConfirm = 0;
+    if (tool != MapTool::Select) gMapSelSlot = -1;
+}
+static void MapToolCycle(int dir) {
+    int t = ((int)gMapTool + dir + 3) % 3;
+    MapSetTool((MapTool)t);
+}
+static void MapZoomCycle() {
+    gMapZoom = (gMapZoom % 4) + 1;
+    MapClampView();
+}
+
+// ── History ────────────────────────────────────────────────────────────────
+static void MapHistApply(const MapHistEntry& e, bool useNew) {
+    uint32_t hFloor = SaveEditor::Hash(MapKeys::FloorKeyHash);
+    for (const auto& c : e.tiles)
+        SaveEditor::SetUIntAt(gMapSav, hFloor, c.idx, useNew ? c.newv : c.oldv);
+    for (const auto& c : e.objs) {
+        int64_t v = useNew ? c.newv : c.oldv;
+        switch (c.field) {
+            case 0: SaveEditor::SetUIntAt (gMapSav, SaveEditor::Hash(MapKeys::ActorKey),    c.slot, (uint32_t)v); break;
+            case 1: SaveEditor::SetIntAt  (gMapSav, SaveEditor::Hash(MapKeys::GridPosX),    c.slot, (int)v); break;
+            case 2: SaveEditor::SetIntAt  (gMapSav, SaveEditor::Hash(MapKeys::GridPosY),    c.slot, (int)v); break;
+            case 3: SaveEditor::SetFloatAt(gMapSav, SaveEditor::Hash(MapKeys::RotY),        c.slot, (float)v); break;
+            case 4: SaveEditor::SetIntAt  (gMapSav, SaveEditor::Hash(MapKeys::LinkedMapId), c.slot, (int)v); break;
+        }
+    }
+}
+static void MapHistPush(MapHistEntry&& e) {
+    if (e.tiles.empty() && e.objs.empty()) return;
+    gMapUndo.push_back(std::move(e));
+    if (gMapUndo.size() > 80) gMapUndo.erase(gMapUndo.begin());
+    gMapRedo.clear();
+}
+// Record one object-field edit, coalescing consecutive edits to the same
+// slot+field into a single undo step (so a held nudge undoes in one press).
+static void MapRecordObj(int slot, int field, int64_t oldv, int64_t newv) {
+    if (oldv == newv) return;
+    if (!gMapUndo.empty()) {
+        MapHistEntry& last = gMapUndo.back();
+        if (last.tiles.empty() && last.objs.size() == 1
+            && last.objs[0].slot == slot && last.objs[0].field == field) {
+            last.objs[0].newv = newv;
+            gMapRedo.clear();
+            return;
+        }
+    }
+    MapHistEntry e; e.label = "edit";
+    e.objs.push_back({ slot, field, oldv, newv });
+    MapHistPush(std::move(e));
+}
+static void MapUndo() {
+    if (gMapUndo.empty()) { MapSetMsg(Lang::T("map.undo.empty"), COL_DIM, 90); return; }
+    MapHistEntry e = std::move(gMapUndo.back());
+    gMapUndo.pop_back();
+    MapHistApply(e, false);
+    gMapRedo.push_back(std::move(e));
+    gMapDirty = true;
+    if (gMapSelSlot >= 0 && MapActorAt(gMapSelSlot) == 0) {
+        gMapSelSlot = -1;
+        if (gMapMode == MapMode::Inspect) gMapMode = MapMode::Idle;
+    }
+    MapSetMsg(Lang::T("map.undo.done"), COL_TEXT, 90);
+}
+static void MapRedo() {
+    if (gMapRedo.empty()) { MapSetMsg(Lang::T("map.redo.empty"), COL_DIM, 90); return; }
+    MapHistEntry e = std::move(gMapRedo.back());
+    gMapRedo.pop_back();
+    MapHistApply(e, true);
+    gMapUndo.push_back(std::move(e));
+    gMapDirty = true;
+    if (gMapSelSlot >= 0 && MapActorAt(gMapSelSlot) == 0) {
+        gMapSelSlot = -1;
+        if (gMapMode == MapMode::Inspect) gMapMode = MapMode::Idle;
+    }
+    MapSetMsg(Lang::T("map.redo.done"), COL_TEXT, 90);
+}
+
+// ── Painting ───────────────────────────────────────────────────────────────
+static void MapPaintBrushAt(int cx, int cy) {
+    if (!gMapSav.loaded || gMapPaintTile == 0) return;
+    uint32_t hFloor = SaveEditor::Hash(MapKeys::FloorKeyHash);
+    int n = SaveEditor::ArraySize(gMapSav, hFloor);
+    if (n < MAP_TILE_COUNT) return;
+    int s = (gMapBrush - 1) / 2;
+    for (int dx = -s; dx <= s; dx++) for (int dy = -s; dy <= s; dy++) {
+        int x = cx + dx, y = cy + dy;
+        if (x < 0 || y < 0 || x >= MAP_WIDTH || y >= MAP_HEIGHT) continue;
+        int idx = x * MAP_HEIGHT + y;
+        uint32_t old = SaveEditor::GetUIntAt(gMapSav, hFloor, idx, 0);
+        if (old == gMapPaintTile) continue;
+        if (gMapStroking && gMapStroke.find(idx) == gMapStroke.end())
+            gMapStroke[idx] = old;
+        SaveEditor::SetUIntAt(gMapSav, hFloor, idx, gMapPaintTile);
+        gMapDirty = true;
+    }
+}
+static void MapStrokeBegin() {
+    gMapStroke.clear(); gMapStroking = true;
+    gMapStrokeLastX = -1; gMapStrokeLastY = -1;
+}
+// Bresenham-stamp the brush along a straight line from the previous tile to
+// (x,y) so a fast stick or skipped touch sample doesn't leave gaps.
+static void MapPaintLineTo(int x, int y) {
+    if (gMapStrokeLastX < 0) { MapPaintBrushAt(x, y); }
+    else {
+        int x0 = gMapStrokeLastX, y0 = gMapStrokeLastY, x1 = x, y1 = y;
+        int dx = std::abs(x1 - x0), dy = std::abs(y1 - y0);
+        int sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+        int err = dx - dy;
+        for (;;) {
+            MapPaintBrushAt(x0, y0);
+            if (x0 == x1 && y0 == y1) break;
+            int e2 = 2 * err;
+            if (e2 > -dy) { err -= dy; x0 += sx; }
+            if (e2 <  dx) { err += dx; y0 += sy; }
+        }
+    }
+    gMapStrokeLastX = x; gMapStrokeLastY = y;
+}
+static void MapStrokeEnd() {
+    if (!gMapStroking) return;
+    gMapStroking = false;
+    uint32_t hFloor = SaveEditor::Hash(MapKeys::FloorKeyHash);
+    MapHistEntry e; e.label = "paint";
+    for (auto& kv : gMapStroke) {
+        uint32_t nv = SaveEditor::GetUIntAt(gMapSav, hFloor, kv.first, 0);
+        if (nv != kv.second) e.tiles.push_back({ kv.first, kv.second, nv });
+    }
+    gMapStroke.clear();
+    if (!e.tiles.empty()) MapHistPush(std::move(e));
+}
+static void MapEyedrop(int x, int y) {
+    if (!gMapSav.loaded || x < 0 || y < 0 || x >= MAP_WIDTH || y >= MAP_HEIGHT) return;
+    uint32_t k = SaveEditor::GetUIntAt(gMapSav, SaveEditor::Hash(MapKeys::FloorKeyHash),
+                                       x * MAP_HEIGHT + y, 0);
+    const MapData::TileInfo* ti = MapData::TileLookup(k);
+    if (ti && !ti->internal) gMapPaintTile = k;
+}
+
+// ── PNG export ─────────────────────────────────────────────────────────────
+static void MapExportPng() {
+    if (!gMapSav.loaded) { MapSetMsg(Lang::T("map.loading"), COL_RED, 120); return; }
+    const int SC = 6;
+    const int W = MAP_WIDTH * SC, H = MAP_HEIGHT * SC;
+    std::vector<uint32_t> px((size_t)W * H, 0xff101010u);
+    uint32_t hFloor = SaveEditor::Hash(MapKeys::FloorKeyHash);
+    int n = SaveEditor::ArraySize(gMapSav, hFloor);
+    if (n >= MAP_TILE_COUNT) {
+        for (int x = 0; x < MAP_WIDTH; x++) for (int y = 0; y < MAP_HEIGHT; y++) {
+            uint32_t k = SaveEditor::GetUIntAt(gMapSav, hFloor, x * MAP_HEIGHT + y, 0);
+            const MapData::TileInfo* ti = MapData::TileLookup(k);
+            // TileInfo.rgba is stored ABGR-packed which matches RGBA32 little-endian.
+            uint32_t c = ti ? ti->rgba : 0xff8800ffu;
+            for (int yy = 0; yy < SC; yy++) for (int xx = 0; xx < SC; xx++)
+                px[(size_t)(y * SC + yy) * W + (x * SC + xx)] = c;
+        }
+    }
+    uint32_t hAct = SaveEditor::Hash(MapKeys::ActorKey);
+    uint32_t hX   = SaveEditor::Hash(MapKeys::GridPosX);
+    uint32_t hY   = SaveEditor::Hash(MapKeys::GridPosY);
+    uint32_t hR   = SaveEditor::Hash(MapKeys::RotY);
+    int cnt = SaveEditor::ArraySize(gMapSav, hAct);
+    for (int i = 0; i < cnt; i++) {
+        uint32_t a = SaveEditor::GetUIntAt(gMapSav, hAct, i, 0);
+        if (!a) continue;
+        int x = SaveEditor::GetIntAt(gMapSav, hX, i, -1);
+        int y = SaveEditor::GetIntAt(gMapSav, hY, i, -1);
+        if (x < 0 || y < 0 || x >= MAP_WIDTH || y >= MAP_HEIGHT) continue;
+        const MapData::ActorInfo* info = MapData::ActorLookup(a);
+        MapFootprint fp = MapActorRect(info, SaveEditor::GetFloatAt(gMapSav, hR, i, 0.0f));
+        const SDL_Color& gc = MAP_GROUP_SDL_COL[info ? info->group : MapData::ACTOR_UNKNOWN];
+        // Pack as 0xAABBGGRR for SDL_PIXELFORMAT_RGBA32.
+        uint32_t c = ((uint32_t)gc.a << 24) | ((uint32_t)gc.b << 16)
+                   | ((uint32_t)gc.g << 8)  |  (uint32_t)gc.r;
+        int rx = (x + fp.x0) * SC, ry = (y + fp.y0) * SC;
+        int rw = fp.w * SC, rh = fp.h * SC;
+        for (int yy = 0; yy < rh; yy++) for (int xx = 0; xx < rw; xx++) {
+            int gx = rx + xx, gy = ry + yy;
+            if (gx < 0 || gy < 0 || gx >= W || gy >= H) continue;
+            px[(size_t)gy * W + gx] = c;
+        }
+    }
+    mkdir(gExportPath.c_str(), 0777);
+    std::string outPath = gExportPath + "/island-map.png";
+    SDL_Surface* surf = SDL_CreateRGBSurfaceWithFormatFrom(
+        px.data(), W, H, 32, W * 4, SDL_PIXELFORMAT_RGBA32);
+    if (!surf) { MapSetMsg("PNG export failed", COL_RED, 180); return; }
+    IMG_SavePNG(surf, outPath.c_str());
+    SDL_FreeSurface(surf);
+    MapSetMsg(Lang::T("map.png.saved") + ": " + outPath, COL_GREEN, 300);
+    LogOK("Map PNG exported: " + outPath);
+}
+
 // Touch callbacks (registered via HitAdd). Translate the global last-touch
 // coords into tile coords inside the map canvas region.
 static void TMapTapCanvas(int /*unused*/) {
-    int px = gLastTouchFireX - MAP_CANVAS_X;
-    int py = gLastTouchFireY - MAP_CANVAS_Y;
-    if (px < 0 || py < 0 || px >= MAP_CANVAS_W || py >= MAP_CANVAS_H) return;
-    int tx = px * MAP_WIDTH  / MAP_CANVAS_W;
-    int ty = py * MAP_HEIGHT / MAP_CANVAS_H;
+    int rx = gLastTouchFireX - MAP_CANVAS_X;
+    int ry = gLastTouchFireY - MAP_CANVAS_Y;
+    if (rx < 0 || ry < 0 || rx >= MAP_CANVAS_W || ry >= MAP_CANVAS_H) return;
+    int cols, rows, ppx; MapViewMetrics(cols, rows, ppx);
+    int tx = gMapViewX + rx / ppx;
+    int ty = gMapViewY + ry / ppx;
     if (tx < 0) tx = 0; if (tx >= MAP_WIDTH)  tx = MAP_WIDTH  - 1;
     if (ty < 0) ty = 0; if (ty >= MAP_HEIGHT) ty = MAP_HEIGHT - 1;
     gMapCursorX = tx;
     gMapCursorY = ty;
+    // Paint tool: tap drops a single brush stamp committed as its own undo entry.
+    if (gMapTool == MapTool::Paint && gMapMode == MapMode::Idle) {
+        MapStrokeBegin(); MapPaintLineTo(tx, ty); MapStrokeEnd();
+        return;
+    }
     if (gMapMode == MapMode::Place) {
         // Simulate A so the place-confirm runs in the input loop next frame.
         gSimKDown |= HidNpadButton_A;
@@ -6164,6 +6459,9 @@ static void TMapTapCanvas(int /*unused*/) {
         gMapSelSlot = slot;
         gMapMode = MapMode::Inspect;
         gMapInsField = 0;
+        // Tapping an object from Stats jumps back to Select so the inspector
+        // form is what the user sees (mirrors the webui behaviour).
+        if (gMapTool == MapTool::Stats) gMapTool = MapTool::Select;
     } else {
         gMapSelSlot = -1;
         if (gMapMode == MapMode::Inspect) gMapMode = MapMode::Idle;
@@ -6183,26 +6481,59 @@ static void TMapInsNudge(int param) {
     uint32_t hR = SaveEditor::Hash(MapKeys::RotY);
     uint32_t hL = SaveEditor::Hash(MapKeys::LinkedMapId);
     if (field == 0) {  // x
-        int v = SaveEditor::GetIntAt(gMapSav, hX, gMapSelSlot, 0) + sign;
+        int o = SaveEditor::GetIntAt(gMapSav, hX, gMapSelSlot, 0);
+        int v = o + sign;
         if (v < 0) v = 0; if (v >= MAP_WIDTH)  v = MAP_WIDTH  - 1;
-        SaveEditor::SetIntAt(gMapSav, hX, gMapSelSlot, v);
-        gMapCursorX = v; gMapDirty = true;
+        if (v != o) {
+            SaveEditor::SetIntAt(gMapSav, hX, gMapSelSlot, v);
+            gMapCursorX = v; gMapDirty = true;
+            MapRecordObj(gMapSelSlot, 1, (int64_t)o, (int64_t)v);
+        }
     } else if (field == 1) {  // y
-        int v = SaveEditor::GetIntAt(gMapSav, hY, gMapSelSlot, 0) + sign;
+        int o = SaveEditor::GetIntAt(gMapSav, hY, gMapSelSlot, 0);
+        int v = o + sign;
         if (v < 0) v = 0; if (v >= MAP_HEIGHT) v = MAP_HEIGHT - 1;
-        SaveEditor::SetIntAt(gMapSav, hY, gMapSelSlot, v);
-        gMapCursorY = v; gMapDirty = true;
+        if (v != o) {
+            SaveEditor::SetIntAt(gMapSav, hY, gMapSelSlot, v);
+            gMapCursorY = v; gMapDirty = true;
+            MapRecordObj(gMapSelSlot, 2, (int64_t)o, (int64_t)v);
+        }
     } else if (field == 2) {  // rotation
         float r = SaveEditor::GetFloatAt(gMapSav, hR, gMapSelSlot, 0.0f);
         int cur = (int)std::round(r);
-        cur = ((cur + sign * 90) % 360 + 360) % 360;
-        SaveEditor::SetFloatAt(gMapSav, hR, gMapSelSlot, (float)cur);
-        gMapDirty = true;
+        int newDeg = ((cur + sign * 90) % 360 + 360) % 360;
+        if (newDeg != cur) {
+            SaveEditor::SetFloatAt(gMapSav, hR, gMapSelSlot, (float)newDeg);
+            gMapDirty = true;
+            MapRecordObj(gMapSelSlot, 3, (int64_t)cur, (int64_t)newDeg);
+        }
     } else if (field == 3) {  // link
-        int v = SaveEditor::GetIntAt(gMapSav, hL, gMapSelSlot, -1) + sign;
+        int o = SaveEditor::GetIntAt(gMapSav, hL, gMapSelSlot, -1);
+        int v = o + sign;
         SaveEditor::SetIntAt(gMapSav, hL, gMapSelSlot, v);
         gMapDirty = true;
+        MapRecordObj(gMapSelSlot, 4, (int64_t)o, (int64_t)v);
     }
+}
+
+// ── Toolbar touch callbacks ─────────────────────────────────────────────────
+static void TMapSetTool(int tool)        { MapSetTool((MapTool)tool); }
+static void TMapZoom(int /*unused*/)     { MapZoomCycle(); }
+static void TMapUndoBtn(int /*unused*/)  { MapUndo(); }
+static void TMapRedoBtn(int /*unused*/)  { MapRedo(); }
+static void TMapPngBtn(int /*unused*/)   { MapExportPng(); }
+static void TMapBrushBtn(int n)          { gMapBrush = n; }
+static void TMapOpenTilePicker(int /*u*/){ MapBuildPaintTiles(); gMapMode = MapMode::TilePicker;
+                                           gMapTileScroll = 0;
+                                           // Sync selection to current paint tile so the highlight is on it.
+                                           for (size_t i = 0; i < gMapPaintTiles.size(); i++)
+                                               if (gMapPaintTiles[i] == gMapPaintTile) { gMapTileSel = (int)i; break; } }
+static void TMapTilePick(int idx) {
+    if (idx >= 0 && idx < (int)gMapPaintTiles.size()) {
+        gMapTileSel   = idx;
+        gMapPaintTile = gMapPaintTiles[idx];
+    }
+    gMapMode = MapMode::Idle;
 }
 static void TMapPickerSelect(int idx) { gMapPickerSel = idx; gSimKDown |= HidNpadButton_A; }
 
@@ -6252,19 +6583,20 @@ static void DrawMap() {
     FillRect(MAP_CANVAS_X - 2, MAP_CANVAS_Y - 2, MAP_CANVAS_W + 4, MAP_CANVAS_H + 4, COL_BORDER);
     FillRect(MAP_CANVAS_X, MAP_CANVAS_Y, MAP_CANVAS_W, MAP_CANVAS_H, COL_PANEL);
 
-    // Floor pass: read FloorKeyHash UIntArray
+    // Floor pass — only the tiles currently inside the (panned/zoomed) viewport.
+    MapBuildPaintTiles();
+    MapClampView();
     {
+        int cols, rows, ppx; MapViewMetrics(cols, rows, ppx);
         uint32_t hFloor = SaveEditor::Hash(MapKeys::FloorKeyHash);
         int n = SaveEditor::ArraySize(gMapSav, hFloor);
         if (n >= MAP_TILE_COUNT) {
-            const int tw = MAP_CANVAS_W / MAP_WIDTH;   // = 6
-            const int th = MAP_CANVAS_H / MAP_HEIGHT;  // = 6
-            for (int x = 0; x < MAP_WIDTH; x++) {
-                for (int y = 0; y < MAP_HEIGHT; y++) {
-                    uint32_t k = SaveEditor::GetUIntAt(gMapSav, hFloor, x * MAP_HEIGHT + y, 0);
-                    SDL_Color c = MapHexColor(MapData::TileLookup(k));
-                    FillRect(MAP_CANVAS_X + x * tw, MAP_CANVAS_Y + y * th, tw, th, c);
-                }
+            for (int dx = 0; dx < cols; dx++) for (int dy = 0; dy < rows; dy++) {
+                int x = gMapViewX + dx, y = gMapViewY + dy;
+                if (x >= MAP_WIDTH || y >= MAP_HEIGHT) continue;
+                uint32_t k = SaveEditor::GetUIntAt(gMapSav, hFloor, x * MAP_HEIGHT + y, 0);
+                SDL_Color c = MapHexColor(MapData::TileLookup(k));
+                FillRect(MAP_CANVAS_X + dx * ppx, MAP_CANVAS_Y + dy * ppx, ppx, ppx, c);
             }
         }
     }
@@ -6274,13 +6606,12 @@ static void DrawMap() {
     // the goal point, not the top-left of the building. Without this the
     // rendered rect drifts off the actual terrain plot.
     {
+        int cols, rows, ppx; MapViewMetrics(cols, rows, ppx);
         uint32_t hAct = SaveEditor::Hash(MapKeys::ActorKey);
         uint32_t hX   = SaveEditor::Hash(MapKeys::GridPosX);
         uint32_t hY   = SaveEditor::Hash(MapKeys::GridPosY);
         uint32_t hR   = SaveEditor::Hash(MapKeys::RotY);
         int n = SaveEditor::ArraySize(gMapSav, hAct);
-        const int tw = MAP_CANVAS_W / MAP_WIDTH;
-        const int th = MAP_CANVAS_H / MAP_HEIGHT;
         for (int i = 0; i < n; i++) {
             uint32_t a = SaveEditor::GetUIntAt(gMapSav, hAct, i, 0);
             if (!a) continue;
@@ -6289,12 +6620,16 @@ static void DrawMap() {
             if (x < 0 || y < 0 || x >= MAP_WIDTH || y >= MAP_HEIGHT) continue;
             const MapData::ActorInfo* info = MapData::ActorLookup(a);
             MapFootprint fp = MapActorRect(info, SaveEditor::GetFloatAt(gMapSav, hR, i, 0.0f));
+            int bx = x + fp.x0, by = y + fp.y0;
+            // Cull anything entirely outside the current view window.
+            if (bx + fp.w <= gMapViewX || by + fp.h <= gMapViewY
+                || bx >= gMapViewX + cols || by >= gMapViewY + rows) continue;
             int g = info ? info->group : MapData::ACTOR_UNKNOWN;
             const SDL_Color& col = MAP_GROUP_SDL_COL[g];
-            int rx = MAP_CANVAS_X + (x + fp.x0) * tw;
-            int ry = MAP_CANVAS_Y + (y + fp.y0) * th;
-            int rw = std::max(2, fp.w * tw);
-            int rh = std::max(2, fp.h * th);
+            int rx = MAP_CANVAS_X + (bx - gMapViewX) * ppx;
+            int ry = MAP_CANVAS_Y + (by - gMapViewY) * ppx;
+            int rw = std::max(2, fp.w * ppx);
+            int rh = std::max(2, fp.h * ppx);
             FillRect(rx, ry, rw, rh, col);
             if (i == gMapSelSlot) {
                 DrawRect(rx - 1, ry - 1, rw + 2, rh + 2, COL_GOLD);
@@ -6303,14 +6638,24 @@ static void DrawMap() {
         }
     }
 
-    // Cursor reticle
+    // Cursor reticle — expands to cover the brush footprint in the Paint tool.
     {
-        const int tw = MAP_CANVAS_W / MAP_WIDTH;
-        const int th = MAP_CANVAS_H / MAP_HEIGHT;
-        int cx = MAP_CANVAS_X + gMapCursorX * tw;
-        int cy = MAP_CANVAS_Y + gMapCursorY * th;
-        DrawRect(cx - 2, cy - 2, tw + 4, th + 4, COL_GOLD);
-        DrawRect(cx - 1, cy - 1, tw + 2, th + 2, {255, 255, 255, 255});
+        int cols, rows, ppx; MapViewMetrics(cols, rows, ppx);
+        (void)cols; (void)rows;
+        int span = (gMapTool == MapTool::Paint) ? gMapBrush : 1;
+        int s = (span - 1) / 2;
+        int rx = MAP_CANVAS_X + (gMapCursorX - s - gMapViewX) * ppx;
+        int ry = MAP_CANVAS_Y + (gMapCursorY - s - gMapViewY) * ppx;
+        int rw = span * ppx, rh = span * ppx;
+        if (gMapTool == MapTool::Paint) {
+            const MapData::TileInfo* ti = MapData::TileLookup(gMapPaintTile);
+            if (ti) {
+                SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_BLEND);
+                FillRect(rx, ry, rw, rh, SDL_Color{ ti->r, ti->g, ti->b, 110 });
+            }
+        }
+        DrawRect(rx - 2, ry - 2, rw + 4, rh + 4, COL_GOLD);
+        DrawRect(rx - 1, ry - 1, rw + 2, rh + 2, SDL_Color{ 255, 255, 255, 255 });
     }
 
     // Canvas-wide touch region. The callback reads the raw touch coords from
@@ -6322,8 +6667,200 @@ static void DrawMap() {
     FillRect(MAP_INS_X, MAP_INS_Y, MAP_INS_W, MAP_INS_H, COL_PANEL);
     DrawRect(MAP_INS_X, MAP_INS_Y, MAP_INS_W, MAP_INS_H, COL_BORDER);
 
+    // ── Inspector toolbar: tool tabs + zoom / undo / redo / PNG row ──────
     int iy = MAP_INS_Y + 8;
-    if (gMapMode == MapMode::Picker) {
+    {
+        const int btnH = 28;
+        int pad = 8;
+        int tbW = MAP_INS_W - 2 * pad;
+        int tbX = MAP_INS_X + pad;
+        // Tool tabs.
+        const char* toolKeys[3] = { "map.tool.select", "map.tool.paint", "map.tool.stats" };
+        int tw = (tbW - 4) / 3;
+        for (int i = 0; i < 3; i++) {
+            int bx = tbX + i * (tw + 2);
+            bool sel = ((int)gMapTool == i);
+            FillRect(bx, iy, tw, btnH, sel ? COL_ACCENT : COL_PANEL2);
+            DrawRect(bx, iy, tw, btnH, sel ? COL_ACCENT : COL_BORDER);
+            DrawTextC(Lang::T(toolKeys[i]), bx + tw/2, iy + btnH/2,
+                      sel ? COL_BG : COL_TEXT, Font::Sm);
+            HitAdd(bx, iy, tw, btnH, TMapSetTool, i);
+        }
+        iy += btnH + 6;
+        // Zoom / undo / redo / PNG row. Zoom button cycles 1×→2×→3×→4×→1×.
+        int zW = 64, uW = 56, rW = 56;
+        int zX = tbX;
+        int uX = zX + zW + 4;
+        int rX = uX + uW + 4;
+        int pX = rX + rW + 4;
+        int pW = tbX + tbW - pX;
+        FillRect(zX, iy, zW, btnH, COL_PANEL2); DrawRect(zX, iy, zW, btnH, COL_BORDER);
+        DrawTextC(std::to_string(gMapZoom) + "x", zX + zW/2, iy + btnH/2, COL_TEXT, Font::Sm);
+        HitAdd(zX, iy, zW, btnH, TMapZoom, 0);
+        bool ue = !gMapUndo.empty();
+        FillRect(uX, iy, uW, btnH, COL_PANEL2);
+        DrawRect (uX, iy, uW, btnH, COL_BORDER);
+        DrawTextC(Lang::T("map.undo.btn"), uX + uW/2, iy + btnH/2,
+                  ue ? COL_TEXT : COL_DIM, Font::Sm);
+        if (ue) HitAdd(uX, iy, uW, btnH, TMapUndoBtn, 0);
+        bool re = !gMapRedo.empty();
+        FillRect(rX, iy, rW, btnH, COL_PANEL2);
+        DrawRect (rX, iy, rW, btnH, COL_BORDER);
+        DrawTextC(Lang::T("map.redo.btn"), rX + rW/2, iy + btnH/2,
+                  re ? COL_TEXT : COL_DIM, Font::Sm);
+        if (re) HitAdd(rX, iy, rW, btnH, TMapRedoBtn, 0);
+        FillRect(pX, iy, pW, btnH, COL_PANEL2);
+        DrawRect (pX, iy, pW, btnH, COL_BORDER);
+        DrawTextC(Lang::T("map.png.btn"), pX + pW/2, iy + btnH/2, COL_TEXT, Font::Sm);
+        HitAdd(pX, iy, pW, btnH, TMapPngBtn, 0);
+        iy += btnH + 10;
+    }
+
+    if (gMapMode == MapMode::TilePicker) {
+        // Tile picker — pick a paintable terrain tile for the Paint tool.
+        MapBuildPaintTiles();
+        DrawText(Lang::T("map.tile.picker.title"), MAP_INS_X + 12, iy, COL_GOLD, Font::Md);
+        iy += 28;
+        const int rowH = 26;
+        int total = (int)gMapPaintTiles.size();
+        int visible = (MAP_INS_Y + MAP_INS_H - 60 - iy) / rowH;
+        if (visible < 1) visible = 1;
+        if (gMapTileSel >= total)       gMapTileSel = std::max(0, total - 1);
+        if (gMapTileSel < gMapTileScroll) gMapTileScroll = gMapTileSel;
+        if (gMapTileSel >= gMapTileScroll + visible)
+            gMapTileScroll = gMapTileSel - visible + 1;
+        int selY = iy; bool sawSel = false;
+        for (int i = 0; i < visible; i++) {
+            int idx = gMapTileScroll + i;
+            if (idx >= total) break;
+            const MapData::TileInfo* ti = MapData::TileLookup(gMapPaintTiles[idx]);
+            int ry = iy + i * rowH;
+            bool sel = (idx == gMapTileSel);
+            if (sel) { selY = ry; sawSel = true; }
+            FillRect(MAP_INS_X + 6, ry, MAP_INS_W - 12, rowH - 2, sel ? COL_SEL : COL_PANEL);
+            if (ti)
+                FillRect(MAP_INS_X + 12, ry + 4, 22, rowH - 10,
+                         SDL_Color{ ti->r, ti->g, ti->b, 255 });
+            std::string lbl = ti ? std::string(ti->code) : std::string("?");
+            for (auto& ch : lbl) if (ch == '_') ch = ' ';
+            DrawText(lbl, MAP_INS_X + 42, ry + 5, sel ? COL_GOLD : COL_TEXT, Font::Sm);
+            HitAdd(MAP_INS_X + 6, ry, MAP_INS_W - 12, rowH - 2, TMapTilePick, idx);
+        }
+        if (sawSel) {
+            RequestHighlight((int)Screen::OnSwitch, 41,
+                             MAP_INS_X + 6, selY, MAP_INS_W - 12, rowH - 2, gDtSec);
+            DrawAnimatedHighlight();
+        }
+        if (total > visible) {
+            int sbH = (MAP_INS_H - 90) * visible / std::max(1, total);
+            int sbY = iy + (MAP_INS_H - 90) * gMapTileScroll / std::max(1, total);
+            FillRect(MAP_INS_X + MAP_INS_W - 6, sbY, 3, sbH, COL_BORDER);
+        }
+    } else if (gMapTool == MapTool::Paint && gMapMode == MapMode::Idle) {
+        // Paint palette — current tile + brush + "tap to change tile".
+        const MapData::TileInfo* ti = MapData::TileLookup(gMapPaintTile);
+        DrawText(Lang::T("map.paint.title"), MAP_INS_X + 12, iy, COL_GOLD, Font::Md);
+        iy += 26;
+        if (ti) {
+            FillRect(MAP_INS_X + 12, iy + 3, 32, 22, SDL_Color{ ti->r, ti->g, ti->b, 255 });
+            std::string lbl = ti->code;
+            for (auto& ch : lbl) if (ch == '_') ch = ' ';
+            DrawText(lbl, MAP_INS_X + 52, iy + 6, COL_TEXT, Font::Sm);
+        } else {
+            DrawText(Lang::T("map.paint.none"), MAP_INS_X + 12, iy + 6, COL_DIM, Font::Sm);
+        }
+        iy += 32;
+        FillRect(MAP_INS_X + 12, iy, MAP_INS_W - 24, 28, COL_PANEL2);
+        DrawRect(MAP_INS_X + 12, iy, MAP_INS_W - 24, 28, COL_BORDER);
+        DrawTextC(Lang::T("map.paint.pick"), MAP_INS_X + MAP_INS_W/2, iy + 14, COL_TEXT, Font::Sm);
+        HitAdd(MAP_INS_X + 12, iy, MAP_INS_W - 24, 28, TMapOpenTilePicker, 0);
+        iy += 36;
+        DrawText(Lang::T("map.paint.brush"), MAP_INS_X + 12, iy, COL_DIM, Font::Sm);
+        iy += 22;
+        int sizes[3] = { 1, 3, 5 };
+        int bbX = MAP_INS_X + 12, bbW = (MAP_INS_W - 24 - 8) / 3;
+        for (int i = 0; i < 3; i++) {
+            int x = bbX + i * (bbW + 4);
+            bool sel = (gMapBrush == sizes[i]);
+            FillRect(x, iy, bbW, 28, sel ? COL_ACCENT : COL_PANEL2);
+            DrawRect(x, iy, bbW, 28, sel ? COL_ACCENT : COL_BORDER);
+            DrawTextC(std::to_string(sizes[i]) + "x" + std::to_string(sizes[i]),
+                      x + bbW/2, iy + 14, sel ? COL_BG : COL_TEXT, Font::Sm);
+            HitAdd(x, iy, bbW, 28, TMapBrushBtn, sizes[i]);
+        }
+        iy += 36;
+        DrawText(Lang::T("map.paint.help1"), MAP_INS_X + 12, iy, COL_DIM, Font::Sm); iy += 18;
+        DrawText(Lang::T("map.paint.help2"), MAP_INS_X + 12, iy, COL_DIM, Font::Sm); iy += 18;
+    } else if (gMapTool == MapTool::Stats && gMapMode == MapMode::Idle) {
+        // Aggregate island stats — object breakdown + tile distribution.
+        DrawText(Lang::T("map.stats.title"), MAP_INS_X + 12, iy, COL_GOLD, Font::Md);
+        iy += 24;
+        uint32_t hAct   = SaveEditor::Hash(MapKeys::ActorKey);
+        uint32_t hFloor = SaveEditor::Hash(MapKeys::FloorKeyHash);
+        int actCount = SaveEditor::ArraySize(gMapSav, hAct);
+        int used = 0; int groups[7] = {0,0,0,0,0,0,0};
+        for (int i = 0; i < actCount; i++) {
+            uint32_t a = SaveEditor::GetUIntAt(gMapSav, hAct, i, 0);
+            if (!a) continue;
+            used++;
+            const MapData::ActorInfo* info = MapData::ActorLookup(a);
+            groups[info ? info->group : MapData::ACTOR_UNKNOWN]++;
+        }
+        const char* groupNames[7] = { "house", "facility", "deco", "room", "step", "ugc", "unknown" };
+        DrawText(Lang::T("map.stats.placed") + ": "
+                 + std::to_string(used) + " / " + std::to_string(actCount),
+                 MAP_INS_X + 12, iy, COL_TEXT, Font::Sm);
+        iy += 20;
+        for (int g = 0; g < 7; g++) {
+            if (!groups[g]) continue;
+            FillRect(MAP_INS_X + 14, iy + 4, 10, 10, MAP_GROUP_SDL_COL[g]);
+            DrawText(groupNames[g], MAP_INS_X + 30, iy, COL_TEXT, Font::Sm);
+            DrawText(std::to_string(groups[g]),
+                     MAP_INS_X + MAP_INS_W - 50, iy, COL_GOLD, Font::Sm);
+            iy += 18;
+        }
+        iy += 6;
+        DrawText(Lang::T("map.stats.terrain"), MAP_INS_X + 12, iy, COL_GOLD, Font::Sm);
+        iy += 20;
+        int fn = SaveEditor::ArraySize(gMapSav, hFloor);
+        if (fn >= MAP_TILE_COUNT) {
+            std::map<uint32_t, int> bucket;
+            for (int i = 0; i < MAP_TILE_COUNT; i++)
+                bucket[SaveEditor::GetUIntAt(gMapSav, hFloor, i, 0)]++;
+            std::vector<std::pair<uint32_t,int>> sorted(bucket.begin(), bucket.end());
+            std::sort(sorted.begin(), sorted.end(),
+                      [](const std::pair<uint32_t,int>& a,
+                         const std::pair<uint32_t,int>& b){ return a.second > b.second; });
+            int shown = 0;
+            int maxN = sorted.empty() ? 1 : sorted[0].second;
+            for (auto& kv : sorted) {
+                if (shown >= 9) break;
+                if (iy + 26 > MAP_INS_Y + MAP_INS_H - 40) break;
+                const MapData::TileInfo* ti = MapData::TileLookup(kv.first);
+                SDL_Color c = ti ? SDL_Color{ ti->r, ti->g, ti->b, 255 }
+                                 : SDL_Color{ 0x77, 0x77, 0x77, 255 };
+                std::string name = ti ? std::string(ti->code) : std::string("unknown");
+                for (auto& ch : name) if (ch == '_') ch = ' ';
+                FillRect(MAP_INS_X + 14, iy + 3, 10, 10, c);
+                DrawText(name, MAP_INS_X + 30, iy, COL_TEXT, Font::Sm);
+                int pc = (int)((100.0 * kv.second) / MAP_TILE_COUNT);
+                DrawText(std::to_string(kv.second) + " (" + std::to_string(pc) + "%)",
+                         MAP_INS_X + MAP_INS_W - 92, iy, COL_DIM, Font::Sm);
+                int barX = MAP_INS_X + 30;
+                int barW = MAP_INS_W - 44;
+                int bw = (kv.second * barW) / std::max(1, maxN);
+                // Sit the bar a few pixels below the text baseline so it
+                // doesn't kiss the descenders of the label row.
+                FillRect(barX, iy + 19, barW, 3, COL_BORDER);
+                FillRect(barX, iy + 19, bw,   3, c);
+                iy += 26;
+                shown++;
+            }
+        } else {
+            DrawText(Lang::T("map.stats.no.floor"), MAP_INS_X + 12, iy, COL_DIM, Font::Sm);
+            iy += 18;
+        }
+    } else if (gMapMode == MapMode::Picker) {
         MapRebuildPicker();
         DrawText(Lang::T("map.picker.title"), MAP_INS_X + 12, iy, COL_GOLD, Font::Md); iy += 28;
         DrawText(Lang::T("map.picker.filter") + ": " + (gMapPickerFilter.empty() ? Lang::T("map.picker.any") : gMapPickerFilter),
@@ -6491,10 +7028,13 @@ static void DrawMap() {
 
     // Footer
     const char* footerKey =
-        gMapMode == MapMode::Inspect ? "map.footer.inspect" :
-        gMapMode == MapMode::Picker  ? "map.footer.picker"  :
-        gMapMode == MapMode::Place   ? "map.footer.place"   :
-                                       "map.footer.idle";
+        gMapMode == MapMode::TilePicker ? "map.footer.tilepicker" :
+        gMapMode == MapMode::Inspect    ? "map.footer.inspect"    :
+        gMapMode == MapMode::Picker     ? "map.footer.picker"     :
+        gMapMode == MapMode::Place      ? "map.footer.place"      :
+        gMapTool == MapTool::Paint      ? "map.footer.paint"      :
+        gMapTool == MapTool::Stats      ? "map.footer.stats"      :
+                                          "map.footer.idle";
     DrawFooter(Lang::T(footerKey));
     Present();
 }
@@ -6774,19 +7314,12 @@ static void DrawMiiStats() {
     {
         int stW=76, stH=22, stGap=4, stY=SE_TOP_Y+6;
         const char* stKeys[] = {"subtab.stats","subtab.words","subtab.relations","subtab.items","subtab.habits","subtab.housing","subtab.social"};
-        // Right-align the strip to the panel's right edge with a small
-        // padding. Previously we tried two approaches that both felt off:
-        //   - editX+8 (anchored to the small panel) → strip looked stuck
-        //     to the right when on housing/social/etc. (wider panel)
-        //   - panelX + (panelW-totalStripW)/2 (centered on wider panel)
-        //     → strip drifted LEFT on housing because midHidden expands
-        //     panelX further left.
-        // Right-aligning splits the difference: tabs sit against the
-        // panel's right edge consistently regardless of midHidden, and
-        // the selected-tab highlight stays within the visible content
-        // area. Mirrors what most desktop tab bars do.
+        // Left-align the strip to the panel's left edge with a small padding
+        // — matches the new Player subtab strip and reads naturally for users
+        // who scan left-to-right.
         int totalStripW = MII_SUBTAB_COUNT * stW + (MII_SUBTAB_COUNT - 1) * stGap;
-        int stX = panelX + panelW - totalStripW - 12;
+        (void)totalStripW;  // not needed for left-align but kept for any future re-anchor
+        int stX = panelX + 12;
         int sulX = stX, sulY = stY + stH + 2;
         bool sulHave = false;
         for (int ti=0; ti<MII_SUBTAB_COUNT; ti++) {
@@ -7935,7 +8468,7 @@ static void DrawMiiStats() {
                 }
 
                 // Clamp nav selection to current item count.
-                if (gHousingNavSel >= (int)gHousingNav.size()) gHousingNavSel = (int)gHousingNav.size() - 1;
+                if (gHousingNavSel >= (int)gHousingNav.size()) gHousingNavSel = std::max(0, (int)gHousingNav.size() - 1);
                 if (gHousingNavSel < 0) gHousingNavSel = 0;
                 // Focus follow now happens BEFORE the layout pass (see the
                 // "Focus-follow scroll (pre-render)" block above). No need to
@@ -8708,7 +9241,7 @@ static void TConfirmBgRemove(int) {
     gEntries = UgcScanner::Scan(SAVE_UGC_PATH);
     MiiManager::LoadUgcNames();
     RebuildUgcFilter();
-    if (gEntrySel >= (int)gEntries.size()) gEntrySel = (int)gEntries.size() - 1;
+    if (gEntrySel >= (int)gEntries.size()) gEntrySel = std::max(0, (int)gEntries.size() - 1);
     if (!gEntries.empty()) LoadPreview(gEntries[gEntrySel]);
     gUgcDirty = true;
     gOnSwitchMsg = "Background removed — save or discard on exit";
@@ -8772,7 +9305,7 @@ static void TUndoPlayer(int) {
 }
 static void TUndoMii(int) {
     if (!gMiiUndoValid[gMiiStatsFieldSel]) return;
-    if (gMiis.empty() || gMiiStatsMiiSel >= (int)gMiis.size()) return;
+    if (gMiis.empty() || gMiiStatsMiiSel < 0 || gMiiStatsMiiSel >= (int)gMiis.size()) return;
     const auto& fd = MII_STATS_FIELDS[gMiiStatsFieldSel];
     uint32_t h = SaveEditor::Hash(fd.fieldName);
     int miiIdx = gMiis[gMiiStatsMiiSel].slot - 1;
@@ -8783,7 +9316,7 @@ static void TUndoMii(int) {
 }
 static void TUndoWords(int) {
     if (!gWordUndo.valid) return;
-    if (gMiis.empty() || gMiiStatsMiiSel >= (int)gMiis.size()) return;
+    if (gMiis.empty() || gMiiStatsMiiSel < 0 || gMiiStatsMiiSel >= (int)gMiis.size()) return;
     static const uint32_t H_WKIND_U = SaveEditor::Hash("Mii.MiiMisc.WordInfo.WordArray.WordKind");
     static const uint32_t H_WTXT_U  = SaveEditor::Hash("Mii.MiiMisc.WordInfo.WordArray.WordText");
     static const uint32_t H_WHOW_U  = SaveEditor::Hash("Mii.MiiMisc.WordInfo.WordArray.WordHowToCall");
@@ -9871,7 +10404,7 @@ int main(int,char**) {
                                     gBundleMsgFrames = 180;
                                 } else {
                                     if (gRestoreSel >= (int)gRestoreList.size())
-                                        gRestoreSel = (int)gRestoreList.size() - 1;
+                                        gRestoreSel = std::max(0, (int)gRestoreList.size() - 1);
                                     if (gRestoreSel < gRestoreScroll) gRestoreScroll = gRestoreSel;
                                     int maxScroll = std::max(0, (int)gRestoreList.size() - RVIS);
                                     if (gRestoreScroll > maxScroll) gRestoreScroll = maxScroll;
@@ -10212,7 +10745,7 @@ int main(int,char**) {
             if (HttpServer::HasPendingMiiRefresh()) {
                 HttpServer::ClearPendingMiiRefresh();
                 gMiis = MiiManager::ListMiis();
-                if (gMiiStatsMiiSel >= (int)gMiis.size()) gMiiStatsMiiSel = (int)gMiis.size()-1;
+                if (gMiiStatsMiiSel >= (int)gMiis.size()) gMiiStatsMiiSel = std::max(0, (int)gMiis.size()-1);
                 if (!gMiiSavDirty) {
                     gMiiSav = SaveEditor::SavFile{};
                     std::string lerr;
@@ -10506,6 +11039,23 @@ int main(int,char**) {
                 if (kDown&HidNpadButton_R){
                     gOnSwitchMode=OnSwitchMode::Map; gOnSwitchMsg=""; break;
                 }
+                // B = back to user pick, Plus = quit app (both prompt when dirty)
+                if (kDown&(HidNpadButton_B|HidNpadButton_Plus)) {
+                    bool toUserPick = (kDown&HidNpadButton_B) != 0;
+                    if (gPlayerSavDirty || gUgcDirty || gWebUiDirty) {
+                        gShowBackPrompt=true; gBackPromptIsMii=false; gBackPromptToUserPick=toUserPick;
+                    } else if (toUserPick) {
+                        FreePreview(); HttpServer::Stop(); gLog.clear();
+                        gEntries.clear(); gMiis.clear();
+                        gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
+                        gPlayerSavDirty=false; gMiiSavDirty=false;
+                        SaveMount::Unmount();
+                        gScreen=Screen::UserPick;
+                    } else {
+                        gQuitApp=true;
+                    }
+                    gOnSwitchMsg=""; break;
+                }
                 // Field navigation
                 if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp|HidNpadButton_ZL))
                     gPlayerFieldSel = (gPlayerFieldSel>0) ? gPlayerFieldSel-1 : PLAYER_FIELD_COUNT-1;
@@ -10689,22 +11239,8 @@ int main(int,char**) {
                     }
                     if (!fd.isStr && (kDown&HidNpadButton_X)) TUndoPlayer(0);
                 }
-                // B = back to user pick, Plus = quit app (both prompt when dirty)
-                if (kDown&(HidNpadButton_B|HidNpadButton_Plus)) {
-                    bool toUserPick = (kDown&HidNpadButton_B) != 0;
-                    if (gPlayerSavDirty || gUgcDirty || gWebUiDirty) {
-                        gShowBackPrompt=true; gBackPromptIsMii=false; gBackPromptToUserPick=toUserPick;
-                    } else if (toUserPick) {
-                        FreePreview(); HttpServer::Stop(); gLog.clear();
-                        gEntries.clear(); gMiis.clear();
-                        gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
-                        gPlayerSavDirty=false; gMiiSavDirty=false;
-                        SaveMount::Unmount();
-                        gScreen=Screen::UserPick;
-                    } else {
-                        gQuitApp=true;
-                    }
-                }
+                // (B / + back handler moved above — it now runs for both
+                // sub-tabs, before the Edit-only break.)
 
             } else if (gOnSwitchMode == OnSwitchMode::MiiStats) {
                 // Lazy-load
@@ -10762,7 +11298,7 @@ int main(int,char**) {
                             gMiiStatsScroll = std::max(0, gMiiStatsMiiSel - mseVis2 + 1);
                     };
                     auto prevMii = [&](){
-                        gMiiStatsMiiSel = (gMiiStatsMiiSel>0) ? gMiiStatsMiiSel-1 : (int)gMiis.size()-1;
+                        gMiiStatsMiiSel = (gMiiStatsMiiSel>0) ? gMiiStatsMiiSel-1 : std::max(0, (int)gMiis.size()-1);
                         followScroll();
                         gWordUndo.valid = false; gMiiRelSel=0; gMiiRelScroll=0; gBlPickerOpen=false;
                     };
@@ -11569,9 +12105,14 @@ int main(int,char**) {
 
             } else if (gOnSwitchMode == OnSwitchMode::Map) {
                 // ── Map tab input ──────────────────────────────────────────
-                // Tab L/R cycling (consistent with the other tabs).
-                if (kDown&HidNpadButton_L) { gOnSwitchMode = OnSwitchMode::Player; gOnSwitchMsg=""; break; }
-                if (kDown&HidNpadButton_R) { gOnSwitchMode = OnSwitchMode::WebUI;  gOnSwitchMsg=""; break; }
+                MapBuildPaintTiles();
+                // Tab L/R cycling (consistent with the other tabs). Commit any
+                // in-progress paint stroke first so its tiles are undoable.
+                if (kDown&HidNpadButton_L) { if (gMapStroking) MapStrokeEnd(); gOnSwitchMode = OnSwitchMode::Player; gOnSwitchMsg=""; break; }
+                if (kDown&HidNpadButton_R) { if (gMapStroking) MapStrokeEnd(); gOnSwitchMode = OnSwitchMode::WebUI;  gOnSwitchMsg=""; break; }
+                // ZL = cycle tool (Select → Paint → Stats); ZR = cycle zoom (1×→4×).
+                if (kDown & HidNpadButton_ZL) { if (gMapStroking) MapStrokeEnd(); MapToolCycle(+1); }
+                if (kDown & HidNpadButton_ZR) { MapZoomCycle(); }
 
                 // Cursor pan: right stick scales faster (120 tiles is wide),
                 // left stick + D-pad does one tile per repeat. Cursor pan is
@@ -11594,10 +12135,25 @@ int main(int,char**) {
                     if (nx != gMapCursorX || ny != gMapCursorY) {
                         gMapCursorX = nx; gMapCursorY = ny;
                         gMapDelConfirm = 0;  // any movement cancels the delete-confirm
+                        MapClampView();
+                        // Drag-paint when A is held in the paint tool.
+                        if (gMapStroking && gMapTool == MapTool::Paint
+                            && gMapMode == MapMode::Idle && (kHeld & HidNpadButton_A)) {
+                            MapPaintLineTo(gMapCursorX, gMapCursorY);
+                        }
                     }
                 }
 
-                if (gMapMode == MapMode::Picker) {
+                if (gMapMode == MapMode::TilePicker) {
+                    int total = (int)gMapPaintTiles.size();
+                    if (kNav&(HidNpadButton_Up   |HidNpadButton_StickLUp  |HidNpadButton_StickRUp))   { if (total>0) gMapTileSel = (gMapTileSel - 1 + total) % total; }
+                    if (kNav&(HidNpadButton_Down |HidNpadButton_StickLDown|HidNpadButton_StickRDown)) { if (total>0) gMapTileSel = (gMapTileSel + 1) % total; }
+                    if (kDown&HidNpadButton_A && total > 0) {
+                        gMapPaintTile = gMapPaintTiles[gMapTileSel];
+                        gMapMode = MapMode::Idle;
+                    }
+                    if (kDown&HidNpadButton_B) gMapMode = MapMode::Idle;
+                } else if (gMapMode == MapMode::Picker) {
                     MapRebuildPicker();
                     int total = (int)gMapPickerActors.size();
                     if (kNav&(HidNpadButton_Up   |HidNpadButton_StickLUp  |HidNpadButton_StickRUp))   { if (total>0) gMapPickerSel = (gMapPickerSel - 1 + total) % total; }
@@ -11625,11 +12181,23 @@ int main(int,char**) {
                         if (slot < 0) {
                             MapSetMsg(Lang::T("map.no.empty.slot"), COL_RED, 180);
                         } else {
+                            // Capture old values so undo can restore the empty slot.
+                            int     oldX = SaveEditor::GetIntAt  (gMapSav, SaveEditor::Hash(MapKeys::GridPosX),    slot, 0);
+                            int     oldY = SaveEditor::GetIntAt  (gMapSav, SaveEditor::Hash(MapKeys::GridPosY),    slot, 0);
+                            float   oldR = SaveEditor::GetFloatAt(gMapSav, SaveEditor::Hash(MapKeys::RotY),        slot, 0.0f);
+                            int     oldL = SaveEditor::GetIntAt  (gMapSav, SaveEditor::Hash(MapKeys::LinkedMapId), slot, -1);
                             SaveEditor::SetUIntAt(gMapSav, hAct, slot, gMapPlaceActor);
-                            SaveEditor::SetIntAt (gMapSav, SaveEditor::Hash(MapKeys::GridPosX), slot, gMapCursorX);
-                            SaveEditor::SetIntAt (gMapSav, SaveEditor::Hash(MapKeys::GridPosY), slot, gMapCursorY);
-                            SaveEditor::SetFloatAt(gMapSav, SaveEditor::Hash(MapKeys::RotY),   slot, 0.0f);
+                            SaveEditor::SetIntAt (gMapSav, SaveEditor::Hash(MapKeys::GridPosX),    slot, gMapCursorX);
+                            SaveEditor::SetIntAt (gMapSav, SaveEditor::Hash(MapKeys::GridPosY),    slot, gMapCursorY);
+                            SaveEditor::SetFloatAt(gMapSav, SaveEditor::Hash(MapKeys::RotY),       slot, 0.0f);
                             SaveEditor::SetIntAt (gMapSav, SaveEditor::Hash(MapKeys::LinkedMapId), slot, -1);
+                            MapHistEntry he; he.label = "place";
+                            he.objs.push_back({slot, 0, 0,                  (int64_t)gMapPlaceActor});
+                            he.objs.push_back({slot, 1, (int64_t)oldX,      (int64_t)gMapCursorX});
+                            he.objs.push_back({slot, 2, (int64_t)oldY,      (int64_t)gMapCursorY});
+                            he.objs.push_back({slot, 3, (int64_t)(int)oldR, 0});
+                            he.objs.push_back({slot, 4, (int64_t)oldL,      (int64_t)-1});
+                            MapHistPush(std::move(he));
                             gMapSelSlot = slot;
                             gMapDirty   = true;
                             gMapMode    = MapMode::Inspect;
@@ -11677,8 +12245,12 @@ int main(int,char**) {
                             gMapDelConfirm = 1;
                             MapSetMsg("press X again to confirm delete", COL_GOLD, 180);
                         } else {
-                            SaveEditor::SetUIntAt(gMapSav, SaveEditor::Hash(MapKeys::ActorKey),
-                                                   gMapSelSlot, 0);
+                            uint32_t hActDel = SaveEditor::Hash(MapKeys::ActorKey);
+                            uint32_t oldAct  = SaveEditor::GetUIntAt(gMapSav, hActDel, gMapSelSlot, 0);
+                            SaveEditor::SetUIntAt(gMapSav, hActDel, gMapSelSlot, 0);
+                            MapHistEntry hed; hed.label = "delete";
+                            hed.objs.push_back({gMapSelSlot, 0, (int64_t)oldAct, 0});
+                            MapHistPush(std::move(hed));
                             gMapDirty = true;
                             gMapDelConfirm = 0;
                             gMapSelSlot = -1;
@@ -11692,24 +12264,57 @@ int main(int,char**) {
                     }
                     (void)rowsCount;
                 } else { // Idle
-                    if (kDown&HidNpadButton_A) {
-                        int slot = MapObjectAt(gMapCursorX, gMapCursorY);
-                        if (slot >= 0) {
-                            gMapSelSlot = slot;
-                            gMapMode    = MapMode::Inspect;
-                            gMapInsField= 0;
-                        } else {
-                            MapSetMsg("no object here", COL_DIM, 60);
+                    if (gMapTool == MapTool::Paint) {
+                        // A pressed: start a fresh stroke and stamp the brush.
+                        // While A is held the cursor-move block paints a line.
+                        // A released: commit the stroke as one undo entry.
+                        if (kDown & HidNpadButton_A) {
+                            MapStrokeBegin();
+                            MapPaintLineTo(gMapCursorX, gMapCursorY);
                         }
-                    }
-                    // Y = enter actor picker so the user can drop a new
-                    // object. (+ stays reserved for the global "close app"
-                    // shortcut, same as every other tab.)
-                    if (kDown&HidNpadButton_Y) {
-                        gMapMode = MapMode::Picker;
-                        gMapPickerFilter.clear();
-                        gMapPickerSel = 0;
-                        gMapPickerScroll = 0;
+                        if (gMapStroking && !(kHeld & HidNpadButton_A)) {
+                            MapStrokeEnd();
+                        }
+                        if (kDown & HidNpadButton_Y) {
+                            gMapMode = MapMode::TilePicker;
+                            gMapTileScroll = 0;
+                            for (size_t i = 0; i < gMapPaintTiles.size(); i++)
+                                if (gMapPaintTiles[i] == gMapPaintTile) { gMapTileSel = (int)i; break; }
+                        }
+                        // X = undo (Paint's left-hand action; redo is on-screen).
+                        if (kDown & HidNpadButton_X) MapUndo();
+                    } else if (gMapTool == MapTool::Stats) {
+                        // A jumps back to Select; selects an object under cursor if any.
+                        if (kDown & HidNpadButton_A) {
+                            int slot = MapObjectAt(gMapCursorX, gMapCursorY);
+                            gMapTool = MapTool::Select;
+                            if (slot >= 0) {
+                                gMapSelSlot = slot; gMapMode = MapMode::Inspect; gMapInsField = 0;
+                            }
+                        }
+                        if (kDown & HidNpadButton_X) MapUndo();
+                    } else { // Select tool
+                        if (kDown & HidNpadButton_A) {
+                            int slot = MapObjectAt(gMapCursorX, gMapCursorY);
+                            if (slot >= 0) {
+                                gMapSelSlot = slot;
+                                gMapMode    = MapMode::Inspect;
+                                gMapInsField= 0;
+                            } else {
+                                MapSetMsg("no object here", COL_DIM, 60);
+                            }
+                        }
+                        // Y = enter actor picker so the user can drop a new
+                        // object. (+ stays reserved for the global "close app"
+                        // shortcut, same as every other tab.)
+                        if (kDown & HidNpadButton_Y) {
+                            gMapMode = MapMode::Picker;
+                            gMapPickerFilter.clear();
+                            gMapPickerSel = 0;
+                            gMapPickerScroll = 0;
+                        }
+                        // X = undo (Select has no in-Idle delete; delete lives in Inspect).
+                        if (kDown & HidNpadButton_X) MapUndo();
                     }
                     // B exits to user-pick. If any save (Map, Mii, Player,
                     // textures, etc.) is dirty, defer to the existing
@@ -11717,6 +12322,7 @@ int main(int,char**) {
                     // with on-screen buttons — same UX as the Mii / Player
                     // tabs. + lets the global handler take over for quit.
                     if (kDown&(HidNpadButton_B|HidNpadButton_Plus)) {
+                        if (gMapStroking) MapStrokeEnd();
                         bool hasDirty = gMapDirty || gPlayerSavDirty || gMiiSavDirty
                                       || gUgcDirty || gWebUiDirty;
                         bool toUserPick = (kDown&HidNpadButton_Plus) == 0;

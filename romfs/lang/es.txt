@@ -1,0 +1,514 @@
+# TomoToolNX — traducción al español.
+# Keys to the left of '=' must match en.txt. Translate the right side.
+
+# ── Tab bar ──────────────────────────────────────────────────────────────────
+tab.webui = webui
+tab.textures = texturas
+tab.mii = mii
+tab.player = jugador
+tab.map = mapa
+
+# ── Map tab ──────────────────────────────────────────────────────────────────
+map.loading = cargando Map.sav…
+map.empty.slot = espacio vacío
+map.inspector = objeto
+map.delete.confirm = ¿eliminar este objeto?
+map.place.prompt = elige un actor y luego pulsa A en una casilla
+map.no.empty.slot = no quedan espacios libres
+map.applied = guardado
+map.dirty = cambios sin guardar
+map.footer.idle = Cruceta/stick  mover    A  inspeccionar    Y  colocar    B  atrás    +  salir
+map.footer.inspect = Cruceta  mover objeto    A  hecho    Y  añadir actor    X  eliminar    B  cancelar
+map.footer.picker = Cruceta  desplazar    A  elegir    B  cancelar
+map.footer.place = Cruceta/stick  mover    A  colocar aquí    B  cancelar
+
+# ── Settings tab ─────────────────────────────────────────────────────────────
+settings.header = codificación
+settings.shape = Forma del lienzo
+settings.shape.hint.square = 256×256 — por defecto (comida, ropa, tesoros…)
+settings.shape.hint.book = Encaja en zona libro 3:4; barras negras a los lados
+settings.shape.hint.tv = Encaja en zona 16:9; barras negras arriba/abajo
+settings.encoder = Codificador
+settings.encoder.desc = Codificador BC1 usado al importar texturas
+settings.encoder.hint.custom = Ajuste sRGB con gamma. Mejor calidad (por defecto).
+settings.encoder.hint.pca = Ajuste PCA de extremos. Más rápido, peor en degradados.
+settings.bc1 = Modo BC1
+settings.bc1.desc = Modo de bloque (solo codificador Gamma-aware)
+settings.bc1.disabled = Cambia al codificador Gamma-aware para editar.
+settings.bc1.hint.auto = Elige el mejor modo por bloque. Recomendado.
+settings.bc1.hint.fourColor = Colores más nítidos. La transparencia se conserva.
+settings.bc1.hint.threeColor = Optimizado para imágenes con transparencia. Menos detalle de color.
+settings.fit = Ajuste
+settings.fit.hint.cover = Recortar para llenar la textura, conservando proporciones.
+settings.fit.hint.contain = Imagen completa dentro, con bordes transparentes.
+settings.fit.hint.fill = Estirar para llenar, ignorando proporciones.
+settings.matte = Fondo
+settings.matte.desc = Color de relleno usado en el modo Contain.
+settings.matte.disabled = Solo se usa cuando Ajuste = Contain.
+settings.language = Idioma
+settings.language.desc = Idioma de la interfaz en la Switch.
+settings.language.hint = Ayuda a traducir — consulta el README en GitHub.
+settings.footer = Arriba/Abajo  seleccionar    Izq/Der  ajustar    L/R  cambiar pestaña    B/+  atrás
+
+# ── Player tab field labels ──────────────────────────────────────────────────
+player.field.Name = Nombre
+player.field.Island = Isla
+player.field.Money = Dinero
+player.field.Currency = Moneda
+player.field.BootCount = Arranques
+player.field.SkinTone = Tono de piel
+player.field.BdayDay = Día nac.
+player.field.BdayMonth = Mes nac.
+player.field.BdayYear = Año nac.
+player.field.IslandSize = Tamaño isla
+player.field.FountainLv = Nv. fuente
+player.field.Wishes = Deseos
+player.field.Region = Región
+
+# ── Player tab footer ────────────────────────────────────────────────────────
+player.footer = Arriba/Abajo  seleccionar    Izq/Der  ajustar    A  editar    X  deshacer    B/+  atrás
+
+# ── Backup prompt ────────────────────────────────────────────────────────────
+backup.title = ¿hacer copia de seguridad?
+backup.action = hacer copia
+backup.action.hint = crea una copia con fecha y hora
+backup.skip = omitir copia
+backup.skip.hint = continuar sin copia de seguridad
+backup.footer = A  copiar    B  omitir    +  salir
+backup.full.title = {cur}/{max} copias — ¿borrar la más antigua para liberar espacio?
+backup.full.action = borrar más antigua + copia
+backup.full.hint = elimina la copia más antigua
+backup.footer.full = A  borrar + copiar    B  omitir    +  salir
+backup.tip = {cur} / {max} copias
+backup.progress.title = haciendo copia de seguridad...
+backup.progress.warn = no apagues la consola
+mounting.title = montando la partida...
+
+# ── Common labels ────────────────────────────────────────────────────────────
+footer.back = B  atrás
+footer.quit = +  salir
+cancel = cancelar
+confirm = Confirmar
+back = Atrás
+prev = Ant
+next = Sig
+undo = Deshacer
+loading = cargando…
+empty = (vacío)
+empty.paren = (vacío)
+none.paren = (ninguno)
+unknown.paren = (desconocido)
+not.set = (sin definir)
+of = de
+items = objetos
+more = más
+keyboard = teclado
+
+# ── Update screens ───────────────────────────────────────────────────────────
+update.checking = buscando actualizaciones...
+update.footer.checking = B  omitir
+update.available = ¡una nueva actualización está disponible en GitHub!
+update.download.from = descarga la nueva TomoToolNX.nro desde:
+update.footer.available = A / B  continuar    +  salir
+
+# ── Restore picker ───────────────────────────────────────────────────────────
+restore.header = restaurar copia
+restore.empty.title = Sin copias aún
+restore.empty.hint = Crea una desde la pantalla de selección de usuario.
+restore.backups.word = copias
+restore.newest.prefix = más reciente:
+restore.badge.newest = reciente
+restore.badge.oldest = antigua
+restore.chip.restore = restaurar
+restore.chip.delete = eliminar
+restore.footer = Arriba/Abajo  navegar    A  restaurar    X  eliminar    B  cancelar
+restore.confirm.delete.title = ¿Eliminar esta copia?
+restore.confirm.restore.title = ¿Restaurar esta copia?
+restore.confirm.delete.l1 = Esta copia se eliminará permanentemente de la tarjeta SD.
+restore.confirm.delete.l2 = Esto no se puede deshacer.
+restore.confirm.restore.l1 = Tu partida actual será sobrescrita con los datos
+restore.confirm.restore.l2 = de esta copia.
+restore.progress.title = Restaurando...
+restore.progress.wait = Por favor espera.
+
+# ── Settings ─────────────────────────────────────────────────────────────────
+settings.title = ajustes
+settings.item.lang = Idioma
+settings.item.lang.desc = idioma de la interfaz — ayuda a traducir en GitHub
+settings.item.export = Carpeta de export.
+settings.item.export.desc = carpeta usada al exportar texturas
+settings.item.maxbk = Copias máx.
+settings.item.maxbk.desc = número máximo de copias a guardar (1-99)
+settings.item.restore = Restaurar copia
+settings.item.restore.desc = restaurar una copia anterior del usuario seleccionado
+settings.item.theme = Tema
+settings.item.theme.desc = elige entre el nuevo estilo Switch y la interfaz original
+theme.switch = Switch
+theme.original = Original
+settings.change = cambiar
+settings.open = abrir
+settings.backups.none = ninguna
+settings.backups.available = disponibles
+settings.footer.main = Arriba/Abajo  navegar    Izq/Der  ajustar    A  acción    B  atrás
+
+# ── User pick ────────────────────────────────────────────────────────────────
+userpick.title = selecciona usuario
+userpick.footer = Izq/Der  navegar    A  elegir    X  restaurar    -  ajustes    +  salir
+restore.toast.ok = Copia restaurada.
+restore.toast.fail = Error al restaurar:
+restore.toast.mount_fail = Error al montar:
+restore.toast.deleted_last = Copia borrada (no quedan copias para este usuario).
+ugc.rename.guide = Renombrar UGC
+ugc.rename.ok = Renombrado.
+ugc.rename.fail = Error al renombrar:
+ugc.kind.picker.title = Filtrar por categoría
+ugc.kind.all = Todo
+ugc.kind.food = Comida
+ugc.kind.cloth = Ropa
+ugc.kind.goods = Tesoros
+ugc.kind.interior = Interior
+ugc.kind.exterior = Exterior
+ugc.kind.map_object = Objetos
+ugc.kind.map_floor = Paisaje
+ugc.kind.face_paint = Pintura facial
+webui.mtp.start = Iniciar MTP
+webui.mtp.stop = Detener MTP
+webui.mtp.waiting = Esperando…
+webui.mtp.warn.title = ¿Iniciar compartir por USB?
+webui.mtp.warn.l1 = MTP solo funciona en una Switch real.
+webui.mtp.warn.l2 = En Ryujinx y la mayoría de emuladores la app se cerrará.
+webui.mtp.warn.l3 = Este aviso solo aparece una vez.
+webui.mtp.warn.yes = Iniciar
+webui.mtp.warn.no = Cancelar
+bundle.create.title = Crear una nueva isla
+bundle.create.body = En la siguiente pantalla, elige un usuario de Switch al que aplicar esta nueva isla. También se guarda una copia como bundle en la tarjeta SD.
+bundle.create.footer = A  crear    B  atrás
+bundle.blank.title = Partida 100% estándar
+bundle.blank.desc = Aplica el 100% tal cual. Todas las tiendas, 70 miis genéricos.
+bundle.generated.title = + Generador de isla
+bundle.generated.desc = Igual, luego ejecuta el generador de isla en la Switch.
+bundle.created = Bundle creado:
+bundle.apply.title = Aplicar esta isla a:
+bundle.apply.footer = Izq/Der  navegar    A  aplicar    B  cancelar
+bundle.dismissed = Cancelado.
+bundle.apply.overwrite.title = Este usuario ya tiene partida
+bundle.apply.overwrite.l1 = Aplicar el bundle sobrescribirá su partida.
+bundle.apply.overwrite.l2 = Sus copias antiguas siguen en la tarjeta SD.
+bundle.apply.overwrite.yes = Sobrescribir
+bundle.apply.overwrite.no = Cancelar
+
+# ── File browser ─────────────────────────────────────────────────────────────
+browse.title.export = elegir carpeta de exportación
+browse.title.ltd = elegir .ltd
+browse.title.png_ltd = elegir PNG o .ltd
+browse.current = actual
+browse.empty = carpeta vacía
+browse.footer.export = Arriba/Abajo  navegar    A  abrir    Y  fijar como exportación    X  cancelar    B  atrás
+browse.footer.pick = Arriba/Abajo  navegar    A  abrir / elegir    B  atrás    X  cancelar
+
+# ── Applet warning ───────────────────────────────────────────────────────────
+applet.title = Modo Applet no compatible
+applet.body.l1 = TomoToolNX necesita todos los recursos del sistema y no puede
+applet.body.l2 = funcionar desde el modo Applet (R + Álbum).
+applet.how = Cómo iniciarlo correctamente
+applet.wrong = Forma incorrecta
+applet.wrong.hint = abrir Álbum
+applet.right = Forma correcta
+applet.right.hint = Mantén R  +  abre un juego
+applet.note = El juego no se iniciará — se abrirá el menú homebrew.
+applet.exit = + / B  Salir
+applet.footer = B / +  salir
+
+# ── Save warning ─────────────────────────────────────────────────────────────
+warn.title = Advertencia
+warn.body.l1 = Modificar estos valores puede romper tu juego.
+warn.body.l2 = Haz una copia en la pestaña de copia antes de editar.
+warn.understand = Entendido
+
+# ── Thumbnail tip ────────────────────────────────────────────────────────────
+thumbtip.title = Acerca de las miniaturas del inventario
+thumbtip.l1 = Tu textura se importó, pero la miniatura del inventario
+thumbtip.l2 = la gestiona el juego y no se actualiza sola.
+thumbtip.l3 = Para refrescarla: abre el objeto en el Estudio,
+thumbtip.l4 = entra al editor de texturas y guarda — el juego
+thumbtip.l5 = reconstruirá la miniatura automáticamente.
+thumbtip.gotit = Entendido
+
+# ── Background removal ───────────────────────────────────────────────────────
+bg.title = ¿Quitar el fondo?
+bg.body.l1 = La textura seleccionada se modificará en su lugar.
+bg.body.l2 = Esto puede tardar hasta 30 segundos.
+bg.removing = Quitando fondo...
+
+# ── Back prompt ──────────────────────────────────────────────────────────────
+backprompt.title = ¿Guardar cambios?
+backprompt.body = Los cambios no guardados se perderán si eliges No.
+backprompt.save.back = Guardar y volver
+backprompt.save.exit = Guardar y salir
+backprompt.discard.back = Descartar y volver
+backprompt.discard.exit = Descartar y salir
+backprompt.footer.back = A  guardar    B  descartar    X  cancelar
+backprompt.footer.exit = A  guardar y salir    B  descartar y salir    X  cancelar
+
+# ── Save feedback / error ────────────────────────────────────────────────────
+save.feedback.title = ¡Guardado!
+save.feedback.body = Cambios guardados con éxito.
+error.title = error
+error.footer = B  atrás     +  salir
+
+# ── WebUI tab ────────────────────────────────────────────────────────────────
+webui.log.title = registro
+webui.log.empty = sin actividad
+webui.active = Activo
+webui.inactive = Inactivo
+webui.footer = L/R  pestaña    X  reiniciar servidor    Y  alternar MTP    B/+  atrás
+
+# ── Textures (UGC) tab ───────────────────────────────────────────────────────
+ugc.filter = Filtro
+ugc.search.placeholder = Toca o  -  para buscar...
+ugc.no.matches = sin resultados
+ugc.no.preview = sin vista previa
+ugc.import = importar
+ugc.exportpic = exportar img
+ugc.exportltd = exportar .ltd
+ugc.removebg = quitar fondo
+ugc.footer = ZL/ZR  desplazar    Arriba/Abajo  elegir    A  importar    Y  exportar img    exportar .ltd  (toque)    X  quitar fondo    -  buscar    L/R  pestaña    B/+  atrás
+
+# ── Player tab ───────────────────────────────────────────────────────────────
+player.parse.fail.l1 = Player.sav no se pudo leer — restaura desde una copia
+player.parse.fail.l2 = o vuelve a abrir Tomodachi Life para que el juego lo reescriba.
+player.notfound.hint = ¿Ya has configurado tu isla en Tomodachi Life?
+player.loading = cargando partida del jugador...
+player.kbd.edit = editar con teclado
+player.money.type = escribir cantidad
+player.edit.pron = editar pronunciación
+player.cycle.lang = Izq/Der  cambiar idioma
+player.cycle.currency = Izq/Der  cambiar moneda
+player.cycle.tone = Izq/Der  cambiar tono
+player.cycle.size = Izq/Der  cambiar tamaño
+player.cycle.region = Izq/Der  cambiar región
+player.islandsize.warn = ¡Otros tamaños corromperán la partida!
+player.wishes.liberated = deseos liberados
+player.wishes.bulk = Acciones de deseos  (toque)
+player.wishes.unlock = Desbloquear todos (268)
+player.wishes.unlock.confirm = toca otra vez para DESBLOQUEAR los 268
+player.wishes.reset = Reiniciar deseos liberados
+player.wishes.reset.confirm = toca otra vez para REINICIAR
+player.footer.pron = ZL/ZR  campo    A  nombre    X  pronunciación    Izq/Der  idioma    L/R  pestaña    B/+  atrás
+player.footer.value = ZL/ZR  campo    Izq/Der  valor    A  editar    X  deshacer    L/R  pestaña    B/+  atrás
+player.desc.Name = Nombre de tu jugador en el juego.
+player.desc.Island = Nombre de tu isla.
+player.desc.Money = Monedas actuales.
+player.desc.Currency = Símbolo de moneda regional.
+player.desc.BootCount = Veces que se ha iniciado el juego.
+player.desc.SkinTone = Tono de piel/manos (0-5).
+player.desc.BdayDay = Día de cumpleaños (1-31).
+player.desc.BdayMonth = Mes de cumpleaños (1-12).
+player.desc.BdayYear = Año de nacimiento.
+player.desc.IslandSize = Preajuste de tamaño de isla. ¡Otros valores corrompen la partida!
+player.desc.FountainLv = Nivel de la fuente de los deseos.
+player.desc.Wishes = Número de deseos pedidos.
+player.desc.Region = Región del jugador (afecta estaciones y clima).
+
+# ── Map tab ──────────────────────────────────────────────────────────────────
+map.picker.title = elegir actor
+map.picker.filter = filtro
+map.picker.any = (cualquiera)
+map.slot = espacio
+map.row.posX = posición X
+map.row.posY = posición Y
+map.row.rotation = rotación
+map.row.linked = mapa enlazado
+map.add.actor = añadir actor
+map.delete.btn = eliminar (X)
+map.delete.confirm.tap = toca otra vez para eliminar
+map.place.title = modo colocar
+map.actor = actor
+map.cursor = cursor
+map.viewer.title = Visor del mapa
+map.viewer.l1 = Mueve el cursor con la cruceta o el stick.
+map.viewer.l2 = Toca o pulsa A para inspeccionar.
+map.viewer.l3 = Pulsa Y para colocar un nuevo objeto.
+map.viewer.l4 = B sale — aparecerá una confirmación
+map.viewer.l5 = de guardado si es necesario.
+map.objects = objetos
+map.slots = espacios
+
+# ── Mii Stats ────────────────────────────────────────────────────────────────
+mii.header = stats mii
+mii.parse.fail.l1 = Mii.sav no se pudo leer — restaura desde una copia
+mii.parse.fail.l2 = o vuelve a abrir Tomodachi Life para que lo reescriba.
+mii.notfound.hint = ¿Ya has creado un Mii en tu isla?
+mii.loading = cargando partida mii...
+mii.no.miis = sin miis
+mii.no.relations = sin relaciones
+mii.no.relationships = sin relaciones
+mii.miis.word = miis
+mii.same.as.name = (igual al nombre)
+mii.cycle.mood = Izq/Der  cambiar humor
+mii.file = Archivo Mii
+mii.import.ltd = importar .ltd
+mii.export.ltd = exportar .ltd
+
+subtab.stats = Stats
+subtab.items = Objetos
+subtab.habits = Hábitos
+subtab.words = Palabras
+subtab.relations = Relaciones
+subtab.housing = Vivienda
+subtab.social = Social
+
+words.slot = Espacio
+words.kind = Tipo
+words.text = Texto
+words.pron = Pronunciación  (opcional)
+words.same.as.text = (igual al texto)
+words.edit.text = Editar texto
+words.edit.pron = Editar pronunciación
+
+rel.your.type = Tu tipo
+rel.their.type = Su tipo  (auto)
+rel.type = Tipo
+rel.batch.know = Conocer todos
+rel.meter = Medidor
+rel.fixed = fijo
+rel.both.directions = ambas direcciones a la vez
+rel.since = Desde
+
+bl.filter = filtro
+bl.select.item = elegir objeto
+bl.no.matches = sin resultados — pulsa X para borrar
+
+habits.empty = sin hábitos en esta categoría
+habits.hint = A  activar    X  poseer    -  limpiar categoría    Izq/Der  cambiar categoría
+
+housing.unavailable = Datos de vivienda no disponibles en esta partida.
+housing.unavailable.detail = (Mii.Location.HouseMapId / RoomIndex no encontrados)
+housing.moving = Moviendo
+housing.moving.hint = Toca una habitación para soltar. El ocupante se intercambiará.
+housing.idle.hint = Toca un Mii para levantarlo, luego toca una habitación.
+housing.housed = alojados
+housing.unhoused = SIN VIVIENDA
+housing.unhoused.lower = sin vivienda
+housing.house = casa
+housing.houses = CASAS
+housing.no.houses = (no hay casas en la isla — coloca una en el juego primero)
+housing.all.housed = (todos los miis tienen vivienda)
+housing.slot.short = espacio
+housing.room = habitación
+housing.drop.here = soltar aquí
+housing.empty.paren = (vacío)
+housing.add.resident = añadir residente
+housing.delete = eliminar
+housing.vacate = vaciar
+housing.cancel = Cancelar
+housing.evict = Echar
+housing.footer.idle = A  elegir / soltar    Y  sub-pestaña    L/R  pestaña    B/+  atrás
+housing.footer.picked = A  soltar / elegir    -  echar    B  cancelar    L/R  pestaña
+
+share.search = búsqueda
+share.page = página
+share.sort = orden
+share.sort.newest = recientes
+share.sort.oldest = antiguos
+share.sort.likes = likes
+share.importable.only = solo importables
+share.fetching = Pulsa Y para entrar — cargando primera página…
+share.unnamed = (sin nombre)
+share.by = por
+share.likes = likes
+share.image.failed = imagen no disponible
+share.platform = plataforma
+share.gender = género
+share.mii.id = id mii
+share.overwrite.slot = sobrescribir espacio
+share.slot = espacio
+share.slot.empty = espacio vacío
+share.replaces = reemplaza
+share.download.overwrite = Descargar y sobrescribir
+share.footer = A  detalles    X  buscar    Izq/Der  página    ZL/ZR  mii  (espacio destino)    Y  sub-pestaña    B  atrás
+
+mii.field.Name = Nombre
+mii.field.Level = Nivel
+mii.field.LvMeter = Barra Nv
+mii.field.Money = Dinero
+mii.field.BdayDay = Día cump.
+mii.field.BdayMonth = Mes cump.
+mii.field.BirthYear = Año nac.
+mii.field.DirectAge = Edad directa
+mii.field.Activeness = Actividad
+mii.field.Audacity = Audacia
+mii.field.Commonsense = Sentido común
+mii.field.Gaiety = Alegría
+mii.field.Sociability = Sociabilidad
+mii.field.BondMeter = Vínculo
+mii.field.Mood = Humor
+mii.field.Fullness = Saciedad
+mii.desc.Name = Nombre del Mii en el juego.
+mii.desc.Level = Nivel de amistad con el jugador.
+mii.desc.LvMeter = Barra de progreso hasta el siguiente nivel (0-100).
+mii.desc.Money = Monedas que tiene este Mii.
+mii.desc.BdayDay = Día de cumpleaños (1-31).
+mii.desc.BdayMonth = Mes de cumpleaños (1-12).
+mii.desc.BirthYear = Año de nacimiento.
+mii.desc.DirectAge = Edad forzada. -1 = automática.
+mii.desc.Activeness = Nivel de energía del Mii (1-10).
+mii.desc.Audacity = Audacia del Mii (1-10).
+mii.desc.Commonsense = Sentido común del Mii (1-10).
+mii.desc.Gaiety = Alegría del Mii (1-10).
+mii.desc.Sociability = Sociabilidad del Mii (1-10).
+mii.desc.BondMeter = Fuerza del vínculo con el jugador (0-100).
+mii.desc.Mood = Estado emocional actual.
+mii.desc.Fullness = Nivel de saciedad. Puede superar 100.
+
+mii.footer.social.focus = ZL/ZR  mii    Y  sub-pestaña    X  vista global    L/R  pestaña    B/+  atrás
+mii.footer.social.global = ZL/ZR  mii    Y  sub-pestaña    X  vista enfocada    L/R  pestaña    B/+  atrás
+mii.footer.words = ZL/ZR  mii    Arriba/Abajo  espacio    Izq/Der  tipo    A  texto    X  pronunciación    -  deshacer    Y  sub-pestaña    L/R  pestaña    B/+  atrás
+mii.footer.relations = ZL/ZR  mii    Arriba/Abajo  relación    Izq/Der  tipo    Y  sub-pestaña    L/R  pestaña    B/+  atrás
+mii.footer.bl.picker = ZL/ZR  objeto    Arriba/Abajo  objeto    Izq/Der  saltar 12    A  confirmar    B  cancelar
+mii.footer.bl = ZL/ZR  mii    D-pad  navegar    A  elegir    -  color    X  borrar    Y  sub-pestaña    L/R  pestaña    B/+  atrás
+mii.footer.housing.idle = D-pad  navegar    A  elegir / soltar    Y  sub-pestaña    L/R  pestaña    B/+  atrás
+mii.footer.housing.picked = D-pad  navegar    A  soltar / elegir    -  echar    B  cancelar    L/R  pestaña
+mii.footer.browse = Arriba/Abajo  mii    Izq/Der  página    ZL/ZR  mii  (espacio destino)    A  detalles    X  buscar    -  orden    B/Y  atrás
+mii.footer.browse.detail = ZL/ZR  mii  (espacio destino)    A  descargar    B  atrás
+mii.footer.stats.name = ZL/ZR  mii    Arriba/Abajo  campo    Izq/Der  elegir    A  confirmar    X  pronunciación    Y  sub-pestaña    L/R  pestaña    B/+  atrás
+mii.footer.stats.value = ZL/ZR  mii    Arriba/Abajo  campo    Izq/Der  valor    X  deshacer    Y  sub-pestaña    L/R  pestaña    B/+  atrás
+
+# ── Island Generator (on-Switch) ────────────────────────────────────────────
+islandgen.cfg.header = Generador de isla
+islandgen.cfg.title = Generar esta isla
+islandgen.cfg.body = Elige cómo distribuir la nueva isla y luego inicia.
+islandgen.cfg.row.map = Mapa
+islandgen.cfg.row.rels = Relaciones
+islandgen.cfg.row.map.desc  = Elige entre el mapa clásico 100% y un terreno aleatorio
+islandgen.cfg.row.rels.desc = Cómo se conocen los miis de esta isla
+islandgen.cfg.row.batch       = Importar miis LTD
+islandgen.cfg.row.batch.desc  = Reemplaza los miis con los .ltd colocados vía MTP
+islandgen.cfg.batch.yes       = Sí
+islandgen.cfg.batch.no        = No
+islandgen.batchltd.header     = Generador de isla
+islandgen.batchltd.title      = Coloca tus .ltd vía MTP
+islandgen.batchltd.body1      = Pon cada .ltd que quieras importar en esta carpeta:
+islandgen.batchltd.body2      = Luego pulsa A para importarlos y continuar.
+islandgen.batchltd.mtp_on     = activar MTP
+islandgen.batchltd.mtp_off    = desactivar MTP
+islandgen.batchltd.go         = importar y continuar
+islandgen.batchltd.footer     = Y  MTP     X  importar y continuar     B  atrás
+islandgen.cfg.row.fetch = Traer Miis desde TomoShare
+islandgen.cfg.rels.dense = Aleatorias
+islandgen.cfg.rels.none = Todos desconocidos
+islandgen.cfg.fetch.on = Sí (~30–60 s)
+islandgen.cfg.fetch.off = Omitir
+islandgen.cfg.go = Generar
+islandgen.cfg.skip = Omitir
+islandgen.cfg.footer = Arriba/Abajo  seleccionar    Izq/Der  cambiar    A  generar    B  omitir
+islandgen.map.random = Aleatorio
+islandgen.map.classic = Clásico
+islandgen.run.header = Generador de isla
+islandgen.run.title = Generando isla
+islandgen.run.starting = Iniciando…
+islandgen.run.cancel = Cancelar
+islandgen.run.dismiss_done = Listo
+islandgen.run.dismiss_cancel = Atrás
+islandgen.run.dismiss_error = OK
+islandgen.run.footer = B  cancelar (en curso)    A  continuar (al terminar)

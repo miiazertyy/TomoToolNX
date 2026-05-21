@@ -1,0 +1,556 @@
+# TomoToolNX — English translation (baseline).
+#
+# Lines starting with '#' are comments. Empty lines are skipped.
+# Format: key = value   (spaces around '=' are trimmed)
+#
+# To contribute a new language:
+#   1. Copy this file to romfs/lang/<your-code>.txt
+#   2. Translate every value (right side of '='). Leave keys (left side) alone.
+#   3. Register the locale in source/i18n.cpp (kAvailable list).
+#   4. Open a Pull Request — partial translations are welcome.
+
+# ── Tab bar ──────────────────────────────────────────────────────────────────
+tab.webui = webui
+tab.textures = textures
+tab.mii = mii
+tab.player = player
+tab.map = map
+
+# ── Map tab ──────────────────────────────────────────────────────────────────
+map.loading = loading Map.sav…
+map.empty.slot = empty slot
+map.inspector = object
+map.delete.confirm = delete this object?
+map.place.prompt = pick an actor, then press A on a tile
+map.no.empty.slot = no empty slots left
+map.applied = saved
+map.dirty = unsaved changes
+map.footer.idle = D-pad/stick  move    A  inspect    Y  place    X  undo    ZL  tool    ZR  zoom    B  back
+map.footer.inspect = D-pad  move object    A  done    Y  add new actor    X  delete    B  cancel
+map.footer.picker = D-pad  scroll    A  pick    B  cancel
+map.footer.place = D-pad/stick  move    A  drop here    B  cancel
+map.footer.paint = D-pad/stick  move    A  paint    Y  pick tile    X  undo    ZL  tool    ZR  zoom    B  back
+map.footer.stats = D-pad/stick  move    A  pick object    X  undo    ZL  tool    ZR  zoom    B  back
+map.footer.tilepicker = D-pad/stick  scroll    A  pick    B  cancel
+map.tool.select = select
+map.tool.paint = paint
+map.tool.stats = stats
+map.undo.btn = Undo
+map.redo.btn = Redo
+map.undo.done = undone
+map.redo.done = redone
+map.undo.empty = nothing to undo
+map.redo.empty = nothing to redo
+map.png.btn = Export PNG
+map.png.saved = saved island PNG
+map.paint.title = paint floor
+map.paint.brush = brush size
+map.paint.pick = choose tile (Y)
+map.paint.none = (no tile picked)
+map.paint.help1 = ZL cycles tools  ·  ZR cycles zoom
+map.paint.help2 = X = undo  ·  Y = pick tile
+map.stats.title = map stats
+map.stats.placed = placed objects
+map.stats.terrain = terrain breakdown
+map.stats.no.floor = no floor data
+map.tile.picker.title = pick a tile
+
+# ── Settings tab ─────────────────────────────────────────────────────────────
+settings.header = encoding
+settings.shape = Canvas shape
+settings.shape.hint.square = 256×256 — default (food, clothes, goods…)
+settings.shape.hint.book = Fit into a 3:4 book area; black bars on the sides
+settings.shape.hint.tv = Fit into a 16:9 wide area; black bars top and bottom
+settings.encoder = Encoder
+settings.encoder.desc = BC1 encoder used when importing textures
+settings.encoder.hint.custom = Gamma-aware sRGB fitting. Best quality (default).
+settings.encoder.hint.pca = PCA endpoint fit. Faster, weaker on gradients.
+settings.bc1 = BC1 mode
+settings.bc1.desc = Block mode (Gamma-aware encoder only)
+settings.bc1.disabled = Switch to the Gamma-aware encoder to edit this.
+settings.bc1.hint.auto = Picks the best mode for each block. Recommended.
+settings.bc1.hint.fourColor = Sharper colors. Transparent pixels are still preserved.
+settings.bc1.hint.threeColor = Optimized for images with transparency. Less color detail.
+settings.fit = Fit
+settings.fit.hint.cover = Crop to fill the texture, preserving aspect ratio.
+settings.fit.hint.contain = Fit the whole image inside, leaving transparent edges.
+settings.fit.hint.fill = Stretch to fill the texture, ignoring aspect ratio.
+settings.matte = Background
+settings.matte.desc = Letterbox color used by the Contain fit mode.
+settings.matte.disabled = Used only when Fit is set to Contain.
+settings.language = Language
+settings.language.desc = Display language for the on-Switch UI.
+settings.language.hint = Help translate — see the README on GitHub.
+settings.footer = Up/Down  select    Left/Right  adjust    L/R  switch tab    B/+  back
+
+# ── Player tab field labels ──────────────────────────────────────────────────
+player.field.Name = Name
+player.field.Island = Island
+player.field.Money = Money
+player.field.Currency = Currency
+player.field.BootCount = Boot Count
+player.field.SkinTone = Skin Tone
+player.field.BdayDay = Bday Day
+player.field.BdayMonth = Bday Month
+player.field.BdayYear = Bday Year
+player.field.IslandSize = Island Size
+player.field.FountainLv = Fountain Lv
+player.field.Wishes = Wishes
+player.field.Region = Region
+
+# ── Player tab footer ────────────────────────────────────────────────────────
+player.footer = Up/Down  select    Left/Right  adjust    A  edit    X  undo    B/+  back
+
+# ── Backup prompt ────────────────────────────────────────────────────────────
+backup.title = backup save data?
+backup.action = backup now
+backup.action.hint = creates a timestamped backup
+backup.skip = skip backup
+backup.skip.hint = continue without backup
+backup.footer = A  backup    B  skip    +  quit
+backup.full.title = {cur}/{max} backups — erase oldest to make room?
+backup.full.action = erase oldest + backup
+backup.full.hint = removes the oldest backup
+backup.footer.full = A  erase oldest + backup    B  skip    +  quit
+backup.tip = {cur} / {max} backups
+backup.progress.title = backing up save data...
+backup.progress.warn = do not turn off the console
+mounting.title = mounting save...
+
+# ── Common labels ────────────────────────────────────────────────────────────
+footer.back = B  back
+footer.quit = +  quit
+cancel = cancel
+confirm = Confirm
+back = Back
+prev = Prev
+next = Next
+undo = Undo
+loading = loading…
+empty = (empty)
+empty.paren = (empty)
+none.paren = (none)
+unknown.paren = (unknown)
+not.set = (not set)
+of = of
+items = items
+more = more
+keyboard = keyboard
+
+# ── Update screens ───────────────────────────────────────────────────────────
+update.checking = checking for updates...
+update.footer.checking = B  skip
+update.available = a new update is available on GitHub!
+update.download.from = download the new TomoToolNX.nro from:
+update.footer.available = A / B  continue    +  quit
+
+# ── Restore picker ───────────────────────────────────────────────────────────
+restore.header = restore backup
+restore.empty.title = No backups yet
+restore.empty.hint = Create one from the backup prompt on the user-select screen.
+restore.backups.word = backups
+restore.newest.prefix = newest:
+restore.badge.newest = newest
+restore.badge.oldest = oldest
+restore.chip.restore = restore
+restore.chip.delete = delete
+restore.footer = Up/Down  navigate    A  restore    X  delete    B  cancel
+restore.confirm.delete.title = Delete this backup?
+restore.confirm.restore.title = Restore this backup?
+restore.confirm.delete.l1 = This backup will be permanently removed from the SD card.
+restore.confirm.delete.l2 = This cannot be undone.
+restore.confirm.restore.l1 = Your current save will be overwritten with the data
+restore.confirm.restore.l2 = from this backup.
+restore.progress.title = Restoring backup...
+restore.progress.wait = Please wait.
+
+# ── Settings ─────────────────────────────────────────────────────────────────
+settings.title = settings
+settings.item.lang = Language
+settings.item.lang.desc = app display language — help translate on GitHub
+settings.item.export = Export Path
+settings.item.export.desc = folder used when exporting textures
+settings.item.maxbk = Max Backups
+settings.item.maxbk.desc = maximum number of save backups to keep (1-99)
+settings.item.restore = Restore Backup
+settings.item.restore.desc = restore a previous save backup for the selected user
+settings.item.theme = Theme
+settings.item.theme.desc = choose between the new Switch-style look and the original UI
+theme.switch = Switch
+theme.original = Original
+settings.change = change
+settings.open = open
+settings.backups.none = none
+settings.backups.available = available
+settings.footer.main = Up/Down  navigate    Left/Right  adjust    A  action    B  back
+
+# ── User pick ────────────────────────────────────────────────────────────────
+userpick.title = select user
+userpick.footer = Left/Right  navigate    A  select    X  restore    -  settings    +  quit
+restore.toast.ok = Backup restored.
+restore.toast.fail = Restore failed:
+restore.toast.mount_fail = Mount failed:
+restore.toast.deleted_last = Backup deleted (no backups left for this user).
+
+# ── File browser ─────────────────────────────────────────────────────────────
+browse.title.export = select export folder
+browse.title.ltd = select .ltd
+browse.title.png_ltd = select PNG or .ltd
+browse.current = current
+browse.empty = empty folder
+browse.footer.export = Up/Down  navigate    A  open folder    Y  set as export folder    X  cancel    B  back
+browse.footer.pick = Up/Down  navigate    A  open / select    B  back    X  cancel
+
+# ── Applet warning ───────────────────────────────────────────────────────────
+applet.title = Applet Mode Not Supported
+applet.body.l1 = TomoToolNX requires full system resources and cannot
+applet.body.l2 = run from Applet mode (R + Album).
+applet.how = How to launch correctly
+applet.wrong = Wrong way
+applet.wrong.hint = open Album
+applet.right = Correct way
+applet.right.hint = Hold R  +  open any game
+applet.note = The game will not launch — the homebrew menu will open instead.
+applet.exit = + / B  Exit
+applet.footer = B / +  exit app
+
+# ── Save warning ─────────────────────────────────────────────────────────────
+warn.title = Warning
+warn.body.l1 = Modifying these values can break your game.
+warn.body.l2 = Make a backup in the Backup tab before editing.
+warn.understand = I understand
+
+# ── Thumbnail tip ────────────────────────────────────────────────────────────
+thumbtip.title = About inventory thumbnails
+thumbtip.l1 = Your texture was imported, but the inventory thumbnail
+thumbtip.l2 = is managed by the game itself and won't update on its own.
+thumbtip.l3 = To refresh it: open this item in Studio Workshop,
+thumbtip.l4 = enter its texture editor, and re-save — the game
+thumbtip.l5 = will automatically rebuild the thumbnail.
+thumbtip.gotit = Got it
+
+# ── Background removal ───────────────────────────────────────────────────────
+bg.title = Remove Background?
+bg.body.l1 = The selected texture will be modified in-place.
+bg.body.l2 = This may take up to 30 seconds.
+bg.removing = Removing background...
+
+# ── Back prompt ──────────────────────────────────────────────────────────────
+backprompt.title = Save changes?
+backprompt.body = Unsaved edits will be lost if you choose No.
+backprompt.save.back = Save & Back
+backprompt.save.exit = Save & Exit
+backprompt.discard.back = Discard & Back
+backprompt.discard.exit = Discard & Exit
+backprompt.footer.back = A  save & back    B  discard & back    X  cancel
+backprompt.footer.exit = A  save & exit    B  discard & exit    X  cancel
+
+# ── Save feedback / error ────────────────────────────────────────────────────
+save.feedback.title = Saved!
+save.feedback.body = Changes saved successfully.
+error.title = error
+error.footer = B  back     +  quit
+
+# ── Island Generator (no-save bootstrap) ─────────────────────────────────────
+islandgen.title = No Tomodachi Life save found
+islandgen.body1 = Press A to create a fresh island for this user.
+islandgen.body2 = After it loads you'll be able to fill it with random miis and a random map from the web UI.
+islandgen.no_seed = (this build has no seed save — rebuild after dropping seed_*.bin into data/)
+islandgen.footer = A  generate    B  back    +  quit
+islandgen.err_no_seed = Seed save not bundled. See data/README.md.
+islandgen.cfg.header = Island Generator
+islandgen.cfg.title = Generate this island
+islandgen.cfg.body = Pick how the new island should be laid out, then start.
+islandgen.cfg.row.map = Map
+islandgen.cfg.row.rels = Relationships
+islandgen.cfg.row.map.desc  = Pick between the classic 100% layout and a fresh random terrain
+islandgen.cfg.row.rels.desc = How miis on this island know each other
+islandgen.cfg.row.batch       = Batch import LTD miis
+islandgen.cfg.row.batch.desc  = Overwrite mii slots with .ltd files dropped via MTP
+islandgen.cfg.batch.yes       = Yes
+islandgen.cfg.batch.no        = No
+islandgen.batchltd.header     = Island Generator
+islandgen.batchltd.title      = Drop .ltd files via MTP
+islandgen.batchltd.body1      = Place every .ltd you want imported into this folder:
+islandgen.batchltd.body2      = Then press A to import them and continue generating.
+islandgen.batchltd.mtp_on     = enable MTP
+islandgen.batchltd.mtp_off    = disable MTP
+islandgen.batchltd.go         = import & continue
+islandgen.batchltd.footer     = Y  MTP     X  import & continue     B  back
+islandgen.cfg.row.fetch = Fetch Miis from TomoShare
+islandgen.cfg.rels.dense = Random
+islandgen.cfg.rels.none = Everyone unknown
+islandgen.cfg.fetch.on = Yes (~30–60s)
+islandgen.cfg.fetch.off = Skip
+islandgen.cfg.go = Generate
+islandgen.cfg.skip = Skip
+islandgen.cfg.footer = Up/Down  select    Left/Right  change    A  generate    B  skip
+islandgen.map.random = Random
+islandgen.map.classic = Classic
+islandgen.run.header = Island Generator
+islandgen.run.title = Generating island
+islandgen.run.starting = Starting…
+islandgen.run.cancel = Cancel
+islandgen.run.dismiss_done = Done
+islandgen.run.dismiss_cancel = Back
+islandgen.run.dismiss_error = OK
+islandgen.run.footer = B  cancel (mid-run)    A  continue (when done)
+
+# ── Save bundle workflow (user-picker "+" tile) ──────────────────────────────
+userpick.new_bundle = new island
+bundle.create.title = Create a new island
+bundle.create.body = Pick a Switch user on the next screen to apply this new island to. A copy is also saved as a bundle on your SD card for later.
+bundle.create.footer = A  create    B  back
+bundle.blank.title = Standard 100% save
+bundle.blank.desc = Apply the bundled 100% save as-is. All shops unlocked, 70 placeholder miis.
+bundle.generated.title = + Island generator
+bundle.generated.desc = Same, plus run the on-Switch Island Generator right after.
+bundle.created = Bundle created:
+bundle.apply.title = Apply this island to:
+bundle.apply.footer = Left/Right  navigate    A  apply    B  cancel
+bundle.dismissed = Cancelled.
+bundle.apply.overwrite.title = This user already has a save
+bundle.apply.overwrite.l1 = Applying the bundle will overwrite their existing save.
+bundle.apply.overwrite.l2 = Their current backups stay on the SD card.
+bundle.apply.overwrite.yes = Overwrite
+bundle.apply.overwrite.no = Cancel
+
+# ── WebUI tab ────────────────────────────────────────────────────────────────
+webui.log.title = activity log
+webui.log.empty = no activity yet
+webui.active = Active
+webui.inactive = Inactive
+webui.footer = L/R  tab    X  restart server    Y  toggle MTP    B/+  back
+webui.mtp.start = Start MTP
+webui.mtp.stop = Stop MTP
+webui.mtp.waiting = Waiting…
+webui.mtp.warn.title = Start USB file-sharing?
+webui.mtp.warn.l1 = MTP only works on real Switch hardware.
+webui.mtp.warn.l2 = On Ryujinx and most emulators it will crash the app.
+webui.mtp.warn.l3 = This prompt only appears once.
+webui.mtp.warn.yes = Start
+webui.mtp.warn.no = Cancel
+
+# ── Textures (UGC) tab ───────────────────────────────────────────────────────
+ugc.filter = Filter
+ugc.search.placeholder = Tap or  -  to search...
+ugc.no.matches = no matches
+ugc.no.preview = no preview
+ugc.import = import
+ugc.exportpic = export pic
+ugc.exportltd = export .ltd
+ugc.removebg = remove BG
+ugc.footer = ZL/ZR  scroll    Up/Down  select    A  import    Y  export pic    export .ltd  (touch)    X  remove BG    -  search    L/R  tab    B/+  back
+ugc.rename.guide = Rename UGC slot
+ugc.rename.ok = Renamed.
+ugc.rename.fail = Rename failed:
+ugc.kind.picker.title = Filter by category
+ugc.kind.all = All
+ugc.kind.food = Food
+ugc.kind.cloth = Clothing
+ugc.kind.goods = Treasure
+ugc.kind.interior = Interior
+ugc.kind.exterior = Exterior
+ugc.kind.map_object = Objects
+ugc.kind.map_floor = Landscaping
+ugc.kind.face_paint = Face Paint
+
+# ── Player tab ───────────────────────────────────────────────────────────────
+player.parse.fail.l1 = Player.sav couldn't be parsed — restore from a backup or
+player.parse.fail.l2 = re-open Tomodachi Life once to let the game rewrite it.
+player.notfound.hint = Did you set up your island in Tomodachi Life yet?
+player.loading = loading current player save...
+player.kbd.edit = edit with keyboard
+player.money.type = type new amount
+player.edit.pron = edit pronunciation
+player.cycle.lang = Left/Right  cycle language
+player.cycle.currency = Left/Right  cycle currency
+player.cycle.tone = Left/Right  cycle tone
+player.cycle.size = Left/Right  cycle size
+player.cycle.region = Left/Right  cycle region
+player.islandsize.warn = Other sizes will corrupt the save file!
+player.wishes.liberated = currently liberated
+player.wishes.bulk = Bulk wish actions  (touch)
+player.wishes.unlock = Unlock All Wishes (268)
+player.wishes.unlock.confirm = tap again to UNLOCK all 268
+player.wishes.reset = Reset Liberated Wishes
+player.wishes.reset.confirm = tap again to RESET liberated
+player.footer.pron = ZL/ZR  field    A  name    X  pronunciation    Left/Right  language    L/R  tab    B/+  back
+player.footer.value = ZL/ZR  field    Left/Right  value    A  edit    X  undo    L/R  tab    B/+  back
+player.desc.Name = Your player's display name.
+player.desc.Island = The name of your island.
+player.desc.Money = Current coin balance.
+player.desc.Currency = Regional currency symbol shown in-game.
+player.desc.BootCount = Number of times the game has been launched.
+player.desc.SkinTone = Player hand/skin color (0-5).
+player.desc.BdayDay = Birthday day of the month (1-31).
+player.desc.BdayMonth = Birthday month (1-12).
+player.desc.BdayYear = Birthday year.
+player.desc.IslandSize = Island size preset. Other values corrupt the save!
+player.desc.FountainLv = Wishing fountain upgrade level.
+player.desc.Wishes = Number of wishes made.
+player.desc.Region = Player region (affects seasons and weather).
+
+# ── Map tab ──────────────────────────────────────────────────────────────────
+map.picker.title = pick an actor
+map.picker.filter = filter
+map.picker.any = (any)
+map.slot = slot
+map.row.posX = position X
+map.row.posY = position Y
+map.row.rotation = rotation
+map.row.linked = linked map
+map.add.actor = add new actor
+map.delete.btn = delete (X)
+map.delete.confirm.tap = tap again to delete
+map.place.title = place mode
+map.actor = actor
+map.cursor = cursor
+map.viewer.title = Map viewer
+map.viewer.l1 = Move the cursor with the D-pad or sticks.
+map.viewer.l2 = Tap or press A on an object to inspect.
+map.viewer.l3 = Press Y to place a new object.
+map.viewer.l4 = B exits — you'll get a save / discard
+map.viewer.l5 = prompt if needed.
+map.objects = objects
+map.slots = slots
+
+# ── Mii Stats ────────────────────────────────────────────────────────────────
+mii.header = mii stats
+mii.parse.fail.l1 = Mii.sav couldn't be parsed — restore from a backup or
+mii.parse.fail.l2 = re-open Tomodachi Life once to let the game rewrite it.
+mii.notfound.hint = Did you create a Mii on your island yet?
+mii.loading = loading current mii save...
+mii.no.miis = no miis
+mii.no.relations = no relations
+mii.no.relationships = no relationships
+mii.miis.word = miis
+mii.same.as.name = (same as name)
+mii.cycle.mood = Left/Right  cycle mood
+mii.file = Mii file
+mii.import.ltd = import .ltd
+mii.export.ltd = export .ltd
+
+subtab.stats = Stats
+subtab.items = Items
+subtab.habits = Habits
+subtab.words = Words
+subtab.relations = Relations
+subtab.housing = Housing
+subtab.social = Social
+
+words.slot = Slot
+words.kind = Kind
+words.text = Word Text
+words.pron = Pronunciation  (optional)
+words.same.as.text = (same as text)
+words.edit.text = Edit Text
+words.edit.pron = Edit Pronunciation
+
+rel.your.type = Your type
+rel.their.type = Their type  (auto)
+rel.type = Type
+rel.batch.know = Batch Know
+rel.meter = Meter
+rel.fixed = fixed
+rel.both.directions = both directions set together
+rel.since = Since
+
+bl.filter = filter
+bl.select.item = select item
+bl.no.matches = no matches — press X to clear filter
+
+habits.empty = no habits in this category
+habits.hint = A  toggle active    X  toggle owned    -  clear category    Left/Right  switch category
+
+housing.unavailable = Housing data unavailable in this save.
+housing.unavailable.detail = (Mii.Location.HouseMapId / RoomIndex not found)
+housing.moving = Moving
+housing.moving.hint = Tap a room to drop. The current occupant will be swapped.
+housing.idle.hint = Tap a Mii to pick them up, then tap a room.
+housing.housed = housed
+housing.unhoused = UNHOUSED
+housing.unhoused.lower = unhoused
+housing.house = house
+housing.houses = HOUSES
+housing.no.houses = (no houses on this island — place one in-game first)
+housing.all.housed = (all miis are housed)
+housing.slot.short = slot
+housing.room = room
+housing.drop.here = drop here
+housing.empty.paren = (empty)
+housing.add.resident = add resident
+housing.delete = delete
+housing.vacate = vacate
+housing.cancel = Cancel
+housing.evict = Evict
+housing.footer.idle = A  pick mii / drop    Y  subtab    L/R  tab    B/+  back
+housing.footer.picked = A  drop / pick    -  evict picked    B  cancel pick    L/R  tab
+
+share.search = search
+share.page = page
+share.sort = sort
+share.sort.newest = newest
+share.sort.oldest = oldest
+share.sort.likes = likes
+share.importable.only = importable only
+share.fetching = Press Y to cycle into Browse — fetching first page…
+share.unnamed = (unnamed)
+share.by = by
+share.likes = likes
+share.image.failed = image failed
+share.platform = platform
+share.gender = gender
+share.mii.id = mii id
+share.overwrite.slot = overwrite slot
+share.slot = slot
+share.slot.empty = slot is empty
+share.replaces = replaces
+share.download.overwrite = Download & overwrite
+share.footer = A  details    X  search    D-pad  navigate / page    ZL/ZR  mii  (target slot)    Y  subtab    B  back
+
+mii.field.Name = Name
+mii.field.Level = Level
+mii.field.LvMeter = Lv Meter
+mii.field.Money = Money
+mii.field.BdayDay = Bday Day
+mii.field.BdayMonth = Bday Month
+mii.field.BirthYear = Birth Year
+mii.field.DirectAge = Direct Age
+mii.field.Activeness = Activeness
+mii.field.Audacity = Audacity
+mii.field.Commonsense = Commonsense
+mii.field.Gaiety = Gaiety
+mii.field.Sociability = Sociability
+mii.field.BondMeter = Bond Meter
+mii.field.Mood = Mood
+mii.field.Fullness = Fullness
+mii.desc.Name = The Mii's in-game display name.
+mii.desc.Level = Friendship level with the player.
+mii.desc.LvMeter = Progress bar toward the next level (0-100).
+mii.desc.Money = Coins currently held by this Mii.
+mii.desc.BdayDay = Birthday day of the month (1-31).
+mii.desc.BdayMonth = Birthday month (1-12).
+mii.desc.BirthYear = Year of birth.
+mii.desc.DirectAge = Age override. -1 means auto (from birthday).
+mii.desc.Activeness = How active and energetic the Mii is (1-10).
+mii.desc.Audacity = How bold and daring the Mii is (1-10).
+mii.desc.Commonsense = How wise and sensible the Mii is (1-10).
+mii.desc.Gaiety = How cheerful and upbeat the Mii is (1-10).
+mii.desc.Sociability = How sociable and outgoing the Mii is (1-10).
+mii.desc.BondMeter = Strength of the bond with the player (0-100).
+mii.desc.Mood = Current emotional state.
+mii.desc.Fullness = How well-fed the Mii is. Can exceed 100 with certain items.
+
+mii.footer.social.focus = ZL/ZR  mii    Y  subtab    X  global graph    L/R  tab    B/+  back
+mii.footer.social.global = ZL/ZR  mii    Y  subtab    X  focus view    L/R  tab    B/+  back
+mii.footer.words = ZL/ZR  mii    Up/Down  slot    Left/Right  kind    A  text    X  pronunciation    -  undo    Y  subtab    L/R  tab    B/+  back
+mii.footer.relations = ZL/ZR  mii    Up/Down  relation    Left/Right  type    Y  subtab    L/R  tab    B/+  back
+mii.footer.bl.picker = ZL/ZR  item    Up/Down  item    Left/Right  skip 12    A  confirm    B  cancel
+mii.footer.bl = ZL/ZR  mii    D-pad  navigate    A  pick item    -  cycle color    X  clear    Y  subtab    L/R  tab    B/+  back
+mii.footer.housing.idle = D-pad  navigate    A  pick mii / drop    Y  subtab    L/R  tab    B/+  back
+mii.footer.housing.picked = D-pad  navigate    A  drop / pick    -  evict picked    B  cancel pick    L/R  tab
+mii.footer.browse = Up/Down  mii    Left/Right  page    ZL/ZR  mii  (target slot)    A  details    X  search    -  sort    B/Y  back
+mii.footer.browse.detail = ZL/ZR  mii  (target slot)    A  download & overwrite    B  back to list
+mii.footer.stats.name = ZL/ZR  mii    Up/Down  field    Left/Right  select    A  confirm    X  pronunciation    Y  subtab    L/R  tab    B/+  back
+mii.footer.stats.value = ZL/ZR  mii    Up/Down  field    Left/Right  value    X  undo    Y  subtab    L/R  tab    B/+  back

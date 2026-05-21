@@ -9,6 +9,7 @@
 #include "mii_manager.h"
 #include "save_editor.h"
 #include "save_mount.h"
+#include "i18n.h"
 #include "habits_data.h"
 #include "wishes_data.h"
 #include "island_generator.h"
@@ -459,7 +460,9 @@ static void HandleUgcItemImport(int fd,const Request& req){
 static void HandleMiiSocial(int fd, const std::string& query) {
     std::string slotStr = GetQueryParam(query, "slot");
     if (slotStr.empty()) { Send500(fd, "Missing slot"); return; }
-    int slot = atoi(slotStr.c_str()) - 1; // convert 1-based slot to 0-based index
+    int slot1 = atoi(slotStr.c_str());
+    if (slot1 < 1 || slot1 > MII_MAX_SLOTS) { Send500(fd, "Bad slot"); return; }
+    int slot = slot1 - 1; // convert 1-based slot to 0-based index
 
     SaveEditor::SavFile sav;
     std::string err;
@@ -592,7 +595,13 @@ static void HandleConfig(int fd) {
     mutexLock(&s_mutex);
     bool acked = s_saveWarnAcked;
     mutexUnlock(&s_mutex);
-    Send200(fd, "application/json", std::string("{\"saveWarnAcked\":") + (acked ? "true" : "false") + "}");
+    // locale: the homebrew is the single source of truth for the UI language.
+    // The WebUI fetches this on init so changing the language in the on-Switch
+    // settings auto-applies to the browser view too.
+    std::string locale = Lang::Current();
+    Send200(fd, "application/json",
+            std::string("{\"saveWarnAcked\":") + (acked ? "true" : "false")
+            + ",\"locale\":\"" + locale + "\"}");
 }
 
 // ── TomodachiShare proxy ─────────────────────────────────────────────────────
@@ -725,7 +734,7 @@ static void HandleShareImport(int fd, const std::string& query) {
     if (!ShareIsSafeToken(id, 16)) { Send500(fd, "Bad id"); return; }
     if (slotStr.empty()) { Send500(fd, "Missing slot"); return; }
     int slot = atoi(slotStr.c_str());
-    if (slot < 1 || slot > 70) { Send500(fd, "Bad slot"); return; }
+    if (slot < 1 || slot > MII_MAX_SLOTS) { Send500(fd, "Bad slot"); return; }
 
     std::string url = "https://api.tomodachishare.com/mii/" + id + "/download";
     std::vector<uint8_t> body; std::string err;

@@ -142,6 +142,14 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 #save-fields-player::-webkit-scrollbar{width:4px}#save-fields-player::-webkit-scrollbar-thumb{background:var(--border)}
 .ed-card{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:12px 14px}
 .ed-card-title{font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;border-bottom:1px solid var(--border);padding-bottom:6px}
+.dash-row{display:flex;justify-content:space-between;gap:12px;padding:3px 0;font-size:.85rem;line-height:1.4}
+.dash-l{color:var(--muted)}
+.dash-v{color:var(--text);text-align:right}
+.dash-dim{color:var(--muted);font-size:.78rem}
+.dash-sub{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:6px 0 4px;padding-bottom:3px;border-bottom:1px dashed var(--border)}
+.dash-note{color:var(--muted);font-size:.8rem;font-style:italic;padding:6px 0}
+#player-content-edit,#player-content-dashboard{flex:1;min-height:0;display:flex;flex-direction:column}
+#player-content-dashboard{padding:12px 16px;gap:10px;overflow-y:auto}
 .ed-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px}
 .ed-field{display:flex;flex-direction:column;gap:3px}
 .ed-label{font-size:.75rem;color:var(--muted)}
@@ -409,11 +417,39 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
 .br-import-box .br-import-action .btn-primary{padding:10px 14px;font-size:.92rem;font-weight:600;width:100%}
 .br-import-hint{font-size:.7rem;color:var(--muted);font-style:italic}
 /* ── Map tab ─────────────────────────────────────────────────────────── */
+#map-toolbar{flex-wrap:wrap;align-items:center;row-gap:6px}
 .map-layout{display:flex;gap:10px;padding:10px 12px;flex:1;min-height:0}
 .map-canvas-wrap{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:6px;align-items:center}
-#map-canvas{width:100%;max-width:960px;height:auto;aspect-ratio:3/2;background:var(--surface2);border:1px solid var(--border);border-radius:5px;image-rendering:pixelated;touch-action:manipulation;cursor:crosshair;display:block}
+#map-canvas{width:100%;max-width:960px;height:auto;aspect-ratio:3/2;background:var(--surface2);border:1px solid var(--border);border-radius:5px;image-rendering:pixelated;touch-action:none;cursor:crosshair;display:block}
 #map-canvas.placing{cursor:cell;outline:2px dashed var(--accent);outline-offset:-2px}
-.map-hud{font-size:.78rem;color:var(--muted);font-style:italic;text-align:center}
+#map-canvas.panning{cursor:grabbing}
+.map-hud{font-size:.78rem;color:var(--muted);font-style:italic;text-align:center;min-height:1.1em}
+/* toolbar: tool switcher + zoom + icon buttons */
+.map-tool-group{display:flex;gap:2px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:2px}
+.map-tool{background:transparent;border:none;color:var(--muted);padding:4px 11px;border-radius:3px;cursor:pointer;font-size:.78rem;font-family:inherit}
+.map-tool:hover{color:var(--text)}
+.map-tool.active{background:var(--accent);color:var(--bg);font-weight:bold}
+.map-icon-btn{background:var(--surface2);border:1px solid var(--border);color:var(--text);width:28px;height:28px;border-radius:3px;cursor:pointer;font-size:.95rem;display:inline-flex;align-items:center;justify-content:center;padding:0}
+.map-icon-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.map-icon-btn:disabled{opacity:.4;cursor:default}
+.map-zoom-group{display:flex;align-items:center;gap:3px}
+.map-zoom-group span{font-size:.74rem;color:var(--muted);min-width:40px;text-align:center}
+/* tile palette (paint tool) */
+.map-tile-palette{display:grid;grid-template-columns:repeat(auto-fill,minmax(56px,1fr));gap:4px;margin-top:6px}
+.map-tile-swatch{display:flex;flex-direction:column;align-items:center;gap:3px;padding:4px 2px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--surface2);font-size:.6rem;color:var(--muted);text-align:center;line-height:1.15}
+.map-tile-swatch:hover{border-color:var(--accent)}
+.map-tile-swatch.active{border-color:var(--accent);background:var(--surface);color:var(--text)}
+.map-tile-swatch .chip{width:100%;height:20px;border-radius:3px;border:1px solid rgba(0,0,0,.35)}
+.map-brush-row{display:flex;gap:4px;margin:6px 0 2px}
+.map-brush-row button{flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:5px 0;border-radius:3px;cursor:pointer;font-size:.76rem;font-family:inherit}
+.map-brush-row button.active{border-color:var(--accent);color:var(--accent);background:var(--surface)}
+/* stats panel */
+.map-stats-card{background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:8px 10px;margin-bottom:8px}
+.map-stats-card h4{margin:0 0 6px;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--accent)}
+.map-stat-row{display:flex;justify-content:space-between;font-size:.8rem;padding:2px 0;gap:8px}
+.map-stat-row .v{color:var(--text);font-weight:bold;white-space:nowrap}
+.map-stat-bar{height:6px;border-radius:3px;background:var(--border);overflow:hidden;margin:1px 0 5px}
+.map-stat-bar>span{display:block;height:100%}
 .map-inspector{flex:0 0 290px;min-width:240px;max-width:290px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;max-height:calc(100vh - 220px)}
 .map-ins-row{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:.82rem}
 .map-ins-row label{flex:0 0 90px;color:var(--muted);font-size:.78rem}
@@ -470,6 +506,8 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
   .map-inspector{max-height:none;flex:0 0 auto}
   .map-ins-row label{flex:0 0 78px;font-size:.75rem}
   .map-actor-picker .map-actor-results{max-height:220px}
+  .map-tool{padding:6px 9px}
+  .map-tile-palette{grid-template-columns:repeat(auto-fill,minmax(64px,1fr))}
 }
 </style>
 </head>
@@ -649,7 +687,12 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
     <button class="btn" onclick="exportSav('player')">export Player.sav</button>
     <div class="status info" id="save-status-player"></div>
   </div>
-  <div id="save-fields-player"></div>
+  <div class="mii-subtab-bar" id="player-subtab-bar">
+    <button class="mii-subtab active" data-i18n="player.subtab.edit" onclick="switchPlayerSubTab('edit',this)">edit</button>
+    <button class="mii-subtab" data-i18n="player.subtab.dashboard" onclick="switchPlayerSubTab('dashboard',this)">dashboard</button>
+  </div>
+  <div id="player-content-edit"><div id="save-fields-player"></div></div>
+  <div id="player-content-dashboard" style="display:none"><div id="player-dashboard-panel"></div></div>
 </div>
 
 <!-- Mii Stats Panel -->
@@ -688,14 +731,28 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
   <div class="toolbar" id="map-toolbar">
     <button class="btn btn-primary" id="map-load-btn" onclick="loadMap()">load Map.sav</button>
     <button class="btn btn-gold" id="map-apply-btn" disabled onclick="applyMap()">apply to Switch</button>
-    <button class="btn" id="map-place-btn" disabled onclick="mapStartPlace()" title="Add a new object">+ place object</button>
     <button class="btn" onclick="exportSav('map')">export Map.sav</button>
+    <button class="btn" id="map-png-btn" disabled onclick="mapExportPng()" title="Save the island as a PNG image">export PNG</button>
+    <div class="map-tool-group">
+      <button class="map-tool active" id="map-tool-select" data-i18n="map.tool.select" onclick="mapSetTool('select')" title="Select &amp; edit objects">select</button>
+      <button class="map-tool" id="map-tool-paint" data-i18n="map.tool.paint" onclick="mapSetTool('paint')" title="Paint floor tiles">paint</button>
+      <button class="map-tool" id="map-tool-stats" data-i18n="map.tool.stats" onclick="mapSetTool('stats')" title="Map statistics">stats</button>
+    </div>
+    <button class="btn" id="map-place-btn" disabled onclick="mapStartPlace()" title="Add a new object">+ object</button>
+    <button class="map-icon-btn" id="map-undo-btn" disabled onclick="mapUndo()" title="Undo (Ctrl+Z)">&#8630;</button>
+    <button class="map-icon-btn" id="map-redo-btn" disabled onclick="mapRedo()" title="Redo (Ctrl+Y)">&#8631;</button>
+    <div class="map-zoom-group">
+      <button class="map-icon-btn" onclick="mapZoomBy(-1)" title="Zoom out">&minus;</button>
+      <span id="map-zoom-label">100%</span>
+      <button class="map-icon-btn" onclick="mapZoomBy(1)" title="Zoom in">+</button>
+      <button class="map-icon-btn" onclick="mapZoomReset()" title="Reset view">&#9974;</button>
+    </div>
     <div class="status info" id="map-status"></div>
   </div>
   <div class="map-layout">
     <div class="map-canvas-wrap">
       <canvas id="map-canvas" width="720" height="480"></canvas>
-      <div class="map-hud" id="map-hud">— click an object to inspect</div>
+      <div class="map-hud" id="map-hud">— load Map.sav to begin</div>
     </div>
     <aside class="map-inspector" id="map-inspector">
       <div class="bl-section">
@@ -743,6 +800,10 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
 const LOCALE_META = [
   {code:'en', label:'English'},
   {code:'fr', label:'Français'},
+  {code:'es', label:'Español'},
+  {code:'de', label:'Deutsch'},
+  {code:'ru', label:'Русский'},
+  {code:'zh', label:'简体中文'},
 ];
 const LOCALES = {
   en: {
@@ -757,6 +818,8 @@ const LOCALES = {
     'subtab.relations':'relations',
     'subtab.social':'social',
     'subtab.housing':'housing',
+    'player.subtab.edit':'edit',
+    'player.subtab.dashboard':'dashboard',
     'warn.title':'Warning',
     'warn.body':' — Modifying save data can break your game. Make sure you have a backup before editing.',
     'warn.dismiss':'Got it',
@@ -792,6 +855,18 @@ const LOCALES = {
     'map.load':'load Map.sav',
     'map.placeMode':'click an empty tile to place',
     'map.placeCancel':'cancel placement',
+    'map.tool.select':'select',
+    'map.tool.paint':'paint',
+    'map.tool.stats':'stats',
+    'map.paint.title':'paint floor tiles',
+    'map.paint.help':'Pick a tile, then click &amp; drag on the island. Alt+click picks the tile under the cursor.',
+    'map.paint.brush':'brush',
+    'map.paint.tile':'tile',
+    'map.stats.title':'map statistics',
+    'map.stats.load':'Load Map.sav to see statistics.',
+    'map.stats.objects':'objects',
+    'map.stats.terrain':'terrain',
+    'map.stats.placed':'placed objects',
   },
   fr: {
     'tab.textures':'textures',
@@ -805,6 +880,8 @@ const LOCALES = {
     'subtab.relations':'relations',
     'subtab.social':'social',
     'subtab.housing':'logement',
+    'player.subtab.edit':'modifier',
+    'player.subtab.dashboard':'tableau de bord',
     'warn.title':'Attention',
     'warn.body':" — Modifier les sauvegardes peut casser votre partie. Faites une copie avant d'éditer.",
     'warn.dismiss':'Compris',
@@ -841,10 +918,228 @@ const LOCALES = {
     'map.placeMode':'cliquez sur une case vide pour placer',
     'map.placeCancel':'annuler le placement',
   },
+  es: {
+    'tab.textures':'texturas',
+    'tab.mii':'mii',
+    'tab.player':'jugador',
+    'tab.map':'mapa',
+    'subtab.stats':'stats',
+    'subtab.belongings':'objetos',
+    'subtab.habits':'hábitos',
+    'subtab.words':'palabras',
+    'subtab.relations':'relaciones',
+    'subtab.social':'social',
+    'subtab.housing':'vivienda',
+    'player.subtab.edit':'editar',
+    'player.subtab.dashboard':'panel',
+    'warn.title':'Aviso',
+    'warn.body':' — Modificar los datos de guardado puede dañar tu partida. Asegúrate de tener una copia antes de editar.',
+    'warn.dismiss':'Entendido',
+    'settings.title':'Ajustes',
+    'settings.encoder':'Codificador',
+    'settings.bc1':'Modo BC1',
+    'settings.fit':'Ajuste',
+    'settings.matte':'Fondo',
+    'settings.language':'Idioma',
+    'settings.languageHint':'Idioma de la app. Ayuda a traducir — consulta el README en GitHub.',
+    'btn.loadMii':'cargar Mii.sav',
+    'btn.loadPlayer':'cargar Player.sav',
+    'btn.apply':'aplicar a Switch',
+    'btn.refresh':'actualizar',
+    'btn.import':'importar',
+    'btn.exportPic':'exportar img',
+    'btn.exportLtd':'exportar .ltd',
+    'btn.importLtd':'importar .ltd',
+    'btn.removebg':'quitar fondo',
+    'map.inspector.empty':'ningún objeto seleccionado',
+    'map.inspector.title':'objeto',
+    'map.actor':'tipo',
+    'map.position':'posición',
+    'map.rotation':'rotación',
+    'map.linkedMap':'id de mapa vinculado',
+    'map.residents':'residentes',
+    'map.delete':'eliminar',
+    'map.placeHere':'colocar aquí',
+    'map.actorPicker.title':'elige un tipo',
+    'map.actorPicker.search':'filtrar por nombre',
+    'map.empty':'espacio vacío',
+    'map.unsaved':'cambios sin guardar',
+    'map.load':'cargar Map.sav',
+    'map.placeMode':'haz clic en una casilla vacía para colocar',
+    'map.placeCancel':'cancelar colocación',
+  },
+  de: {
+    'tab.textures':'Texturen',
+    'tab.mii':'Mii',
+    'tab.player':'Spieler',
+    'tab.map':'Karte',
+    'subtab.stats':'Werte',
+    'subtab.belongings':'Sachen',
+    'subtab.habits':'Gewohnheiten',
+    'subtab.words':'Wörter',
+    'subtab.relations':'Beziehungen',
+    'subtab.social':'Sozial',
+    'subtab.housing':'Wohnung',
+    'player.subtab.edit':'bearbeiten',
+    'player.subtab.dashboard':'Übersicht',
+    'warn.title':'Warnung',
+    'warn.body':' — Speicherdaten zu ändern kann dein Spiel beschädigen. Erstelle vor dem Bearbeiten ein Backup.',
+    'warn.dismiss':'Verstanden',
+    'settings.title':'Einstellungen',
+    'settings.encoder':'Encoder',
+    'settings.bc1':'BC1-Modus',
+    'settings.fit':'Anpassung',
+    'settings.matte':'Hintergrund',
+    'settings.language':'Sprache',
+    'settings.languageHint':'Anzeigesprache der App. Hilf beim Übersetzen — siehe README auf GitHub.',
+    'btn.loadMii':'Mii.sav laden',
+    'btn.loadPlayer':'Player.sav laden',
+    'btn.apply':'auf Switch anwenden',
+    'btn.refresh':'aktualisieren',
+    'btn.import':'importieren',
+    'btn.exportPic':'Bild exportieren',
+    'btn.exportLtd':'.ltd exportieren',
+    'btn.importLtd':'.ltd importieren',
+    'btn.removebg':'BG entfernen',
+    'map.inspector.empty':'kein Objekt ausgewählt',
+    'map.inspector.title':'Objekt',
+    'map.actor':'Typ',
+    'map.position':'Position',
+    'map.rotation':'Rotation',
+    'map.linkedMap':'verknüpfte Karten-ID',
+    'map.residents':'Bewohner',
+    'map.delete':'löschen',
+    'map.placeHere':'hier platzieren',
+    'map.actorPicker.title':'Typ wählen',
+    'map.actorPicker.search':'nach Name filtern',
+    'map.empty':'leerer Slot',
+    'map.unsaved':'ungespeicherte Änderungen',
+    'map.load':'Map.sav laden',
+    'map.placeMode':'klicke ein leeres Feld zum Platzieren',
+    'map.placeCancel':'Platzieren abbrechen',
+  },
+  ru: {
+    'tab.textures':'текстуры',
+    'tab.mii':'мии',
+    'tab.player':'игрок',
+    'tab.map':'карта',
+    'subtab.stats':'статы',
+    'subtab.belongings':'вещи',
+    'subtab.habits':'привычки',
+    'subtab.words':'слова',
+    'subtab.relations':'отношения',
+    'subtab.social':'связи',
+    'subtab.housing':'жильё',
+    'player.subtab.edit':'правка',
+    'player.subtab.dashboard':'сводка',
+    'warn.title':'Внимание',
+    'warn.body':' — Изменение сохранения может сломать игру. Перед редактированием обязательно сделайте резервную копию.',
+    'warn.dismiss':'Понятно',
+    'settings.title':'Настройки',
+    'settings.encoder':'Кодировщик',
+    'settings.bc1':'Режим BC1',
+    'settings.fit':'Подгонка',
+    'settings.matte':'Фон',
+    'settings.language':'Язык',
+    'settings.languageHint':'Язык интерфейса. Помогите с переводом — см. README на GitHub.',
+    'btn.loadMii':'загрузить Mii.sav',
+    'btn.loadPlayer':'загрузить Player.sav',
+    'btn.apply':'применить к Switch',
+    'btn.refresh':'обновить',
+    'btn.import':'импорт',
+    'btn.exportPic':'экспорт изобр.',
+    'btn.exportLtd':'экспорт .ltd',
+    'btn.importLtd':'импорт .ltd',
+    'btn.removebg':'убрать фон',
+    'map.inspector.empty':'объект не выбран',
+    'map.inspector.title':'объект',
+    'map.actor':'тип',
+    'map.position':'позиция',
+    'map.rotation':'поворот',
+    'map.linkedMap':'id связанной карты',
+    'map.residents':'жители',
+    'map.delete':'удалить',
+    'map.placeHere':'поставить здесь',
+    'map.actorPicker.title':'выбрать тип',
+    'map.actorPicker.search':'фильтр по имени',
+    'map.empty':'пустой слот',
+    'map.unsaved':'несохранённые изменения',
+    'map.load':'загрузить Map.sav',
+    'map.placeMode':'кликните пустую клетку для размещения',
+    'map.placeCancel':'отмена размещения',
+  },
+  zh: {
+    'tab.textures':'纹理',
+    'tab.mii':'Mii',
+    'tab.player':'玩家',
+    'tab.map':'地图',
+    'subtab.stats':'属性',
+    'subtab.belongings':'物品',
+    'subtab.habits':'习惯',
+    'subtab.words':'词语',
+    'subtab.relations':'关系',
+    'subtab.social':'社交',
+    'subtab.housing':'住房',
+    'player.subtab.edit':'编辑',
+    'player.subtab.dashboard':'概览',
+    'warn.title':'警告',
+    'warn.body':' — 修改存档数据可能会破坏游戏。请先做好备份再编辑。',
+    'warn.dismiss':'知道了',
+    'settings.title':'设置',
+    'settings.encoder':'编码器',
+    'settings.bc1':'BC1 模式',
+    'settings.fit':'适配',
+    'settings.matte':'背景',
+    'settings.language':'语言',
+    'settings.languageHint':'应用显示语言。欢迎帮忙翻译 — 详见 GitHub 上的 README。',
+    'btn.loadMii':'加载 Mii.sav',
+    'btn.loadPlayer':'加载 Player.sav',
+    'btn.apply':'应用到 Switch',
+    'btn.refresh':'刷新',
+    'btn.import':'导入',
+    'btn.exportPic':'导出图片',
+    'btn.exportLtd':'导出 .ltd',
+    'btn.importLtd':'导入 .ltd',
+    'btn.removebg':'去除背景',
+    'map.inspector.empty':'未选择对象',
+    'map.inspector.title':'对象',
+    'map.actor':'类型',
+    'map.position':'位置',
+    'map.rotation':'旋转',
+    'map.linkedMap':'关联地图 ID',
+    'map.residents':'居民',
+    'map.delete':'删除',
+    'map.placeHere':'放在这里',
+    'map.actorPicker.title':'选择类型',
+    'map.actorPicker.search':'按名称筛选',
+    'map.empty':'空插槽',
+    'map.unsaved':'未保存的更改',
+    'map.load':'加载 Map.sav',
+    'map.placeMode':'点击空白格子放置',
+    'map.placeCancel':'取消放置',
+  },
   // Add new languages here — see the comment block above for instructions.
 };
 let CUR_LOCALE='en';
+// Cache the last-seen homebrew locale in localStorage so first paint is
+// instant on subsequent loads (no en→fr flash). The authoritative source is
+// still /api/config, fetched right after init — see syncLocaleFromHomebrew().
 try{const saved=localStorage.getItem('tomotool.locale');if(saved&&LOCALES[saved])CUR_LOCALE=saved;}catch(_){}
+async function syncLocaleFromHomebrew(){
+  try{
+    const d=await(await fetch('/api/config',{cache:'no-store'})).json();
+    if(d.locale&&LOCALES[d.locale]&&d.locale!==CUR_LOCALE){
+      CUR_LOCALE=d.locale;
+      try{localStorage.setItem('tomotool.locale',d.locale);}catch(_){}
+      applyTranslations();
+    }
+  }catch(_){/* offline / older homebrew without locale field — keep cache */}
+}
+// Poll every 5s so changing the language in the on-Switch settings is
+// reflected without the user manually refreshing the browser. Also re-sync
+// on tab focus so swapping back from another tab picks up any change.
+setInterval(syncLocaleFromHomebrew, 5000);
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) syncLocaleFromHomebrew(); });
 function t(key){
   const cur=LOCALES[CUR_LOCALE];
   if(cur&&cur[key]!==undefined)return cur[key];
@@ -876,6 +1171,7 @@ function switchTab(name, btn) {
   document.getElementById('panel-'+name).classList.add('active');
   document.getElementById('mii-subtab-bar-global').classList.toggle('visible',name==='miistats');
   if(name==='player'||name==='miistats'||name==='map') initSaveWarn();
+  if(name==='map' && typeof mapOnShow==='function') mapOnShow();
 }
 
 // ── Map tab ────────────────────────────────────────────────────────────────────
@@ -884,6 +1180,7 @@ function switchTab(name, btn) {
 // happens client-side against the parsed savMap; "apply to Switch" uploads
 // the modified bytes back via /api/save/upload?file=map.
 const MAP_W = 120, MAP_H = 80;          // fixed by the game
+const MII_MAX_SLOTS = 70;               // mirrors MII_MAX_SLOTS in include/mii_manager.h
 const ACTOR_GROUP_COLORS = ['#e11d48','#2563eb','#16a34a','#9333ea','#ca8a04','#a78bfa','#ef4444'];
 
 // Pre-compute every hash once at script init. We call `murmur3(...)` directly
@@ -907,6 +1204,25 @@ const MAP_H_MII_HOUSE = murmur3('Mii.Location.HouseMapId');
 const MAP_H_MII_ROOM  = murmur3('Mii.Location.RoomIndex');
 const MAP_H_MII_NAME  = murmur3('Mii.Name.Name');
 
+// Paintable terrain tiles — every MAP_TILE_INFO entry that isn't an internal
+// tile (RoomInvalid / UGC / Seaside are engine-only and must not be painted).
+// Built lazily on first use: MAP_TILE_INFO is declared further down the file,
+// so touching it at module-load time would hit the temporal dead zone, throw
+// a ReferenceError, and abort the rest of the script (same hazard the H/
+// murmur3 block above warns about — that's why loadMap() would silently fail).
+let MAP_PAINT_TILES = null;
+let MAP_DEFAULT_TILE = 0;
+function mapEnsurePaintTiles() {
+  if (MAP_PAINT_TILES) return;
+  MAP_PAINT_TILES = Object.keys(MAP_TILE_INFO)
+    .map(k => ({ hash: (+k) >>> 0, c: MAP_TILE_INFO[k].c, col: MAP_TILE_INFO[k].col, i: MAP_TILE_INFO[k].i }))
+    .filter(t => !t.i)
+    .sort((a, b) => a.c.localeCompare(b.c));
+  MAP_DEFAULT_TILE = (MAP_PAINT_TILES.find(t => t.c === 'Grass')
+                    || MAP_PAINT_TILES[0] || { hash: 0 }).hash;
+  if (!mapState.paintTile) mapState.paintTile = MAP_DEFAULT_TILE;
+}
+
 const mapState = {
   loaded: false, loading: false, dirty: false,
   count: 0,            // MapObject.ActorKey array length
@@ -914,7 +1230,459 @@ const mapState = {
   placing: false,      // active actor picker / placement mode
   placeActor: 0,       // hash of actor chosen for placement
   pickerFilter: '',
+  tool: 'select',      // 'select' | 'paint' | 'stats'
+  zoom: 1,             // 1..16 — canvas magnification
+  panX: 0, panY: 0,    // pan offset in canvas pixels
+  paintTile: 0,        // resolved by mapEnsurePaintTiles() at first paint use
+  brush: 1,            // square brush edge length (tiles)
+  hoverX: -1, hoverY: -1,
 };
+
+// Undo / redo. Each entry: { label, tiles?:[{idx,old,new}], objs?:[{slot,field,old,new}] }
+const mapHist = { undo: [], redo: [] };
+
+// ── Undo / redo ────────────────────────────────────────────────────────────
+function mapUpdateUndoButtons() {
+  const u = document.getElementById('map-undo-btn');
+  const r = document.getElementById('map-redo-btn');
+  if (u) u.disabled = mapHist.undo.length === 0;
+  if (r) r.disabled = mapHist.redo.length === 0;
+}
+function mapPushHistory(entry) {
+  if ((!entry.tiles || !entry.tiles.length) && (!entry.objs || !entry.objs.length)) return;
+  mapHist.undo.push(entry);
+  if (mapHist.undo.length > 80) mapHist.undo.shift();
+  mapHist.redo.length = 0;
+  mapUpdateUndoButtons();
+}
+function mapApplyHistory(entry, useNew) {
+  const E = savMap.entries;
+  if (entry.tiles) for (const c of entry.tiles)
+    setUIntAt(E, MAP_H_FLOOR, c.idx, (useNew ? c.new : c.old) >>> 0);
+  if (entry.objs) for (const c of entry.objs) {
+    const v = useNew ? c.new : c.old;
+    if      (c.field === 'actor') setUIntAt (E, MAP_H_ACTOR, c.slot, v >>> 0);
+    else if (c.field === 'x')     setIntAt  (E, MAP_H_POSX,  c.slot, v | 0);
+    else if (c.field === 'y')     setIntAt  (E, MAP_H_POSY,  c.slot, v | 0);
+    else if (c.field === 'rot')   setFloatAt(E, MAP_H_ROTY,  c.slot, +v);
+    else if (c.field === 'link')  setIntAt  (E, MAP_H_LINK,  c.slot, v | 0);
+  }
+}
+function mapUndo() {
+  if (!savMap || !mapHist.undo.length) return;
+  const e = mapHist.undo.pop();
+  mapApplyHistory(e, false);
+  mapHist.redo.push(e);
+  mapState.count = arrSize(savMap.entries, MAP_H_ACTOR);
+  if (mapState.selSlot >= 0 && !MapActorOK(mapState.selSlot)) mapState.selSlot = -1;
+  mapMarkDirty(); mapUpdateUndoButtons();
+  mapDrawCanvas(); renderMapInspector();
+  mapSetStatus('undo: ' + e.label, 'info');
+}
+function mapRedo() {
+  if (!savMap || !mapHist.redo.length) return;
+  const e = mapHist.redo.pop();
+  mapApplyHistory(e, true);
+  mapHist.undo.push(e);
+  mapState.count = arrSize(savMap.entries, MAP_H_ACTOR);
+  if (mapState.selSlot >= 0 && !MapActorOK(mapState.selSlot)) mapState.selSlot = -1;
+  mapMarkDirty(); mapUpdateUndoButtons();
+  mapDrawCanvas(); renderMapInspector();
+  mapSetStatus('redo: ' + e.label, 'info');
+}
+function MapActorOK(slot) {
+  return savMap && (getUIntAt(savMap.entries, MAP_H_ACTOR, slot) >>> 0) !== 0;
+}
+
+// ── Canvas metrics, zoom & pan ─────────────────────────────────────────────
+function mapCanvasEl() { return document.getElementById('map-canvas'); }
+function mapBaseTile() { const cv = mapCanvasEl(); return [cv.width / MAP_W, cv.height / MAP_H]; }
+function mapTileSize() { const b = mapBaseTile(); return [b[0] * mapState.zoom, b[1] * mapState.zoom]; }
+function mapClampPan() {
+  const cv = mapCanvasEl(); if (!cv) return;
+  const ts = mapTileSize(), mw = MAP_W * ts[0], mh = MAP_H * ts[1];
+  if (mw <= cv.width) mapState.panX = (cv.width - mw) / 2;
+  else mapState.panX = Math.min(0, Math.max(cv.width - mw, mapState.panX));
+  if (mh <= cv.height) mapState.panY = (cv.height - mh) / 2;
+  else mapState.panY = Math.min(0, Math.max(cv.height - mh, mapState.panY));
+}
+function mapEventToCanvas(ev) {
+  const cv = mapCanvasEl(), rect = cv.getBoundingClientRect();
+  return [(ev.clientX - rect.left) * (cv.width / rect.width),
+          (ev.clientY - rect.top) * (cv.height / rect.height)];
+}
+function mapCanvasToTile(cx, cy) {
+  const ts = mapTileSize();
+  return [Math.floor((cx - mapState.panX) / ts[0]),
+          Math.floor((cy - mapState.panY) / ts[1])];
+}
+function mapUpdateZoomLabel() {
+  const l = document.getElementById('map-zoom-label');
+  if (l) l.textContent = Math.round(mapState.zoom * 100) + '%';
+}
+function mapApplyZoom(z, ax, ay) {
+  z = Math.max(1, Math.min(16, z));
+  if (z === mapState.zoom) return;
+  const ratio = z / mapState.zoom;
+  mapState.panX = ax - (ax - mapState.panX) * ratio;
+  mapState.panY = ay - (ay - mapState.panY) * ratio;
+  mapState.zoom = z;
+  mapClampPan(); mapUpdateZoomLabel(); mapDrawCanvas();
+}
+function mapZoomBy(dir) {
+  const cv = mapCanvasEl();
+  mapApplyZoom(mapState.zoom * (dir > 0 ? 1.5 : 1 / 1.5), cv.width / 2, cv.height / 2);
+}
+function mapZoomReset() {
+  mapState.zoom = 1; mapState.panX = 0; mapState.panY = 0;
+  mapClampPan(); mapUpdateZoomLabel(); mapDrawCanvas();
+}
+function onMapWheel(ev) {
+  if (!savMap) return;
+  ev.preventDefault();
+  const c = mapEventToCanvas(ev);
+  mapApplyZoom(mapState.zoom * (ev.deltaY < 0 ? 1.2 : 1 / 1.2), c[0], c[1]);
+}
+
+// ── Floor painting ─────────────────────────────────────────────────────────
+let mapStroke = null;       // Map<idx,oldHash> for the in-progress paint stroke
+let mapStrokeLast = null;   // [x,y] last brush-stamp tile, for line interpolation
+function mapBrushTiles(cx, cy) {
+  const n = mapState.brush, s = Math.floor((n - 1) / 2), out = [];
+  for (let dx = 0; dx < n; dx++) for (let dy = 0; dy < n; dy++) {
+    const x = cx - s + dx, y = cy - s + dy;
+    if (x >= 0 && y >= 0 && x < MAP_W && y < MAP_H) out.push([x, y]);
+  }
+  return out;
+}
+function mapBeginStroke() { mapStroke = new Map(); mapStrokeLast = null; }
+function mapEndStroke() {
+  if (!mapStroke) return;
+  const tiles = [];
+  mapStroke.forEach((old, idx) => {
+    const nw = getUIntAt(savMap.entries, MAP_H_FLOOR, idx) >>> 0;
+    if (nw !== (old >>> 0)) tiles.push({ idx, old: old >>> 0, new: nw });
+  });
+  mapStroke = null;
+  if (tiles.length) mapPushHistory({ label: 'paint ' + tiles.length + ' tiles', tiles });
+}
+function mapPaintAt(tx, ty) {
+  if (!savMap || !mapState.paintTile) return;
+  let changed = false;
+  for (const t of mapBrushTiles(tx, ty)) {
+    const idx = t[0] * MAP_H + t[1];
+    const old = getUIntAt(savMap.entries, MAP_H_FLOOR, idx) >>> 0;
+    if (old === (mapState.paintTile >>> 0)) continue;
+    if (mapStroke && !mapStroke.has(idx)) mapStroke.set(idx, old);
+    setUIntAt(savMap.entries, MAP_H_FLOOR, idx, mapState.paintTile >>> 0);
+    changed = true;
+  }
+  if (changed) { mapMarkDirty(); mapDrawCanvas(); }
+}
+// Stamp the brush along a straight line from the previous tile to (tx,ty) so a
+// fast drag doesn't leave gaps between sampled pointer positions.
+function mapPaintTo(tx, ty) {
+  if (mapStrokeLast) {
+    let x0 = mapStrokeLast[0], y0 = mapStrokeLast[1];
+    const x1 = tx, y1 = ty;
+    const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    for (;;) {
+      mapPaintAt(x0, y0);
+      if (x0 === x1 && y0 === y1) break;
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; x0 += sx; }
+      if (e2 <  dx) { err += dx; y0 += sy; }
+    }
+  } else {
+    mapPaintAt(tx, ty);
+  }
+  mapStrokeLast = [tx, ty];
+}
+function mapEyedrop(tx, ty) {
+  if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return;
+  const h = getUIntAt(savMap.entries, MAP_H_FLOOR, tx * MAP_H + ty) >>> 0;
+  const ti = MAP_TILE_INFO[h];
+  if (ti && !ti.i) {
+    mapState.paintTile = h;
+    renderMapInspector();
+    mapSetStatus('picked tile: ' + ti.c, 'info');
+  }
+}
+
+// ── Pointer routing (select / paint / pan / pinch-zoom) ────────────────────
+const mapPointers = new Map();   // pointerId -> {cx,cy}
+let mapPanLast = null;           // {cx,cy} while panning
+let mapPinchLast = null;         // {dist,mx,my} while pinching
+function onMapPointerDown(ev) {
+  if (!savMap) return;
+  const cv = mapCanvasEl();
+  try { cv.setPointerCapture(ev.pointerId); } catch (_) {}
+  const c = mapEventToCanvas(ev);
+  mapPointers.set(ev.pointerId, { cx: c[0], cy: c[1] });
+  if (mapPointers.size === 2) {           // second finger → pinch
+    mapEndStroke();
+    const p = [...mapPointers.values()];
+    mapPinchLast = {
+      dist: Math.hypot(p[0].cx - p[1].cx, p[0].cy - p[1].cy),
+      mx: (p[0].cx + p[1].cx) / 2, my: (p[0].cy + p[1].cy) / 2,
+    };
+    mapPanLast = null;
+    return;
+  }
+  if (ev.button === 1 || ev.button === 2) {   // middle / right drag → pan
+    mapPanLast = { cx: c[0], cy: c[1] };
+    cv.classList.add('panning');
+    return;
+  }
+  const tile = mapCanvasToTile(c[0], c[1]);
+  if (mapState.tool === 'paint') {
+    if (ev.altKey) { mapEyedrop(tile[0], tile[1]); return; }
+    mapBeginStroke();
+    mapPaintTo(tile[0], tile[1]);
+  } else {                                    // select / stats
+    if (mapState.placing) { mapDoPlace(tile[0], tile[1]); return; }
+    const slot = mapObjectAt(tile[0], tile[1]);
+    mapState.selSlot = slot;
+    if (slot >= 0 && mapState.tool === 'stats') { mapSetTool('select'); return; }
+    mapDrawCanvas(); renderMapInspector();
+  }
+}
+function onMapPointerMove(ev) {
+  if (!savMap) return;
+  const c = mapEventToCanvas(ev);
+  if (mapPointers.has(ev.pointerId)) mapPointers.set(ev.pointerId, { cx: c[0], cy: c[1] });
+  if (mapPointers.size === 2 && mapPinchLast) {
+    const p = [...mapPointers.values()];
+    const dist = Math.hypot(p[0].cx - p[1].cx, p[0].cy - p[1].cy);
+    const mx = (p[0].cx + p[1].cx) / 2, my = (p[0].cy + p[1].cy) / 2;
+    mapState.panX += mx - mapPinchLast.mx;
+    mapState.panY += my - mapPinchLast.my;
+    if (mapPinchLast.dist > 0) mapApplyZoom(mapState.zoom * (dist / mapPinchLast.dist), mx, my);
+    else { mapClampPan(); mapDrawCanvas(); }
+    mapPinchLast = { dist, mx, my };
+    return;
+  }
+  if (mapPanLast) {
+    mapState.panX += c[0] - mapPanLast.cx;
+    mapState.panY += c[1] - mapPanLast.cy;
+    mapPanLast = { cx: c[0], cy: c[1] };
+    mapClampPan(); mapDrawCanvas();
+    return;
+  }
+  const tile = mapCanvasToTile(c[0], c[1]);
+  mapState.hoverX = tile[0]; mapState.hoverY = tile[1];
+  if (mapStroke) mapPaintTo(tile[0], tile[1]);
+  else if (mapState.tool === 'paint') mapDrawCanvas();
+  mapUpdateHud(tile[0], tile[1]);
+}
+function onMapPointerUp(ev) {
+  const cv = mapCanvasEl();
+  try { cv.releasePointerCapture(ev.pointerId); } catch (_) {}
+  mapPointers.delete(ev.pointerId);
+  if (mapPointers.size < 2) mapPinchLast = null;
+  if (mapPanLast) { mapPanLast = null; cv.classList.remove('panning'); }
+  if (mapStroke) mapEndStroke();
+}
+function onMapKey(ev) {
+  const panel = document.getElementById('panel-map');
+  if (!panel || !panel.classList.contains('active')) return;
+  if (ev.target && /^(INPUT|SELECT|TEXTAREA)$/.test(ev.target.tagName)) return;
+  const k = ev.key.toLowerCase();
+  if ((ev.ctrlKey || ev.metaKey) && k === 'z') { ev.preventDefault(); ev.shiftKey ? mapRedo() : mapUndo(); }
+  else if ((ev.ctrlKey || ev.metaKey) && k === 'y') { ev.preventDefault(); mapRedo(); }
+}
+function mapUpdateHud(tx, ty) {
+  const hud = document.getElementById('map-hud');
+  if (!hud) return;
+  if (!savMap) { hud.textContent = '— load Map.sav to begin'; return; }
+  if (tx == null || tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) {
+    hud.textContent = mapState.tool === 'paint'
+      ? 'paint mode — click & drag to lay tiles (alt+click = eyedropper)'
+      : mapState.tool === 'stats' ? 'island statistics' : 'click an object to inspect';
+    return;
+  }
+  const h = getUIntAt(savMap.entries, MAP_H_FLOOR, tx * MAP_H + ty) >>> 0;
+  const ti = MAP_TILE_INFO[h];
+  let s = '(' + tx + ', ' + ty + ')  ·  ' + (ti ? ti.c : (h === 0 ? 'empty' : 'unknown tile'));
+  const slot = mapObjectAt(tx, ty, 0);
+  if (slot >= 0) s += '  ·  ' + esc(mapActorMeta(getUIntAt(savMap.entries, MAP_H_ACTOR, slot) >>> 0).l);
+  hud.textContent = s;
+}
+
+// ── Tool switching ─────────────────────────────────────────────────────────
+function mapSetTool(tool) {
+  if (tool === 'paint') mapEnsurePaintTiles();
+  mapState.tool = tool;
+  for (const id of ['select', 'paint', 'stats']) {
+    const b = document.getElementById('map-tool-' + id);
+    if (b) b.classList.toggle('active', id === tool);
+  }
+  const cv = mapCanvasEl();
+  if (tool !== 'select' && mapState.placing) {
+    mapState.placing = false;
+    if (cv) cv.classList.remove('placing');
+  }
+  const placeBtn = document.getElementById('map-place-btn');
+  if (placeBtn) placeBtn.disabled = !mapState.loaded || tool !== 'select';
+  renderMapInspector();
+  mapDrawCanvas();
+  mapUpdateHud();
+}
+
+// ── Paint inspector ────────────────────────────────────────────────────────
+function renderMapPaint() {
+  mapEnsurePaintTiles();
+  const cur = MAP_TILE_INFO[mapState.paintTile];
+  let h = '<p style="color:var(--muted);font-size:.8rem;margin:0 0 6px">' + t('map.paint.help') + '</p>';
+  h += '<div class="map-ins-row" style="padding:2px 0 0"><label>' + t('map.paint.brush') + '</label></div>';
+  h += '<div class="map-brush-row">' + [1, 2, 3, 5].map(n =>
+    `<button class="${n === mapState.brush ? 'active' : ''}" onclick="mapSetBrush(${n})">${n}×${n}</button>`).join('') + '</div>';
+  h += '<div class="map-ins-row" style="padding:4px 0 0"><label>' + t('map.paint.tile') + '</label>'
+     + '<span style="font-size:.8rem;color:var(--text)">' + (cur ? esc(cur.c.replace('_', ' ')) : '—') + '</span></div>';
+  h += '<div class="map-tile-palette">' + MAP_PAINT_TILES.map(tl =>
+    `<div class="map-tile-swatch${tl.hash === mapState.paintTile ? ' active' : ''}" onclick="mapPickTile(${tl.hash})" title="${esc(tl.c)}">
+       <span class="chip" style="background:${tl.col}"></span><span>${esc(tl.c.replace('_', ' '))}</span>
+     </div>`).join('') + '</div>';
+  return h;
+}
+function mapSetBrush(n) { mapState.brush = n; renderMapInspector(); mapDrawCanvas(); }
+function mapPickTile(h) { mapState.paintTile = h >>> 0; renderMapInspector(); }
+
+// ── Stats inspector ────────────────────────────────────────────────────────
+function mapComputeStats() {
+  const E = savMap.entries;
+  const count = arrSize(E, MAP_H_ACTOR);
+  let used = 0;
+  const groups = [0, 0, 0, 0, 0, 0, 0];
+  for (let i = 0; i < count; i++) {
+    const a = getUIntAt(E, MAP_H_ACTOR, i) >>> 0;
+    if (!a) continue;
+    used++;
+    groups[mapActorMeta(a).g]++;
+  }
+  const bucket = {};
+  let tileTotal = 0;
+  const fe = findE(E, MAP_H_FLOOR);
+  if (fe && fe.type === 21 && fe.payload && fe.payload.length >= 4 + MAP_W * MAP_H * 4) {
+    const dv = arrDV(fe);
+    for (let i = 0; i < MAP_W * MAP_H; i++) {
+      const h = dv.getUint32(4 + i * 4, true) >>> 0;
+      const ti = MAP_TILE_INFO[h];
+      const name = ti ? ti.c : (h === 0 ? 'empty' : 'unknown');
+      if (!bucket[name]) bucket[name] = { name, col: ti ? ti.col : '#666', n: 0 };
+      bucket[name].n++; tileTotal++;
+    }
+  }
+  const tiles = Object.values(bucket).sort((a, b) => b.n - a.n);
+  return { count, used, groups, tiles, tileTotal };
+}
+function renderMapStats() {
+  if (!mapState.loaded)
+    return '<p style="color:var(--muted);font-size:.85rem;margin:0">' + t('map.stats.load') + '</p>';
+  const s = mapComputeStats();
+  const card = (title, rows) => `<div class="map-stats-card"><h4>${title}</h4>${rows}</div>`;
+  const row = (l, v) => `<div class="map-stat-row"><span>${l}</span><span class="v">${v}</span></div>`;
+  let objRows = row(t('map.stats.placed'), s.used + ' <span style="color:var(--muted)">/ ' + s.count + '</span>');
+  for (let g = 0; g < MAP_ACTOR_GROUPS.length; g++) {
+    if (!s.groups[g]) continue;
+    objRows += `<div class="map-stat-row"><span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${ACTOR_GROUP_COLORS[g]};margin-right:6px;vertical-align:middle"></span>${MAP_ACTOR_GROUPS[g]}</span><span class="v">${s.groups[g]}</span></div>`;
+  }
+  let tileRows = '';
+  const tot = s.tileTotal || 1;
+  for (const tl of s.tiles.slice(0, 14)) {
+    const pc = Math.round(tl.n * 100 / tot);
+    tileRows += row(esc(tl.name.replace('_', ' ')), tl.n + ' <span style="color:var(--muted)">(' + pc + '%)</span>')
+      + `<div class="map-stat-bar"><span style="width:${pc}%;background:${tl.col}"></span></div>`;
+  }
+  if (s.tiles.length > 14) tileRows += `<div class="map-stat-row"><span style="color:var(--muted);font-style:italic">+ ${s.tiles.length - 14} more</span><span></span></div>`;
+  return card(t('map.stats.objects'), objRows)
+       + card(t('map.stats.terrain') + ' (' + s.tileTotal + ' tiles)', tileRows || '<div class="map-stat-row"><span style="color:var(--muted)">no floor data</span><span></span></div>');
+}
+
+// ── Render the floor + objects into any 2D context (canvas draw / PNG) ─────
+function mapRenderInto(ctx, ox, oy, tw, th, opts) {
+  opts = opts || {};
+  const fe = findE(savMap.entries, MAP_H_FLOOR);
+  if (fe && fe.type === 21 && fe.payload && fe.payload.length >= 4 + MAP_W * MAP_H * 4) {
+    const dv = arrDV(fe);
+    for (let x = 0; x < MAP_W; x++) for (let y = 0; y < MAP_H; y++) {
+      ctx.fillStyle = mapTileColor(dv.getUint32(4 + (x * MAP_H + y) * 4, true));
+      ctx.fillRect(Math.floor(ox + x * tw), Math.floor(oy + y * th),
+                   Math.ceil(tw), Math.ceil(th));
+    }
+  } else {
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(ox, oy, MAP_W * tw, MAP_H * th);
+  }
+  ctx.imageSmoothingEnabled = false;
+  for (let i = 0; i < mapState.count; i++) {
+    const actor = getUIntAt(savMap.entries, MAP_H_ACTOR, i) >>> 0;
+    if (!actor) continue;
+    const x = getIntAt(savMap.entries, MAP_H_POSX, i);
+    const y = getIntAt(savMap.entries, MAP_H_POSY, i);
+    if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue;
+    const a = mapActorMeta(actor);
+    const fp = mapActorRect(a, getFloatAt(savMap.entries, MAP_H_ROTY, i));
+    const fx = Math.floor(ox + (x + fp.x0) * tw);
+    const fy = Math.floor(oy + (y + fp.y0) * th);
+    const fw = Math.max(2, Math.ceil(fp.w * tw));
+    const fh = Math.max(2, Math.ceil(fp.h * th));
+    const ic = opts.images === false ? null : mapGetActorImg(a.k);
+    if (ic && ic.loaded && !ic.failed) {
+      ctx.drawImage(ic.img, fx, fy, fw, fh);
+    } else {
+      ctx.fillStyle = ACTOR_GROUP_COLORS[a.g] || '#ef4444';
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(fx, fy, fw, fh);
+      ctx.globalAlpha = 1.0;
+    }
+    if (opts.selSlot === i) {
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+      ctx.strokeRect(fx + 1, fy + 1, fw - 2, fh - 2);
+      ctx.strokeStyle = '#000000'; ctx.lineWidth = 1;
+      ctx.strokeRect(fx, fy, fw, fh);
+    }
+  }
+}
+
+// ── Export the island as a PNG image ───────────────────────────────────────
+function mapExportPng() {
+  if (!savMap) { mapSetStatus('load Map.sav first', 'info'); return; }
+  const SC = 8;
+  const off = document.createElement('canvas');
+  off.width = MAP_W * SC; off.height = MAP_H * SC;
+  const ctx = off.getContext('2d');
+  mapRenderInto(ctx, 0, 0, SC, SC, { selSlot: -1 });
+  off.toBlob(b => {
+    if (!b) { mapSetStatus('PNG export failed', 'err'); return; }
+    const url = URL.createObjectURL(b);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'island-map.png';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    mapSetStatus('exported island-map.png', 'ok');
+  }, 'image/png');
+}
+
+// Adopt an auto-loaded Map.sav (fetched silently for the dashboard) and draw
+// the tab the first time it becomes visible.
+function mapOnShow() {
+  mapEnsurePaintTiles();
+  if (savMap && !mapState.loaded) {
+    mapState.loaded = true;
+    mapState.count = arrSize(savMap.entries, MAP_H_ACTOR);
+    const png = document.getElementById('map-png-btn');
+    if (png) png.disabled = false;
+    const placeBtn = document.getElementById('map-place-btn');
+    if (placeBtn) placeBtn.disabled = mapState.tool !== 'select';
+  }
+  if (mapState.loaded) {
+    mapUpdateZoomLabel(); mapUpdateUndoButtons();
+    mapClampPan(); mapDrawCanvas(); renderMapInspector(); mapUpdateHud();
+  }
+}
 
 function mapSetStatus(text, kind) {
   const s = document.getElementById('map-status');
@@ -1052,10 +1820,18 @@ async function loadMap() {
     mapState.dirty   = false;
     mapState.selSlot = -1;
     mapState.placing = false;
+    mapState.zoom = 1; mapState.panX = 0; mapState.panY = 0;
+    mapHist.undo.length = 0; mapHist.redo.length = 0;
+    mapEnsurePaintTiles();
     document.getElementById('map-apply-btn').disabled = true;
-    document.getElementById('map-place-btn').disabled = false;
+    document.getElementById('map-place-btn').disabled = mapState.tool !== 'select';
+    document.getElementById('map-png-btn').disabled = false;
+    mapUpdateUndoButtons();
+    mapUpdateZoomLabel();
+    mapClampPan();
     mapDrawCanvas();
     renderMapInspector();
+    mapUpdateHud();
     mapSetStatus('loaded ' + mapState.count + ' object slots', 'ok');
   } catch (e) {
     mapSetStatus('load failed: ' + e.message, 'err');
@@ -1089,74 +1865,46 @@ function mapDrawCanvas() {
   if (!cv || !savMap) return;
   const ctx = cv.getContext('2d');
   if (!ctx) return;
-  const W = cv.width, H = cv.height;
-  const tw = W / MAP_W, th = H / MAP_H;
+  mapClampPan();
+  const ts = mapTileSize(), tw = ts[0], th = ts[1];
 
-  // Floor pass — read tile array directly from savMap entry payload.
-  const fe = findE(savMap.entries, MAP_H_FLOOR);
-  if (fe && fe.type === 21 && fe.payload && fe.payload.length >= 4 + MAP_W*MAP_H*4) {
-    const dv = arrDV(fe);
-    for (let x = 0; x < MAP_W; x++) {
-      for (let y = 0; y < MAP_H; y++) {
-        const h = dv.getUint32(4 + (x * MAP_H + y) * 4, true);
-        ctx.fillStyle = mapTileColor(h);
-        ctx.fillRect(Math.floor(x * tw), Math.floor(y * th),
-                     Math.ceil(tw), Math.ceil(th));
-      }
+  // Letterbox background, then the floor + objects through the shared renderer.
+  ctx.fillStyle = '#0d0d0d';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  mapRenderInto(ctx, mapState.panX, mapState.panY, tw, th, { selSlot: mapState.selSlot });
+
+  // Faint tile grid once we're zoomed in enough for it to be useful.
+  if (mapState.zoom >= 3) {
+    ctx.strokeStyle = 'rgba(255,255,255,.07)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 0; x <= MAP_W; x++) {
+      const px = Math.floor(mapState.panX + x * tw) + 0.5;
+      ctx.moveTo(px, mapState.panY); ctx.lineTo(px, mapState.panY + MAP_H * th);
     }
-  } else {
-    ctx.fillStyle = '#1a1a1a';
-    ctx.fillRect(0, 0, W, H);
+    for (let y = 0; y <= MAP_H; y++) {
+      const py = Math.floor(mapState.panY + y * th) + 0.5;
+      ctx.moveTo(mapState.panX, py); ctx.lineTo(mapState.panX + MAP_W * tw, py);
+    }
+    ctx.stroke();
   }
 
-  // Objects pass — draw the ltdimages thumbnail when available, otherwise
-  // fall back to the group color while the image loads (or for actors with
-  // no asset like unknown UGC slots).
-  ctx.imageSmoothingEnabled = false;
-  for (let i = 0; i < mapState.count; i++) {
-    const actor = getUIntAt(savMap.entries, MAP_H_ACTOR, i) >>> 0;
-    if (!actor) continue;
-    const x = getIntAt(savMap.entries, MAP_H_POSX, i);
-    const y = getIntAt(savMap.entries, MAP_H_POSY, i);
-    if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue;
-    const a = mapActorMeta(actor);
-    const rot = getFloatAt(savMap.entries, MAP_H_ROTY, i);
-    const fp = mapActorRect(a, rot);
-    const fx = Math.floor((x + fp.x0) * tw);
-    const fy = Math.floor((y + fp.y0) * th);
-    const fw = Math.max(2, Math.ceil(fp.w * tw));
-    const fh = Math.max(2, Math.ceil(fp.h * th));
-    const ic = mapGetActorImg(a.k);
-    if (ic && ic.loaded && !ic.failed) {
-      ctx.drawImage(ic.img, fx, fy, fw, fh);
-    } else {
-      ctx.fillStyle = ACTOR_GROUP_COLORS[a.g] || '#ef4444';
-      ctx.globalAlpha = 0.85;
-      ctx.fillRect(fx, fy, fw, fh);
-      ctx.globalAlpha = 1.0;
-    }
-    if (i === mapState.selSlot) {
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(fx + 1, fy + 1, fw - 2, fh - 2);
-      ctx.strokeStyle = '#000000';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(fx, fy, fw, fh);
-    }
+  // Brush preview while the paint tool is active.
+  if (mapState.tool === 'paint' && mapState.hoverX >= 0 && mapState.hoverX < MAP_W
+      && mapState.hoverY >= 0 && mapState.hoverY < MAP_H) {
+    const s = Math.floor((mapState.brush - 1) / 2);
+    const ti = MAP_TILE_INFO[mapState.paintTile];
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = ti ? ti.col : '#ffffff';
+    for (const tcell of mapBrushTiles(mapState.hoverX, mapState.hoverY))
+      ctx.fillRect(mapState.panX + tcell[0] * tw, mapState.panY + tcell[1] * th, tw, th);
+    ctx.globalAlpha = 1.0;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(mapState.panX + (mapState.hoverX - s) * tw,
+                   mapState.panY + (mapState.hoverY - s) * th,
+                   mapState.brush * tw, mapState.brush * th);
   }
-}
-
-function mapCanvasCoords(ev) {
-  const cv = document.getElementById('map-canvas');
-  const rect = cv.getBoundingClientRect();
-  const t = ev.touches && ev.touches.length ? ev.touches[0]
-          : (ev.changedTouches && ev.changedTouches.length ? ev.changedTouches[0] : ev);
-  const cx = t.clientX - rect.left;
-  const cy = t.clientY - rect.top;
-  const x = Math.floor(cx / rect.width * MAP_W);
-  const y = Math.floor(cy / rect.height * MAP_H);
-  return [Math.max(0, Math.min(MAP_W - 1, x)),
-          Math.max(0, Math.min(MAP_H - 1, y))];
 }
 
 // Find topmost object whose footprint covers (tx, ty); falls back to nearest
@@ -1180,21 +1928,21 @@ function mapObjectAt(tx, ty, snap = 2) {
   return best;
 }
 
-function onMapCanvasTap(ev) {
-  ev.preventDefault();
-  if (!savMap) return;
-  const [tx, ty] = mapCanvasCoords(ev);
-  if (mapState.placing) { mapDoPlace(tx, ty); return; }
-  mapState.selSlot = mapObjectAt(tx, ty);
-  mapDrawCanvas();
-  renderMapInspector();
-}
-
 function mapBindCanvas() {
   const cv = document.getElementById('map-canvas');
   if (!cv) return;
-  cv.addEventListener('click', onMapCanvasTap);
-  cv.addEventListener('touchend', onMapCanvasTap, {passive:false});
+  cv.addEventListener('pointerdown', onMapPointerDown);
+  cv.addEventListener('pointermove', onMapPointerMove);
+  cv.addEventListener('pointerup', onMapPointerUp);
+  cv.addEventListener('pointercancel', onMapPointerUp);
+  cv.addEventListener('pointerleave', () => {
+    mapState.hoverX = -1; mapState.hoverY = -1;
+    if (mapState.tool === 'paint') mapDrawCanvas();
+    mapUpdateHud();
+  });
+  cv.addEventListener('wheel', onMapWheel, { passive: false });
+  cv.addEventListener('contextmenu', e => e.preventDefault());
+  document.addEventListener('keydown', onMapKey);
 }
 document.addEventListener('DOMContentLoaded', mapBindCanvas);
 
@@ -1203,6 +1951,16 @@ function renderMapInspector() {
   const ttl = document.getElementById('map-ins-title');
   const body = document.getElementById('map-ins-body');
   if (!ttl || !body) return;
+  if (mapState.tool === 'stats') {
+    ttl.textContent = t('map.stats.title');
+    body.innerHTML = renderMapStats();
+    return;
+  }
+  if (mapState.tool === 'paint') {
+    ttl.textContent = t('map.paint.title');
+    body.innerHTML = renderMapPaint();
+    return;
+  }
   if (mapState.placing) {
     ttl.textContent = t('map.actorPicker.title');
     body.innerHTML = renderMapActorPicker();
@@ -1263,13 +2021,18 @@ function renderMapInspector() {
 // ── Field edits ──────────────────────────────────────────────────────────
 function mapEditField(field, value) {
   if (mapState.selSlot < 0) return;
-  const fields = {};
-  if (field === 'x') fields.x = Math.max(0, Math.min(MAP_W-1, value|0));
-  else if (field === 'y') fields.y = Math.max(0, Math.min(MAP_H-1, value|0));
-  else if (field === 'link') fields.link = value|0;
-  else if (field === 'rot') fields.rot = +value;
+  const slot = mapState.selSlot;
+  const o = mapReadObject(slot);
+  if (!o) return;
+  let nv, oldv;
+  if      (field === 'x')    { nv = Math.max(0, Math.min(MAP_W - 1, value | 0)); oldv = o.x; }
+  else if (field === 'y')    { nv = Math.max(0, Math.min(MAP_H - 1, value | 0)); oldv = o.y; }
+  else if (field === 'link') { nv = value | 0; oldv = o.link; }
+  else if (field === 'rot')  { nv = +value;    oldv = o.rot;  }
   else return;
-  mapWriteObject(mapState.selSlot, fields);
+  if (nv === oldv) return;
+  mapWriteObject(slot, { [field]: nv });
+  mapPushHistory({ label: 'edit ' + field, objs: [{ slot, field, old: oldv, new: nv }] });
   mapMarkDirty();
   mapDrawCanvas();
   renderMapInspector();
@@ -1304,11 +2067,15 @@ function mapSelectAdjacent(dir) {
 function mapDeleteSelected() {
   if (mapState.selSlot < 0) return;
   if (!confirm('Delete this object?')) return;
-  mapWriteObject(mapState.selSlot, {actor: 0});
+  const slot = mapState.selSlot;
+  const old = getUIntAt(savMap.entries, MAP_H_ACTOR, slot) >>> 0;
+  mapWriteObject(slot, { actor: 0 });
+  mapPushHistory({ label: 'delete object', objs: [{ slot, field: 'actor', old, new: 0 }] });
   mapMarkDirty();
+  mapState.selSlot = -1;
   mapDrawCanvas();
   renderMapInspector();
-  mapSetStatus('slot #' + mapState.selSlot + ' cleared', 'ok');
+  mapSetStatus('slot #' + slot + ' cleared', 'ok');
 }
 
 // ── Place new object (actor picker) ──────────────────────────────────────
@@ -1317,6 +2084,7 @@ function mapStartPlace(reassignSlot) {
   // rather than adding a new one. Tracked via mapState.placing = slot index
   // (>= 0) or true (free placement). placeActor is set after picker.
   if (!savMap) return;
+  if (mapState.tool !== 'select') mapSetTool('select');
   mapState.placing = (reassignSlot !== undefined) ? reassignSlot : true;
   mapState.placeActor = 0;
   mapState.pickerFilter = '';
@@ -1380,8 +2148,11 @@ function mapPickActor(hash) {
   mapState.placeActor = hash >>> 0;
   // If we're reassigning an existing slot, do it now and exit place mode.
   if (typeof mapState.placing === 'number' && mapState.placing >= 0) {
-    mapWriteObject(mapState.placing, {actor: mapState.placeActor});
-    mapState.selSlot = mapState.placing;
+    const slot = mapState.placing;
+    const old = getUIntAt(savMap.entries, MAP_H_ACTOR, slot) >>> 0;
+    mapWriteObject(slot, { actor: mapState.placeActor });
+    mapPushHistory({ label: 'change actor', objs: [{ slot, field: 'actor', old, new: mapState.placeActor }] });
+    mapState.selSlot = slot;
     mapState.placing = false;
     document.getElementById('map-canvas').classList.remove('placing');
     mapMarkDirty();
@@ -1398,13 +2169,26 @@ function mapDoPlace(tx, ty) {
     mapSetStatus('pick an actor first', 'info');
     return;
   }
+  if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) {
+    mapSetStatus('click inside the island', 'info');
+    return;
+  }
   // Find an empty slot (actor == 0). Same convention as ltd-save-editor.
   let slot = -1;
   for (let i = 0; i < mapState.count; i++) {
     if ((getUIntAt(savMap.entries, MAP_H_ACTOR, i) >>> 0) === 0) { slot = i; break; }
   }
   if (slot < 0) { mapSetStatus('no empty object slots left', 'err'); return; }
-  mapWriteObject(slot, {actor: mapState.placeActor, x: tx, y: ty, rot: 0, link: -1});
+  const E = savMap.entries;
+  const objs = [
+    { slot, field: 'actor', old: 0,                                  new: mapState.placeActor },
+    { slot, field: 'x',     old: getIntAt(E, MAP_H_POSX, slot),       new: tx },
+    { slot, field: 'y',     old: getIntAt(E, MAP_H_POSY, slot),       new: ty },
+    { slot, field: 'rot',   old: getFloatAt(E, MAP_H_ROTY, slot),     new: 0 },
+    { slot, field: 'link',  old: getIntAt(E, MAP_H_LINK, slot),       new: -1 },
+  ];
+  mapWriteObject(slot, { actor: mapState.placeActor, x: tx, y: ty, rot: 0, link: -1 });
+  mapPushHistory({ label: 'place object', objs });
   mapState.selSlot = slot;
   mapState.placing = false;
   document.getElementById('map-canvas').classList.remove('placing');
@@ -1689,8 +2473,8 @@ function showSpinner(msg){
 function modalClose(){document.getElementById('overlay').classList.remove('open');}
 function modalYes(){}
 
-populateLocaleSelect();
 applyTranslations();
+syncLocaleFromHomebrew();
 loadList();
 
 // ── Drag & Drop ───────────────────────────────────────────────────────────────
@@ -1996,6 +2780,220 @@ function renderPlayerFields(){
   document.getElementById('save-fields-player').innerHTML=identity+birthday+settings+island+economy+wishes;
   renderWishesCard();
 }
+
+// ── Player sub-tabs (edit / dashboard) ────────────────────────────────────────
+let playerSubTab='edit';
+function switchPlayerSubTab(name,btn){
+  playerSubTab=name;
+  document.querySelectorAll('#player-subtab-bar .mii-subtab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('player-content-edit').style.display=(name==='edit'?'':'none');
+  document.getElementById('player-content-dashboard').style.display=(name==='dashboard'?'':'none');
+  // Save-edit toolbar (load / apply / export) belongs to the Edit subtab only.
+  const tb=document.getElementById('save-toolbar-player');
+  if(tb)tb.style.display=(name==='dashboard'?'none':'');
+  if(name==='dashboard'){
+    renderPlayerDashboard();
+    autoLoadForDashboard();
+  }
+}
+
+// Silent best-effort fetches so the dashboard can show stats sourced from all
+// three saves even if the user opened the Player tab without loading them.
+// Failures are silent — the dashboard just shows "—" for the missing section.
+async function autoLoadForDashboard(){
+  const promises=[];
+  if(!savPlayer)promises.push(autoLoadOne('player'));
+  if(!savMii)   promises.push(autoLoadOne('mii'));
+  if(!savMap)   promises.push(autoLoadOne('map'));
+  if(promises.length){
+    await Promise.allSettled(promises);
+    if(playerSubTab==='dashboard')renderPlayerDashboard();
+  }
+}
+async function autoLoadOne(which){
+  try{
+    const r=await fetch('/api/save/download?file='+which);
+    if(!r.ok)return;
+    const buf=await r.arrayBuffer();
+    const sav=parseSav(buf);
+    if(which==='player'){savPlayer=sav;}
+    else if(which==='mii'){savMii=sav;}
+    else if(which==='map'){savMap=sav;}
+  }catch(_){}
+}
+
+// ── Player dashboard renderer ─────────────────────────────────────────────────
+// Read-only aggregate stats sourced from Player.sav + Mii.sav + Map.sav. All
+// sections degrade gracefully when their backing save isn't loaded.
+const DASH_TOTAL_WISHES=268;
+function renderPlayerDashboard(){
+  const root=document.getElementById('player-dashboard-panel');
+  if(!root)return;
+  const num=n=>(n==null||isNaN(n))?'—':(n|0).toLocaleString();
+  const pct=(a,b)=>b?Math.round(a*100/b)+'%':'—';
+  const row=(l,v)=>`<div class="dash-row"><span class="dash-l">${l}</span><span class="dash-v">${v}</span></div>`;
+  const card=(t,body)=>`<div class="ed-card"><div class="ed-card-title">${t}</div>${body}</div>`;
+  const note=t=>`<div class="dash-note">${t}</div>`;
+
+  // ── Island totals ───────────────────────────────────────────────────────────
+  let islandHtml='';
+  if(savPlayer){
+    const e=savPlayer.entries;
+    const islandName=getWStr32(e,H('Player.IslandName'))||'(no name)';
+    const playerName=getWStr32(e,H('Player.Name'))||'(no name)';
+    const playerMoney=getUInt(e,H('Player.Money'));
+    const boot=getUInt(e,H('Player.BootNum'));
+    const fountainLv=getAny(e,H('Liberation.FountainLevel'));
+    const wishes=getAny(e,0xa32f7e47);
+    let miiCount=0,housed=0,totalMiiMoney=0;
+    if(savMii){
+      const me=savMii.entries;
+      const nh=H('Mii.Name.Name');
+      miiCount=arrSize(me,nh);
+      const mh=H('Mii.Belongings.Money');
+      for(let i=0;i<miiCount;i++){
+        if(!getWStr32At(me,nh,i))continue;
+        totalMiiMoney+=getUIntAt(me,mh,i);
+        if(getIntAt(me,HASH_HOUSE_MAPID,i)!==0)housed++;
+      }
+    }
+    const totalMoney=playerMoney+totalMiiMoney;
+    islandHtml=
+      row('Island', `<b>${esc(islandName)}</b>`)+
+      row('Player', esc(playerName))+
+      row('Boot count', num(boot))+
+      row('Fountain level', num(fountainLv))+
+      row('Wishes', `${num(wishes)} <span class="dash-dim">/ ${DASH_TOTAL_WISHES}</span> &nbsp;<span class="dash-dim">(${pct(wishes,DASH_TOTAL_WISHES)})</span>`)+
+      (savMii
+        ? row('Miis', `${num(miiCount)} <span class="dash-dim">/ ${MII_MAX_SLOTS}</span>`)+
+          row('Housed', `${num(housed)} <span class="dash-dim">/ ${num(miiCount)}</span> &nbsp;<span class="dash-dim">(${pct(housed,miiCount)})</span>`)+
+          row('Island money', num(totalMoney)+' <span class="dash-dim">(player '+num(playerMoney)+' + miis '+num(totalMiiMoney)+')</span>')
+        : note('Load Mii.sav to see mii count, housed %, and island money.'));
+  }else{
+    islandHtml=note('Load Player.sav (top toolbar in the Edit subtab) to see island stats.');
+  }
+
+  // ── Moods + personality ─────────────────────────────────────────────────────
+  let moodHtml='';
+  if(savMii){
+    const e=savMii.entries;
+    const nh=H('Mii.Name.Name'),fh=H('Mii.Feeling.Type');
+    const tA=H('Mii.CharacterParam.Activeness');
+    const tB=H('Mii.CharacterParam.Audaciousness');
+    const tC=H('Mii.CharacterParam.Commonsense');
+    const tG=H('Mii.CharacterParam.Gaiety');
+    const tS=H('Mii.CharacterParam.Sociability');
+    const cnt=arrSize(e,nh);
+    const moodCount={};let totalMoods=0;
+    const sums={A:0,B:0,C:0,G:0,S:0};let nTraits=0;
+    for(let i=0;i<cnt;i++){
+      if(!getWStr32At(e,nh,i))continue;
+      const m=getEnumAt(e,fh,i)>>>0;
+      const fo=FEELING_OPTS.find(o=>(o.v>>>0)===m);
+      const label=fo?fo.l:'?';
+      moodCount[label]=(moodCount[label]||0)+1;totalMoods++;
+      sums.A+=getIntAt(e,tA,i);sums.B+=getIntAt(e,tB,i);
+      sums.C+=getIntAt(e,tC,i);sums.G+=getIntAt(e,tG,i);
+      sums.S+=getIntAt(e,tS,i);nTraits++;
+    }
+    const moodRows=Object.entries(moodCount).sort((a,b)=>b[1]-a[1])
+      .map(([k,v])=>row(esc(k),`${num(v)} <span class="dash-dim">(${pct(v,totalMoods)})</span>`)).join('');
+    const avg=n=>nTraits?(sums[n]/nTraits).toFixed(1):'—';
+    moodHtml=
+      `<div class="dash-sub">Mood distribution</div>`+(moodRows||note('No miis with names loaded.'))+
+      `<div class="dash-sub" style="margin-top:10px">Average personality (out of 10)</div>`+
+      row('Activeness',avg('A'))+row('Audacity',avg('B'))+
+      row('Commonsense',avg('C'))+row('Gaiety',avg('G'))+
+      row('Sociability',avg('S'));
+  }else{
+    moodHtml=note('Load Mii.sav to see mood and personality aggregates.');
+  }
+
+  // ── Relationship breakdown ──────────────────────────────────────────────────
+  let relHtml='';
+  if(savMii){
+    const e=savMii.entries;
+    const H_IA=0xf7420afb,H_IB=0x4071f71c,H_BASE=0x8b41897e;
+    // Lifted from /api/mii/social — relationship enum → display name.
+    const REL_NAMES={
+      0xba939a42:'Friend',0xc2d067a7:'Couple',0xb7ce0c18:'Lovers',0x354a0515:'Knows',
+      0x7783d4c3:'Ex',0xfe59f825:'Divorced',0xdcfc7603:'Parent',0xe193c5a2:'Child',
+      0x1918f808:'Sibling',0x3b1d200a:'Sibling',0x2fd9785b:'Grandparent',
+      0x7e3cd550:'Grandchild',0x804172f3:'Relative',0x0784a8dc:'Unknown',
+    };
+    const pairCount=arrSize(e,H_IA);
+    const counts={};let total=0;
+    for(let i=0;i<pairCount;i++){
+      const a=getIntAt(e,H_IA,i),b=getIntAt(e,H_IB,i);
+      if(a<0||b<0)continue;
+      // Each pair stores two directed enums (a→b at i*2, b→a at i*2+1). We
+      // bucket by the "strongest" of the two so a Friend↔Friend pair counts
+      // once as Friend, not twice.
+      const t1=getEnumAt(e,H_BASE,i*2)>>>0;
+      const t2=getEnumAt(e,H_BASE,i*2+1)>>>0;
+      const PRIORITY=[0xc2d067a7,0xb7ce0c18,0xfe59f825,0x7783d4c3,0xdcfc7603,0xe193c5a2,
+                      0x1918f808,0x3b1d200a,0x2fd9785b,0x7e3cd550,0x804172f3,
+                      0xba939a42,0x354a0515,0x0784a8dc];
+      let pick=t1;
+      const i1=PRIORITY.indexOf(t1),i2=PRIORITY.indexOf(t2);
+      if(i2>=0&&(i1<0||i2<i1))pick=t2;
+      const name=REL_NAMES[pick]||('0x'+pick.toString(16));
+      counts[name]=(counts[name]||0)+1;total++;
+    }
+    const sorted=Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+    relHtml=row('Total relationships',num(total))+
+      (sorted.length
+        ? sorted.map(([k,v])=>row(esc(k),`${num(v)} <span class="dash-dim">(${pct(v,total)})</span>`)).join('')
+        : note('No relationships found.'));
+  }else{
+    relHtml=note('Load Mii.sav to see relationship breakdown.');
+  }
+
+  // ── Map coverage ────────────────────────────────────────────────────────────
+  let mapHtml='';
+  if(savMap){
+    const e=savMap.entries;
+    const objCnt=arrSize(e,MAP_H_ACTOR);
+    let used=0;
+    for(let i=0;i<objCnt;i++)if((getUIntAt(e,MAP_H_ACTOR,i)>>>0)!==0)used++;
+    // Floor tiles — group by tile class (Grass, Water, Sand, Road, etc.). The
+    // tile array is stored as MAP_W*MAP_H uint32 hashes; idx = x*MAP_H + y.
+    const fe=findE(e,MAP_H_FLOOR);
+    const bucket={};let mapped=0;
+    if(fe&&fe.type===21&&fe.payload&&fe.payload.length>=4+MAP_W*MAP_H*4){
+      const dv=new DataView(fe.payload.buffer,fe.payload.byteOffset,fe.payload.length);
+      for(let i=0;i<MAP_W*MAP_H;i++){
+        const h=dv.getUint32(4+i*4,true);
+        const info=MAP_TILE_INFO[h>>>0];
+        let cat='Unknown';
+        if(info){
+          // Strip the "_Road" suffix and bucket Road tiles separately so the
+          // breakdown is readable instead of 70 near-duplicate rows.
+          if(info.c.endsWith('_Road'))cat='Road';
+          else cat=info.c;
+        }else if(h===0){cat='Empty';}
+        bucket[cat]=(bucket[cat]||0)+1;mapped++;
+      }
+    }
+    const tiles=Object.entries(bucket).sort((a,b)=>b[1]-a[1]);
+    mapHtml=row('Object slots',`${num(used)} <span class="dash-dim">/ ${num(objCnt)} placed</span>`)+
+      (mapped
+        ? `<div class="dash-sub" style="margin-top:10px">Terrain (${num(mapped)} tiles)</div>`+
+          tiles.slice(0,8).map(([k,v])=>row(esc(k),`${num(v)} <span class="dash-dim">(${pct(v,mapped)})</span>`)).join('')+
+          (tiles.length>8?note(`+ ${tiles.length-8} more tile types`):'')
+        : note('Floor tile data not available in this save.'));
+  }else{
+    mapHtml=note('Load Map.sav to see object placement and terrain stats.');
+  }
+
+  root.innerHTML=
+    card('island',islandHtml)+
+    card('moods &amp; personality',moodHtml)+
+    card('relationships',relHtml)+
+    card('map coverage',mapHtml);
+}
+
 function setSkin(val){
   if(!savPlayer)return;
   setAny(savPlayer.entries,H('Player.SkinColorIndex'),val);
@@ -5744,7 +6742,7 @@ function updateBrowseOverwriteHint(){
   tgt.className='br-import-target';
   if(!savMii){tgt.classList.add('bad');tgt.textContent='⚠ load Mii.sav first';return;}
   const slot=parseInt(slotInp.value);
-  if(!isFinite(slot)||slot<1||slot>70){tgt.classList.add('bad');tgt.textContent='⚠ invalid slot — must be 1–70';return;}
+  if(!isFinite(slot)||slot<1||slot>MII_MAX_SLOTS){tgt.classList.add('bad');tgt.textContent='⚠ invalid slot — must be 1–'+MII_MAX_SLOTS;return;}
   const nh=H('Mii.Name.Name');
   let name='';
   try{name=getWStr32At(savMii.entries,nh,slot-1);}catch(e){}
@@ -5757,7 +6755,7 @@ async function doBrowseImport(id){
   const btn=document.getElementById('br-import-btn');
   if(!slotInp||!status||!btn)return;
   const slot=parseInt(slotInp.value);
-  if(!isFinite(slot)||slot<1||slot>70){status.textContent='bad slot';status.className='status err';return;}
+  if(!isFinite(slot)||slot<1||slot>MII_MAX_SLOTS){status.textContent='bad slot';status.className='status err';return;}
   btn.disabled=true; status.textContent='downloading & importing…'; status.className='status info';
   try{
     const r=await fetch('/api/share/import?id='+encodeURIComponent(id)+'&slot='+slot,{method:'POST'});

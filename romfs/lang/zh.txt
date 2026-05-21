@@ -1,0 +1,514 @@
+# TomoToolNX — 简体中文翻译。
+# Keys to the left of '=' must match en.txt. Translate the right side.
+
+# ── Tab bar ──────────────────────────────────────────────────────────────────
+tab.webui = webui
+tab.textures = 贴图
+tab.mii = mii
+tab.player = 玩家
+tab.map = 地图
+
+# ── Map tab ──────────────────────────────────────────────────────────────────
+map.loading = 正在加载 Map.sav…
+map.empty.slot = 空槽
+map.inspector = 对象
+map.delete.confirm = 删除此对象？
+map.place.prompt = 选择对象类型，然后在格子上按 A
+map.no.empty.slot = 没有空槽了
+map.applied = 已保存
+map.dirty = 有未保存的更改
+map.footer.idle = 十字键/摇杆  移动    A  查看    Y  放置    B  返回    +  退出
+map.footer.inspect = 十字键  移动对象    A  完成    Y  新对象    X  删除    B  取消
+map.footer.picker = 十字键  滚动    A  选择    B  取消
+map.footer.place = 十字键/摇杆  移动    A  放在这里    B  取消
+
+# ── Settings tab ─────────────────────────────────────────────────────────────
+settings.header = 编码
+settings.shape = 画布形状
+settings.shape.hint.square = 256×256 — 默认（食物、服装、宝物…）
+settings.shape.hint.book = 嵌入 3:4 书籍区域；两侧添加黑色边
+settings.shape.hint.tv = 嵌入 16:9 区域；上下添加黑色边
+settings.encoder = 编码器
+settings.encoder.desc = 导入贴图时使用的 BC1 编码器
+settings.encoder.hint.custom = 考虑伽马的 sRGB 拟合。最佳质量（默认）。
+settings.encoder.hint.pca = PCA 端点拟合。更快，对渐变较弱。
+settings.bc1 = BC1 模式
+settings.bc1.desc = 块模式（仅限 Gamma-aware 编码器）
+settings.bc1.disabled = 请切换到 Gamma-aware 编码器以修改。
+settings.bc1.hint.auto = 为每个块选择最佳模式。推荐。
+settings.bc1.hint.fourColor = 颜色更锐利。透明像素保留。
+settings.bc1.hint.threeColor = 针对透明图像优化。颜色细节较少。
+settings.fit = 适配
+settings.fit.hint.cover = 裁剪以填满贴图，保留宽高比。
+settings.fit.hint.contain = 完整图像内置，边缘透明。
+settings.fit.hint.fill = 拉伸以填满，忽略宽高比。
+settings.matte = 背景
+settings.matte.desc = Contain 模式下的留边颜色。
+settings.matte.disabled = 仅在适配设为 Contain 时使用。
+settings.language = 语言
+settings.language.desc = Switch 界面的显示语言。
+settings.language.hint = 帮助翻译 — 请参阅 GitHub 上的 README。
+settings.footer = 上/下  选择    左/右  调整    L/R  切换页    B/+  返回
+
+# ── Player tab field labels ──────────────────────────────────────────────────
+player.field.Name = 名字
+player.field.Island = 岛屿
+player.field.Money = 金钱
+player.field.Currency = 货币
+player.field.BootCount = 启动次数
+player.field.SkinTone = 肤色
+player.field.BdayDay = 生日日
+player.field.BdayMonth = 生日月
+player.field.BdayYear = 生日年
+player.field.IslandSize = 岛屿大小
+player.field.FountainLv = 喷泉等级
+player.field.Wishes = 愿望
+player.field.Region = 地区
+
+# ── Player tab footer ────────────────────────────────────────────────────────
+player.footer = 上/下  选择    左/右  调整    A  编辑    X  撤销    B/+  返回
+
+# ── Backup prompt ────────────────────────────────────────────────────────────
+backup.title = 备份存档数据？
+backup.action = 立即备份
+backup.action.hint = 创建带时间戳的备份
+backup.skip = 跳过备份
+backup.skip.hint = 不备份继续
+backup.footer = A  备份    B  跳过    +  退出
+backup.full.title = {cur}/{max} 个备份 — 删除最旧的以腾出空间？
+backup.full.action = 删除最旧 + 备份
+backup.full.hint = 删除最旧的备份
+backup.footer.full = A  删除 + 备份    B  跳过    +  退出
+backup.tip = {cur} / {max} 个备份
+backup.progress.title = 正在备份存档数据...
+backup.progress.warn = 请勿关闭主机
+mounting.title = 正在挂载存档...
+
+# ── Common labels ────────────────────────────────────────────────────────────
+footer.back = B  返回
+footer.quit = +  退出
+cancel = 取消
+confirm = 确认
+back = 返回
+prev = 上一个
+next = 下一个
+undo = 撤销
+loading = 加载中…
+empty = (空)
+empty.paren = (空)
+none.paren = (无)
+unknown.paren = (未知)
+not.set = (未设置)
+of = 共
+items = 项
+more = 更多
+keyboard = 键盘
+
+# ── Update screens ───────────────────────────────────────────────────────────
+update.checking = 正在检查更新...
+update.footer.checking = B  跳过
+update.available = GitHub 上有新版本可用！
+update.download.from = 从下面下载新的 TomoToolNX.nro：
+update.footer.available = A / B  继续    +  退出
+
+# ── Restore picker ───────────────────────────────────────────────────────────
+restore.header = 恢复备份
+restore.empty.title = 尚无备份
+restore.empty.hint = 在用户选择界面的备份提示中创建一个。
+restore.backups.word = 个备份
+restore.newest.prefix = 最新：
+restore.badge.newest = 最新
+restore.badge.oldest = 最旧
+restore.chip.restore = 恢复
+restore.chip.delete = 删除
+restore.footer = 上/下  导航    A  恢复    X  删除    B  取消
+restore.confirm.delete.title = 删除此备份？
+restore.confirm.restore.title = 恢复此备份？
+restore.confirm.delete.l1 = 此备份将从 SD 卡中永久删除。
+restore.confirm.delete.l2 = 此操作不可撤销。
+restore.confirm.restore.l1 = 当前存档将被此备份的数据
+restore.confirm.restore.l2 = 覆盖。
+restore.progress.title = 正在恢复备份...
+restore.progress.wait = 请稍候。
+
+# ── Settings ─────────────────────────────────────────────────────────────────
+settings.title = 设置
+settings.item.lang = 语言
+settings.item.lang.desc = 应用显示语言 — 帮助翻译请见 GitHub
+settings.item.export = 导出路径
+settings.item.export.desc = 导出贴图时使用的文件夹
+settings.item.maxbk = 最大备份数
+settings.item.maxbk.desc = 保留的存档备份数量上限 (1-99)
+settings.item.restore = 恢复备份
+settings.item.restore.desc = 为所选用户恢复之前的存档备份
+settings.item.theme = 主题
+settings.item.theme.desc = 在全新 Switch 风格界面与原版界面之间切换
+theme.switch = Switch
+theme.original = 原版
+settings.change = 更改
+settings.open = 打开
+settings.backups.none = 无
+settings.backups.available = 可用
+settings.footer.main = 上/下  导航    左/右  调整    A  操作    B  返回
+
+# ── User pick ────────────────────────────────────────────────────────────────
+userpick.title = 选择用户
+userpick.footer = 左/右  导航    A  选择    X  恢复    -  设置    +  退出
+restore.toast.ok = 已恢复备份。
+restore.toast.fail = 恢复失败：
+restore.toast.mount_fail = 挂载失败：
+restore.toast.deleted_last = 已删除备份（该用户没有其他备份）。
+ugc.rename.guide = 重命名 UGC
+ugc.rename.ok = 已重命名。
+ugc.rename.fail = 重命名失败：
+ugc.kind.picker.title = 按类别筛选
+ugc.kind.all = 全部
+ugc.kind.food = 食物
+ugc.kind.cloth = 服装
+ugc.kind.goods = 宝物
+ugc.kind.interior = 室内
+ugc.kind.exterior = 室外
+ugc.kind.map_object = 物件
+ugc.kind.map_floor = 景观
+ugc.kind.face_paint = 面绘
+webui.mtp.start = 启动 MTP
+webui.mtp.stop = 停止 MTP
+webui.mtp.waiting = 等待中…
+webui.mtp.warn.title = 启动 USB 文件共享？
+webui.mtp.warn.l1 = MTP 仅在真实 Switch 硬件上可用。
+webui.mtp.warn.l2 = 在 Ryujinx 等模拟器上，应用会崩溃。
+webui.mtp.warn.l3 = 此提示只出现一次。
+webui.mtp.warn.yes = 启动
+webui.mtp.warn.no = 取消
+bundle.create.title = 创建新岛屿
+bundle.create.body = 在下一界面选择要应用此新岛屿的 Switch 用户。同时会在 SD 卡上保存一份 bundle 副本。
+bundle.create.footer = A  创建    B  返回
+bundle.blank.title = 标准 100% 存档
+bundle.blank.desc = 原样应用 100% 存档。所有商店解锁，70 个占位 Mii。
+bundle.generated.title = + 岛屿生成器
+bundle.generated.desc = 同上，随后在 Switch 上直接运行岛屿生成器。
+bundle.created = Bundle 已创建：
+bundle.apply.title = 将此岛屿应用至：
+bundle.apply.footer = 左/右  导航    A  应用    B  取消
+bundle.dismissed = 已取消。
+bundle.apply.overwrite.title = 该用户已有存档
+bundle.apply.overwrite.l1 = 应用此 bundle 将覆盖其现有存档。
+bundle.apply.overwrite.l2 = 已有的备份仍保留在 SD 卡上。
+bundle.apply.overwrite.yes = 覆盖
+bundle.apply.overwrite.no = 取消
+
+# ── File browser ─────────────────────────────────────────────────────────────
+browse.title.export = 选择导出文件夹
+browse.title.ltd = 选择 .ltd
+browse.title.png_ltd = 选择 PNG 或 .ltd
+browse.current = 当前
+browse.empty = 空文件夹
+browse.footer.export = 上/下  导航    A  打开    Y  设为导出文件夹    X  取消    B  返回
+browse.footer.pick = 上/下  导航    A  打开 / 选择    B  返回    X  取消
+
+# ── Applet warning ───────────────────────────────────────────────────────────
+applet.title = 不支持 Applet 模式
+applet.body.l1 = TomoToolNX 需要完整的系统资源，
+applet.body.l2 = 无法在 Applet 模式（R + 相册）下运行。
+applet.how = 正确的启动方式
+applet.wrong = 错误方式
+applet.wrong.hint = 打开相册
+applet.right = 正确方式
+applet.right.hint = 按住 R  +  打开任意游戏
+applet.note = 游戏不会启动 — 而是会打开自制软件菜单。
+applet.exit = + / B  退出
+applet.footer = B / +  退出
+
+# ── Save warning ─────────────────────────────────────────────────────────────
+warn.title = 警告
+warn.body.l1 = 修改这些值可能会破坏您的游戏。
+warn.body.l2 = 编辑前请在备份标签创建备份。
+warn.understand = 我明白
+
+# ── Thumbnail tip ────────────────────────────────────────────────────────────
+thumbtip.title = 关于物品栏缩略图
+thumbtip.l1 = 您的贴图已导入，但物品栏缩略图
+thumbtip.l2 = 由游戏自身管理，不会自动更新。
+thumbtip.l3 = 刷新方法：在工作室工坊中打开此物品，
+thumbtip.l4 = 进入其贴图编辑器并重新保存 — 游戏
+thumbtip.l5 = 会自动重建缩略图。
+thumbtip.gotit = 知道了
+
+# ── Background removal ───────────────────────────────────────────────────────
+bg.title = 移除背景？
+bg.body.l1 = 所选贴图将被就地修改。
+bg.body.l2 = 此操作最长可能需要 30 秒。
+bg.removing = 正在移除背景...
+
+# ── Back prompt ──────────────────────────────────────────────────────────────
+backprompt.title = 保存更改？
+backprompt.body = 如果选择否，未保存的修改将丢失。
+backprompt.save.back = 保存并返回
+backprompt.save.exit = 保存并退出
+backprompt.discard.back = 放弃并返回
+backprompt.discard.exit = 放弃并退出
+backprompt.footer.back = A  保存    B  放弃    X  取消
+backprompt.footer.exit = A  保存并退出    B  放弃并退出    X  取消
+
+# ── Save feedback / error ────────────────────────────────────────────────────
+save.feedback.title = 已保存！
+save.feedback.body = 更改已成功保存。
+error.title = 错误
+error.footer = B  返回     +  退出
+
+# ── WebUI tab ────────────────────────────────────────────────────────────────
+webui.log.title = 活动日志
+webui.log.empty = 暂无活动
+webui.active = 活动
+webui.inactive = 未活动
+webui.footer = L/R  标签    X  重启服务器    Y  切换 MTP    B/+  返回
+
+# ── Textures (UGC) tab ───────────────────────────────────────────────────────
+ugc.filter = 筛选
+ugc.search.placeholder = 触摸或按  -  搜索...
+ugc.no.matches = 无匹配
+ugc.no.preview = 无预览
+ugc.import = 导入
+ugc.exportpic = 导出图片
+ugc.exportltd = 导出 .ltd
+ugc.removebg = 移除背景
+ugc.footer = ZL/ZR  滚动    上/下  选择    A  导入    Y  导出图片    导出 .ltd  (触摸)    X  移除背景    -  搜索    L/R  标签    B/+  返回
+
+# ── Player tab ───────────────────────────────────────────────────────────────
+player.parse.fail.l1 = Player.sav 解析失败 — 请从备份恢复
+player.parse.fail.l2 = 或重新打开 Tomodachi Life 让游戏重新写入。
+player.notfound.hint = 你已经在 Tomodachi Life 里建立小岛了吗？
+player.loading = 正在加载玩家存档...
+player.kbd.edit = 用键盘编辑
+player.money.type = 输入金额
+player.edit.pron = 编辑发音
+player.cycle.lang = 左/右  切换语言
+player.cycle.currency = 左/右  切换货币
+player.cycle.tone = 左/右  切换肤色
+player.cycle.size = 左/右  切换大小
+player.cycle.region = 左/右  切换地区
+player.islandsize.warn = 其他尺寸将损坏存档！
+player.wishes.liberated = 已实现
+player.wishes.bulk = 批量愿望操作  (触摸)
+player.wishes.unlock = 解锁全部愿望 (268)
+player.wishes.unlock.confirm = 再次点击以解锁全部 268
+player.wishes.reset = 重置已实现愿望
+player.wishes.reset.confirm = 再次点击以重置
+player.footer.pron = ZL/ZR  字段    A  名字    X  发音    左/右  语言    L/R  标签    B/+  返回
+player.footer.value = ZL/ZR  字段    左/右  数值    A  编辑    X  撤销    L/R  标签    B/+  返回
+player.desc.Name = 您的玩家在游戏中的显示名字。
+player.desc.Island = 岛屿的名字。
+player.desc.Money = 当前金币数量。
+player.desc.Currency = 游戏中显示的地区货币符号。
+player.desc.BootCount = 游戏启动的次数。
+player.desc.SkinTone = 玩家的手/肤色 (0-5)。
+player.desc.BdayDay = 生日（日，1-31）。
+player.desc.BdayMonth = 生日（月，1-12）。
+player.desc.BdayYear = 出生年份。
+player.desc.IslandSize = 岛屿尺寸预设。其他值会损坏存档！
+player.desc.FountainLv = 许愿喷泉的升级等级。
+player.desc.Wishes = 已许愿望的数量。
+player.desc.Region = 玩家地区（影响季节和天气）。
+
+# ── Map tab ──────────────────────────────────────────────────────────────────
+map.picker.title = 选择对象
+map.picker.filter = 筛选
+map.picker.any = (全部)
+map.slot = 槽
+map.row.posX = 位置 X
+map.row.posY = 位置 Y
+map.row.rotation = 旋转
+map.row.linked = 关联地图
+map.add.actor = 添加对象
+map.delete.btn = 删除 (X)
+map.delete.confirm.tap = 再次点击以删除
+map.place.title = 放置模式
+map.actor = 对象
+map.cursor = 光标
+map.viewer.title = 地图视图
+map.viewer.l1 = 用十字键或摇杆移动光标。
+map.viewer.l2 = 点击或按 A 查看对象。
+map.viewer.l3 = 按 Y 放置新对象。
+map.viewer.l4 = B 退出 — 必要时会出现保存
+map.viewer.l5 = 或放弃提示。
+map.objects = 对象
+map.slots = 个槽位
+
+# ── Mii Stats ────────────────────────────────────────────────────────────────
+mii.header = mii 数据
+mii.parse.fail.l1 = Mii.sav 解析失败 — 请从备份恢复
+mii.parse.fail.l2 = 或重新打开 Tomodachi Life 让游戏重新写入。
+mii.notfound.hint = 你已经在岛上创建过 Mii 了吗？
+mii.loading = 正在加载 mii 存档...
+mii.no.miis = 无 mii
+mii.no.relations = 无关系
+mii.no.relationships = 无关系
+mii.miis.word = 个 miis
+mii.same.as.name = (与名字相同)
+mii.cycle.mood = 左/右  切换心情
+mii.file = Mii 文件
+mii.import.ltd = 导入 .ltd
+mii.export.ltd = 导出 .ltd
+
+subtab.stats = 数据
+subtab.items = 物品
+subtab.habits = 习惯
+subtab.words = 词语
+subtab.relations = 关系
+subtab.housing = 居住
+subtab.social = 社交
+
+words.slot = 槽
+words.kind = 类型
+words.text = 文本
+words.pron = 发音  (可选)
+words.same.as.text = (与文本相同)
+words.edit.text = 编辑文本
+words.edit.pron = 编辑发音
+
+rel.your.type = 你的类型
+rel.their.type = 对方类型  (自动)
+rel.type = 类型
+rel.batch.know = 全部认识
+rel.meter = 数值
+rel.fixed = 固定
+rel.both.directions = 双向同时设置
+rel.since = 自
+
+bl.filter = 筛选
+bl.select.item = 选择物品
+bl.no.matches = 无匹配 — 按 X 清除筛选
+
+habits.empty = 此类别没有习惯
+habits.hint = A  切换激活    X  切换拥有    -  清空类别    左/右  切换类别
+
+housing.unavailable = 此存档中没有居住数据。
+housing.unavailable.detail = (未找到 Mii.Location.HouseMapId / RoomIndex)
+housing.moving = 正在移动
+housing.moving.hint = 点击房间放下。当前住户会被替换。
+housing.idle.hint = 点击 Mii 拿起，然后点击房间。
+housing.housed = 已入住
+housing.unhoused = 无住所
+housing.unhoused.lower = 无住所
+housing.house = 房屋
+housing.houses = 房屋
+housing.no.houses = (岛上没有房屋 — 请先在游戏中放置一座)
+housing.all.housed = (所有 miis 都有住所)
+housing.slot.short = 槽
+housing.room = 房间
+housing.drop.here = 放在这里
+housing.empty.paren = (空)
+housing.add.resident = 添加住户
+housing.delete = 删除
+housing.vacate = 清空
+housing.cancel = 取消
+housing.evict = 驱逐
+housing.footer.idle = A  拿起 / 放下    Y  子标签    L/R  标签    B/+  返回
+housing.footer.picked = A  放下 / 拿起    -  驱逐    B  取消    L/R  标签
+
+share.search = 搜索
+share.page = 页
+share.sort = 排序
+share.sort.newest = 最新
+share.sort.oldest = 最旧
+share.sort.likes = 喜欢数
+share.importable.only = 仅可导入
+share.fetching = 按 Y 进入浏览 — 正在加载第一页…
+share.unnamed = (无名)
+share.by = 作者
+share.likes = 喜欢
+share.image.failed = 图片加载失败
+share.platform = 平台
+share.gender = 性别
+share.mii.id = mii id
+share.overwrite.slot = 覆盖槽位
+share.slot = 槽
+share.slot.empty = 槽位为空
+share.replaces = 替换
+share.download.overwrite = 下载并覆盖
+share.footer = A  详情    X  搜索    左/右  翻页    ZL/ZR  mii  (目标槽位)    Y  子标签    B  返回
+
+mii.field.Name = 名字
+mii.field.Level = 等级
+mii.field.LvMeter = 等级进度
+mii.field.Money = 金钱
+mii.field.BdayDay = 生日日
+mii.field.BdayMonth = 生日月
+mii.field.BirthYear = 出生年
+mii.field.DirectAge = 直接年龄
+mii.field.Activeness = 活力
+mii.field.Audacity = 大胆
+mii.field.Commonsense = 常识
+mii.field.Gaiety = 欢快
+mii.field.Sociability = 社交
+mii.field.BondMeter = 羁绊
+mii.field.Mood = 心情
+mii.field.Fullness = 饱腹度
+mii.desc.Name = Mii 在游戏中的显示名字。
+mii.desc.Level = 与玩家的友谊等级。
+mii.desc.LvMeter = 通往下一等级的进度条 (0-100)。
+mii.desc.Money = 该 Mii 持有的金币。
+mii.desc.BdayDay = 生日（日，1-31）。
+mii.desc.BdayMonth = 生日（月，1-12）。
+mii.desc.BirthYear = 出生年份。
+mii.desc.DirectAge = 年龄覆盖。-1 表示自动。
+mii.desc.Activeness = Mii 的活跃程度 (1-10)。
+mii.desc.Audacity = Mii 的大胆程度 (1-10)。
+mii.desc.Commonsense = Mii 的常识/明智 (1-10)。
+mii.desc.Gaiety = Mii 的欢快程度 (1-10)。
+mii.desc.Sociability = Mii 的社交程度 (1-10)。
+mii.desc.BondMeter = 与玩家的羁绊强度 (0-100)。
+mii.desc.Mood = 当前情绪状态。
+mii.desc.Fullness = 饱腹程度。可超过 100。
+
+mii.footer.social.focus = ZL/ZR  mii    Y  子标签    X  全局视图    L/R  标签    B/+  返回
+mii.footer.social.global = ZL/ZR  mii    Y  子标签    X  聚焦视图    L/R  标签    B/+  返回
+mii.footer.words = ZL/ZR  mii    上/下  槽    左/右  类型    A  文本    X  发音    -  撤销    Y  子标签    L/R  标签    B/+  返回
+mii.footer.relations = ZL/ZR  mii    上/下  关系    左/右  类型    Y  子标签    L/R  标签    B/+  返回
+mii.footer.bl.picker = ZL/ZR  物品    上/下  物品    左/右  +12    A  确认    B  取消
+mii.footer.bl = ZL/ZR  mii    十字键  导航    A  选择    -  颜色    X  清除    Y  子标签    L/R  标签    B/+  返回
+mii.footer.housing.idle = 十字键  导航    A  拿起 / 放下    Y  子标签    L/R  标签    B/+  返回
+mii.footer.housing.picked = 十字键  导航    A  放下 / 拿起    -  驱逐    B  取消    L/R  标签
+mii.footer.browse = 上/下  mii    左/右  翻页    ZL/ZR  mii  (目标槽)    A  详情    X  搜索    -  排序    B/Y  返回
+mii.footer.browse.detail = ZL/ZR  mii  (目标槽)    A  下载    B  返回
+mii.footer.stats.name = ZL/ZR  mii    上/下  字段    左/右  选择    A  确认    X  发音    Y  子标签    L/R  标签    B/+  返回
+mii.footer.stats.value = ZL/ZR  mii    上/下  字段    左/右  数值    X  撤销    Y  子标签    L/R  标签    B/+  返回
+
+# ── Island Generator (on-Switch) ────────────────────────────────────────────
+islandgen.cfg.header = 岛屿生成器
+islandgen.cfg.title = 生成此岛屿
+islandgen.cfg.body = 选择新岛屿的布局，然后开始。
+islandgen.cfg.row.map = 地图
+islandgen.cfg.row.rels = 关系
+islandgen.cfg.row.map.desc  = 选择经典100%布局或全新的随机地形
+islandgen.cfg.row.rels.desc = 这个岛上的Mii之间的关系
+islandgen.cfg.row.batch       = 批量导入 LTD Mii
+islandgen.cfg.row.batch.desc  = 用通过 MTP 放入的 .ltd 文件覆盖 Mii 槽
+islandgen.cfg.batch.yes       = 是
+islandgen.cfg.batch.no        = 否
+islandgen.batchltd.header     = 岛屿生成器
+islandgen.batchltd.title      = 通过 MTP 放入 .ltd 文件
+islandgen.batchltd.body1      = 把每个要导入的 .ltd 放入此文件夹：
+islandgen.batchltd.body2      = 然后按 A 进行导入并继续生成。
+islandgen.batchltd.mtp_on     = 启用 MTP
+islandgen.batchltd.mtp_off    = 关闭 MTP
+islandgen.batchltd.go         = 导入并继续
+islandgen.batchltd.footer     = Y  MTP     X  导入并继续     B  返回
+islandgen.cfg.row.fetch = 从 TomoShare 获取 Mii
+islandgen.cfg.rels.dense = 随机
+islandgen.cfg.rels.none = 全部互不相识
+islandgen.cfg.fetch.on = 是（约 30–60 秒）
+islandgen.cfg.fetch.off = 跳过
+islandgen.cfg.go = 生成
+islandgen.cfg.skip = 跳过
+islandgen.cfg.footer = 上/下  选择    左/右  调整    A  生成    B  跳过
+islandgen.map.random = 随机
+islandgen.map.classic = 经典
+islandgen.run.header = 岛屿生成器
+islandgen.run.title = 正在生成岛屿
+islandgen.run.starting = 启动中…
+islandgen.run.cancel = 取消
+islandgen.run.dismiss_done = 完成
+islandgen.run.dismiss_cancel = 返回
+islandgen.run.dismiss_error = 确定
+islandgen.run.footer = B  取消（进行中）    A  继续（完成后）

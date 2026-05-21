@@ -1,0 +1,514 @@
+# TomoToolNX — русский перевод.
+# Keys to the left of '=' must match en.txt. Translate the right side.
+
+# ── Tab bar ──────────────────────────────────────────────────────────────────
+tab.webui = webui
+tab.textures = текстуры
+tab.mii = mii
+tab.player = игрок
+tab.map = карта
+
+# ── Map tab ──────────────────────────────────────────────────────────────────
+map.loading = загрузка Map.sav…
+map.empty.slot = пустой слот
+map.inspector = объект
+map.delete.confirm = удалить этот объект?
+map.place.prompt = выберите объект, затем нажмите A на клетке
+map.no.empty.slot = свободных слотов не осталось
+map.applied = сохранено
+map.dirty = есть несохранённые изменения
+map.footer.idle = D-pad/стик  движение    A  осмотр    Y  разместить    B  назад    +  выход
+map.footer.inspect = D-pad  переместить объект    A  готово    Y  новый объект    X  удалить    B  отмена
+map.footer.picker = D-pad  прокрутка    A  выбрать    B  отмена
+map.footer.place = D-pad/стик  движение    A  поставить здесь    B  отмена
+
+# ── Settings tab ─────────────────────────────────────────────────────────────
+settings.header = кодирование
+settings.shape = Форма холста
+settings.shape.hint.square = 256×256 — стандарт (еда, одежда, сокровища…)
+settings.shape.hint.book = Вписать в книгу 3:4; чёрные полосы по бокам
+settings.shape.hint.tv = Вписать в зону 16:9; чёрные полосы сверху/снизу
+settings.encoder = Кодировщик
+settings.encoder.desc = Кодировщик BC1 при импорте текстур
+settings.encoder.hint.custom = sRGB-подгонка с учётом гаммы. Лучшее качество (по умолчанию).
+settings.encoder.hint.pca = Подгонка PCA по конечным точкам. Быстрее, хуже на градиентах.
+settings.bc1 = Режим BC1
+settings.bc1.desc = Режим блока (только Gamma-aware кодировщик)
+settings.bc1.disabled = Переключитесь на Gamma-aware, чтобы изменить.
+settings.bc1.hint.auto = Подбирает лучший режим для каждого блока. Рекомендуется.
+settings.bc1.hint.fourColor = Чёткие цвета. Прозрачные пиксели сохраняются.
+settings.bc1.hint.threeColor = Для изображений с прозрачностью. Меньше цветовых деталей.
+settings.fit = Подгонка
+settings.fit.hint.cover = Обрезать, чтобы заполнить, сохраняя пропорции.
+settings.fit.hint.contain = Изображение целиком внутри, с прозрачными полями.
+settings.fit.hint.fill = Растянуть до заполнения, без сохранения пропорций.
+settings.matte = Фон
+settings.matte.desc = Цвет полей, используемый в режиме Contain.
+settings.matte.disabled = Используется только при Contain.
+settings.language = Язык
+settings.language.desc = Язык интерфейса на Switch.
+settings.language.hint = Помогите перевести — см. README на GitHub.
+settings.footer = Вверх/Вниз  выбор    Влево/Вправо  настройка    L/R  вкладка    B/+  назад
+
+# ── Player tab field labels ──────────────────────────────────────────────────
+player.field.Name = Имя
+player.field.Island = Остров
+player.field.Money = Деньги
+player.field.Currency = Валюта
+player.field.BootCount = Запуски
+player.field.SkinTone = Тон кожи
+player.field.BdayDay = День рожд.
+player.field.BdayMonth = Месяц рожд.
+player.field.BdayYear = Год рожд.
+player.field.IslandSize = Размер острова
+player.field.FountainLv = Ур. фонтана
+player.field.Wishes = Желания
+player.field.Region = Регион
+
+# ── Player tab footer ────────────────────────────────────────────────────────
+player.footer = Вверх/Вниз  выбор    Влево/Вправо  настройка    A  правка    X  отмена    B/+  назад
+
+# ── Backup prompt ────────────────────────────────────────────────────────────
+backup.title = создать резервную копию?
+backup.action = создать копию
+backup.action.hint = создаёт копию с отметкой времени
+backup.skip = пропустить
+backup.skip.hint = продолжить без копии
+backup.footer = A  создать    B  пропустить    +  выход
+backup.full.title = {cur}/{max} копий — удалить самую старую, чтобы освободить место?
+backup.full.action = удалить старую + создать
+backup.full.hint = удаляет самую старую копию
+backup.footer.full = A  удалить + создать    B  пропустить    +  выход
+backup.tip = {cur} / {max} копий
+backup.progress.title = создание резервной копии...
+backup.progress.warn = не выключайте консоль
+mounting.title = загрузка сохранения...
+
+# ── Common labels ────────────────────────────────────────────────────────────
+footer.back = B  назад
+footer.quit = +  выход
+cancel = отмена
+confirm = Подтвердить
+back = Назад
+prev = Назад
+next = Далее
+undo = Отмена
+loading = загрузка…
+empty = (пусто)
+empty.paren = (пусто)
+none.paren = (нет)
+unknown.paren = (неизвестно)
+not.set = (не задано)
+of = из
+items = предметов
+more = ещё
+keyboard = клавиатура
+
+# ── Update screens ───────────────────────────────────────────────────────────
+update.checking = проверка обновлений...
+update.footer.checking = B  пропустить
+update.available = доступно новое обновление на GitHub!
+update.download.from = скачайте новый TomoToolNX.nro с:
+update.footer.available = A / B  продолжить    +  выход
+
+# ── Restore picker ───────────────────────────────────────────────────────────
+restore.header = восстановление копии
+restore.empty.title = Нет копий
+restore.empty.hint = Создайте копию через окно резервного копирования при выборе пользователя.
+restore.backups.word = копий
+restore.newest.prefix = новейшая:
+restore.badge.newest = новая
+restore.badge.oldest = старая
+restore.chip.restore = восстановить
+restore.chip.delete = удалить
+restore.footer = Вверх/Вниз  навигация    A  восстановить    X  удалить    B  отмена
+restore.confirm.delete.title = Удалить эту копию?
+restore.confirm.restore.title = Восстановить эту копию?
+restore.confirm.delete.l1 = Эта копия будет навсегда удалена с SD-карты.
+restore.confirm.delete.l2 = Это действие необратимо.
+restore.confirm.restore.l1 = Ваше текущее сохранение будет заменено данными
+restore.confirm.restore.l2 = этой копии.
+restore.progress.title = Восстановление...
+restore.progress.wait = Подождите.
+
+# ── Settings ─────────────────────────────────────────────────────────────────
+settings.title = настройки
+settings.item.lang = Язык
+settings.item.lang.desc = язык интерфейса — помогите перевести на GitHub
+settings.item.export = Папка экспорта
+settings.item.export.desc = папка, используемая при экспорте текстур
+settings.item.maxbk = Макс. копий
+settings.item.maxbk.desc = максимум сохраняемых копий (1-99)
+settings.item.restore = Восстановить
+settings.item.restore.desc = восстановить копию для выбранного пользователя
+settings.item.theme = Тема
+settings.item.theme.desc = выберите между новым видом в стиле Switch и оригинальным интерфейсом
+theme.switch = Switch
+theme.original = Оригинал
+settings.change = изменить
+settings.open = открыть
+settings.backups.none = нет
+settings.backups.available = доступно
+settings.footer.main = Вверх/Вниз  навигация    Влево/Вправо  изменить    A  действие    B  назад
+
+# ── User pick ────────────────────────────────────────────────────────────────
+userpick.title = выбор пользователя
+userpick.footer = Влево/Вправо  навигация    A  выбрать    X  восстановить    -  настройки    +  выход
+restore.toast.ok = Сохранение восстановлено.
+restore.toast.fail = Ошибка восстановления:
+restore.toast.mount_fail = Ошибка монтирования:
+restore.toast.deleted_last = Резервная копия удалена (других у этого пользователя нет).
+ugc.rename.guide = Переименовать UGC
+ugc.rename.ok = Переименовано.
+ugc.rename.fail = Ошибка переименования:
+ugc.kind.picker.title = Фильтр по категории
+ugc.kind.all = Все
+ugc.kind.food = Еда
+ugc.kind.cloth = Одежда
+ugc.kind.goods = Сокровища
+ugc.kind.interior = Интерьер
+ugc.kind.exterior = Экстерьер
+ugc.kind.map_object = Объекты
+ugc.kind.map_floor = Ландшафт
+ugc.kind.face_paint = Боди-арт
+webui.mtp.start = Запустить MTP
+webui.mtp.stop = Остановить MTP
+webui.mtp.waiting = Ожидание…
+webui.mtp.warn.title = Запустить обмен файлами по USB?
+webui.mtp.warn.l1 = MTP работает только на настоящей Switch.
+webui.mtp.warn.l2 = На Ryujinx и эмуляторах приложение упадёт.
+webui.mtp.warn.l3 = Это сообщение появится только один раз.
+webui.mtp.warn.yes = Запустить
+webui.mtp.warn.no = Отмена
+bundle.create.title = Создать новый остров
+bundle.create.body = На следующем экране выбери пользователя Switch, к которому применить новый остров. Копия также сохраняется как bundle на SD-карте.
+bundle.create.footer = A  создать    B  назад
+bundle.blank.title = Стандартное 100%-сохранение
+bundle.blank.desc = Применить 100% как есть. Все магазины открыты, 70 заглушечных Mii.
+bundle.generated.title = + Генератор острова
+bundle.generated.desc = То же, и сразу после запускает генератор острова на Switch.
+bundle.created = Bundle создан:
+bundle.apply.title = Применить этот остров к:
+bundle.apply.footer = Влево/Вправо  навигация    A  применить    B  отмена
+bundle.dismissed = Отменено.
+bundle.apply.overwrite.title = У этого пользователя уже есть сохранение
+bundle.apply.overwrite.l1 = Применение bundle перезапишет существующее сохранение.
+bundle.apply.overwrite.l2 = Старые резервные копии остаются на SD-карте.
+bundle.apply.overwrite.yes = Перезаписать
+bundle.apply.overwrite.no = Отмена
+
+# ── File browser ─────────────────────────────────────────────────────────────
+browse.title.export = выбрать папку экспорта
+browse.title.ltd = выбрать .ltd
+browse.title.png_ltd = выбрать PNG или .ltd
+browse.current = текущий
+browse.empty = пустая папка
+browse.footer.export = Вверх/Вниз  навигация    A  открыть    Y  выбрать папку экспорта    X  отмена    B  назад
+browse.footer.pick = Вверх/Вниз  навигация    A  открыть / выбрать    B  назад    X  отмена
+
+# ── Applet warning ───────────────────────────────────────────────────────────
+applet.title = Режим Applet не поддерживается
+applet.body.l1 = TomoToolNX требует полные системные ресурсы и не может
+applet.body.l2 = работать в режиме Applet (R + Альбом).
+applet.how = Как правильно запустить
+applet.wrong = Неверный способ
+applet.wrong.hint = открыть Альбом
+applet.right = Верный способ
+applet.right.hint = Удерживайте R  +  откройте игру
+applet.note = Игра не запустится — вместо неё откроется меню Homebrew.
+applet.exit = + / B  Выход
+applet.footer = B / +  выход
+
+# ── Save warning ─────────────────────────────────────────────────────────────
+warn.title = Внимание
+warn.body.l1 = Изменение этих значений может сломать игру.
+warn.body.l2 = Сделайте копию во вкладке Резерв перед редактированием.
+warn.understand = Понятно
+
+# ── Thumbnail tip ────────────────────────────────────────────────────────────
+thumbtip.title = О миниатюрах инвентаря
+thumbtip.l1 = Текстура импортирована, но миниатюра инвентаря
+thumbtip.l2 = управляется игрой и не обновляется автоматически.
+thumbtip.l3 = Чтобы обновить: откройте предмет в Студии,
+thumbtip.l4 = войдите в редактор текстур и сохраните снова —
+thumbtip.l5 = игра пересоздаст миниатюру автоматически.
+thumbtip.gotit = Понятно
+
+# ── Background removal ───────────────────────────────────────────────────────
+bg.title = Удалить фон?
+bg.body.l1 = Выбранная текстура будет изменена на месте.
+bg.body.l2 = Это может занять до 30 секунд.
+bg.removing = Удаление фона...
+
+# ── Back prompt ──────────────────────────────────────────────────────────────
+backprompt.title = Сохранить изменения?
+backprompt.body = Несохранённые правки будут потеряны, если выбрать Нет.
+backprompt.save.back = Сохранить и назад
+backprompt.save.exit = Сохранить и выйти
+backprompt.discard.back = Сбросить и назад
+backprompt.discard.exit = Сбросить и выйти
+backprompt.footer.back = A  сохранить    B  сбросить    X  отмена
+backprompt.footer.exit = A  сохранить и выйти    B  сбросить и выйти    X  отмена
+
+# ── Save feedback / error ────────────────────────────────────────────────────
+save.feedback.title = Сохранено!
+save.feedback.body = Изменения успешно сохранены.
+error.title = ошибка
+error.footer = B  назад     +  выход
+
+# ── WebUI tab ────────────────────────────────────────────────────────────────
+webui.log.title = журнал
+webui.log.empty = нет активности
+webui.active = Активно
+webui.inactive = Неактивно
+webui.footer = L/R  вкладка    X  перезапуск сервера    Y  переключить MTP    B/+  назад
+
+# ── Textures (UGC) tab ───────────────────────────────────────────────────────
+ugc.filter = Фильтр
+ugc.search.placeholder = Коснитесь или  -  для поиска...
+ugc.no.matches = нет совпадений
+ugc.no.preview = нет превью
+ugc.import = импорт
+ugc.exportpic = экспорт изобр.
+ugc.exportltd = экспорт .ltd
+ugc.removebg = убрать фон
+ugc.footer = ZL/ZR  прокрутка    Вверх/Вниз  выбор    A  импорт    Y  экспорт изобр.    экспорт .ltd  (касание)    X  убрать фон    -  поиск    L/R  вкладка    B/+  назад
+
+# ── Player tab ───────────────────────────────────────────────────────────────
+player.parse.fail.l1 = Player.sav не удалось прочитать — восстановите из копии
+player.parse.fail.l2 = или откройте Tomodachi Life, чтобы игра пересоздала файл.
+player.notfound.hint = Вы уже настроили остров в Tomodachi Life?
+player.loading = загрузка сохранения игрока...
+player.kbd.edit = редактировать с клавиатуры
+player.money.type = ввести сумму
+player.edit.pron = редактировать произношение
+player.cycle.lang = Влево/Вправо  сменить язык
+player.cycle.currency = Влево/Вправо  сменить валюту
+player.cycle.tone = Влево/Вправо  сменить оттенок
+player.cycle.size = Влево/Вправо  сменить размер
+player.cycle.region = Влево/Вправо  сменить регион
+player.islandsize.warn = Другие размеры повредят сохранение!
+player.wishes.liberated = открыто желаний
+player.wishes.bulk = Массовые действия с желаниями  (касание)
+player.wishes.unlock = Открыть все желания (268)
+player.wishes.unlock.confirm = коснитесь ещё раз, чтобы ОТКРЫТЬ все 268
+player.wishes.reset = Сбросить открытые желания
+player.wishes.reset.confirm = коснитесь ещё раз для СБРОСА
+player.footer.pron = ZL/ZR  поле    A  имя    X  произн.    Влево/Вправо  язык    L/R  вкладка    B/+  назад
+player.footer.value = ZL/ZR  поле    Влево/Вправо  значение    A  правка    X  отмена    L/R  вкладка    B/+  назад
+player.desc.Name = Отображаемое имя вашего игрока.
+player.desc.Island = Название вашего острова.
+player.desc.Money = Текущий баланс монет.
+player.desc.Currency = Символ региональной валюты в игре.
+player.desc.BootCount = Сколько раз запускалась игра.
+player.desc.SkinTone = Цвет кожи/рук (0-5).
+player.desc.BdayDay = День рождения (1-31).
+player.desc.BdayMonth = Месяц рождения (1-12).
+player.desc.BdayYear = Год рождения.
+player.desc.IslandSize = Пресет размера острова. Другие значения повредят файл!
+player.desc.FountainLv = Уровень фонтана желаний.
+player.desc.Wishes = Количество загаданных желаний.
+player.desc.Region = Регион игрока (влияет на сезоны и погоду).
+
+# ── Map tab ──────────────────────────────────────────────────────────────────
+map.picker.title = выбрать объект
+map.picker.filter = фильтр
+map.picker.any = (любой)
+map.slot = слот
+map.row.posX = позиция X
+map.row.posY = позиция Y
+map.row.rotation = поворот
+map.row.linked = связ. карта
+map.add.actor = добавить объект
+map.delete.btn = удалить (X)
+map.delete.confirm.tap = коснитесь ещё раз для удаления
+map.place.title = режим размещения
+map.actor = объект
+map.cursor = курсор
+map.viewer.title = Просмотр карты
+map.viewer.l1 = Двигайте курсор крестовиной или стиком.
+map.viewer.l2 = Коснитесь или нажмите A для осмотра.
+map.viewer.l3 = Нажмите Y для размещения объекта.
+map.viewer.l4 = B — выход, появится запрос сохранить
+map.viewer.l5 = или сбросить при необходимости.
+map.objects = объектов
+map.slots = слотов
+
+# ── Mii Stats ────────────────────────────────────────────────────────────────
+mii.header = статы Mii
+mii.parse.fail.l1 = Mii.sav не удалось прочитать — восстановите из копии
+mii.parse.fail.l2 = или откройте Tomodachi Life, чтобы игра пересоздала файл.
+mii.notfound.hint = Вы уже создали Mii на своём острове?
+mii.loading = загрузка сохранения mii...
+mii.no.miis = нет miis
+mii.no.relations = нет отношений
+mii.no.relationships = нет отношений
+mii.miis.word = miis
+mii.same.as.name = (как имя)
+mii.cycle.mood = Влево/Вправо  сменить настроение
+mii.file = Файл Mii
+mii.import.ltd = импорт .ltd
+mii.export.ltd = экспорт .ltd
+
+subtab.stats = Статы
+subtab.items = Вещи
+subtab.habits = Привычки
+subtab.words = Слова
+subtab.relations = Отношения
+subtab.housing = Жильё
+subtab.social = Соц.
+
+words.slot = Слот
+words.kind = Тип
+words.text = Текст
+words.pron = Произношение  (необяз.)
+words.same.as.text = (как текст)
+words.edit.text = Изменить текст
+words.edit.pron = Изменить произн.
+
+rel.your.type = Ваш тип
+rel.their.type = Их тип  (авто)
+rel.type = Тип
+rel.batch.know = Знакомы все
+rel.meter = Шкала
+rel.fixed = фикс.
+rel.both.directions = обе стороны вместе
+rel.since = С
+
+bl.filter = фильтр
+bl.select.item = выбрать предмет
+bl.no.matches = нет совпадений — X для очистки фильтра
+
+habits.empty = нет привычек в этой категории
+habits.hint = A  актив    X  есть    -  очистить    Влево/Вправо  категория
+
+housing.unavailable = Данные о жилье недоступны в этом сохранении.
+housing.unavailable.detail = (Mii.Location.HouseMapId / RoomIndex не найдены)
+housing.moving = Переселение
+housing.moving.hint = Коснитесь комнаты для размещения. Жилец будет заменён.
+housing.idle.hint = Коснитесь Mii чтобы поднять, затем коснитесь комнаты.
+housing.housed = с жильём
+housing.unhoused = БЕЗ ЖИЛЬЯ
+housing.unhoused.lower = без жилья
+housing.house = дом
+housing.houses = ДОМА
+housing.no.houses = (на острове нет домов — постройте в игре)
+housing.all.housed = (у всех miis есть жильё)
+housing.slot.short = слот
+housing.room = комната
+housing.drop.here = разместить
+housing.empty.paren = (пусто)
+housing.add.resident = добавить жильца
+housing.delete = удалить
+housing.vacate = выселить
+housing.cancel = Отмена
+housing.evict = Выгнать
+housing.footer.idle = A  поднять / разместить    Y  подвкл.    L/R  вкладка    B/+  назад
+housing.footer.picked = A  разместить / поднять    -  выгнать    B  отмена    L/R  вкладка
+
+share.search = поиск
+share.page = страница
+share.sort = сортировка
+share.sort.newest = новые
+share.sort.oldest = старые
+share.sort.likes = лайки
+share.importable.only = только импортируемые
+share.fetching = Нажмите Y — загрузка первой страницы…
+share.unnamed = (без имени)
+share.by = от
+share.likes = лайков
+share.image.failed = изображение не загружено
+share.platform = платформа
+share.gender = пол
+share.mii.id = id mii
+share.overwrite.slot = перезаписать слот
+share.slot = слот
+share.slot.empty = слот пуст
+share.replaces = заменит
+share.download.overwrite = Скачать и перезаписать
+share.footer = A  детали    X  поиск    Влево/Вправо  страница    ZL/ZR  mii  (целевой слот)    Y  подвкл.    B  назад
+
+mii.field.Name = Имя
+mii.field.Level = Уровень
+mii.field.LvMeter = Шкала ур.
+mii.field.Money = Деньги
+mii.field.BdayDay = День рожд.
+mii.field.BdayMonth = Месяц рожд.
+mii.field.BirthYear = Год рожд.
+mii.field.DirectAge = Возраст
+mii.field.Activeness = Активность
+mii.field.Audacity = Смелость
+mii.field.Commonsense = Разумность
+mii.field.Gaiety = Весёлость
+mii.field.Sociability = Общительн.
+mii.field.BondMeter = Связь
+mii.field.Mood = Настроение
+mii.field.Fullness = Сытость
+mii.desc.Name = Отображаемое имя Mii в игре.
+mii.desc.Level = Уровень дружбы с игроком.
+mii.desc.LvMeter = Прогресс до следующего уровня (0-100).
+mii.desc.Money = Монеты, имеющиеся у Mii.
+mii.desc.BdayDay = День рождения (1-31).
+mii.desc.BdayMonth = Месяц рождения (1-12).
+mii.desc.BirthYear = Год рождения.
+mii.desc.DirectAge = Возраст принудительно. -1 — авто.
+mii.desc.Activeness = Активность/энергия Mii (1-10).
+mii.desc.Audacity = Смелость Mii (1-10).
+mii.desc.Commonsense = Разумность Mii (1-10).
+mii.desc.Gaiety = Жизнерадостность (1-10).
+mii.desc.Sociability = Общительность (1-10).
+mii.desc.BondMeter = Сила связи с игроком (0-100).
+mii.desc.Mood = Текущее эмоциональное состояние.
+mii.desc.Fullness = Уровень сытости. Может превышать 100.
+
+mii.footer.social.focus = ZL/ZR  mii    Y  подвкл.    X  общий граф    L/R  вкладка    B/+  назад
+mii.footer.social.global = ZL/ZR  mii    Y  подвкл.    X  фокус    L/R  вкладка    B/+  назад
+mii.footer.words = ZL/ZR  mii    Вверх/Вниз  слот    Влево/Вправо  тип    A  текст    X  произн.    -  отмена    Y  подвкл.    L/R  вкладка    B/+  назад
+mii.footer.relations = ZL/ZR  mii    Вверх/Вниз  отношение    Влево/Вправо  тип    Y  подвкл.    L/R  вкладка    B/+  назад
+mii.footer.bl.picker = ZL/ZR  предмет    Вверх/Вниз  предмет    Влево/Вправо  +12    A  подтвердить    B  отмена
+mii.footer.bl = ZL/ZR  mii    D-pad  навигация    A  выбрать    -  цвет    X  очистить    Y  подвкл.    L/R  вкладка    B/+  назад
+mii.footer.housing.idle = D-pad  навигация    A  поднять / разместить    Y  подвкл.    L/R  вкладка    B/+  назад
+mii.footer.housing.picked = D-pad  навигация    A  разместить / поднять    -  выгнать    B  отмена    L/R  вкладка
+mii.footer.browse = Вверх/Вниз  mii    Влево/Вправо  страница    ZL/ZR  mii  (целевой слот)    A  детали    X  поиск    -  сортировка    B/Y  назад
+mii.footer.browse.detail = ZL/ZR  mii  (целевой слот)    A  скачать    B  назад
+mii.footer.stats.name = ZL/ZR  mii    Вверх/Вниз  поле    Влево/Вправо  выбрать    A  подтвердить    X  произн.    Y  подвкл.    L/R  вкладка    B/+  назад
+mii.footer.stats.value = ZL/ZR  mii    Вверх/Вниз  поле    Влево/Вправо  значение    X  отмена    Y  подвкл.    L/R  вкладка    B/+  назад
+
+# ── Island Generator (on-Switch) ────────────────────────────────────────────
+islandgen.cfg.header = Генератор острова
+islandgen.cfg.title = Создать этот остров
+islandgen.cfg.body = Выбери, как будет выглядеть новый остров, и запусти.
+islandgen.cfg.row.map = Карта
+islandgen.cfg.row.rels = Отношения
+islandgen.cfg.row.map.desc  = Выберите классическую 100%-карту или случайный ландшафт
+islandgen.cfg.row.rels.desc = Как мии на этом острове знают друг друга
+islandgen.cfg.row.batch       = Импорт .ltd миев
+islandgen.cfg.row.batch.desc  = Заменяет миев файлами .ltd, переданными по MTP
+islandgen.cfg.batch.yes       = Да
+islandgen.cfg.batch.no        = Нет
+islandgen.batchltd.header     = Генератор острова
+islandgen.batchltd.title      = Перенесите .ltd по MTP
+islandgen.batchltd.body1      = Поместите все нужные .ltd в эту папку:
+islandgen.batchltd.body2      = Затем нажмите A, чтобы импортировать и продолжить.
+islandgen.batchltd.mtp_on     = включить MTP
+islandgen.batchltd.mtp_off    = выключить MTP
+islandgen.batchltd.go         = импорт и далее
+islandgen.batchltd.footer     = Y  MTP     X  импорт и далее     B  назад
+islandgen.cfg.row.fetch = Загружать Mii с TomoShare
+islandgen.cfg.rels.dense = Случайные
+islandgen.cfg.rels.none = Все незнакомы
+islandgen.cfg.fetch.on = Да (~30–60 с)
+islandgen.cfg.fetch.off = Пропустить
+islandgen.cfg.go = Создать
+islandgen.cfg.skip = Пропустить
+islandgen.cfg.footer = Вверх/Вниз  выбор    Влево/Вправо  изменить    A  создать    B  пропустить
+islandgen.map.random = Случайно
+islandgen.map.classic = Классический
+islandgen.run.header = Генератор острова
+islandgen.run.title = Идёт генерация острова
+islandgen.run.starting = Запуск…
+islandgen.run.cancel = Отмена
+islandgen.run.dismiss_done = Готово
+islandgen.run.dismiss_cancel = Назад
+islandgen.run.dismiss_error = ОК
+islandgen.run.footer = B  отмена (в процессе)    A  продолжить (по завершении)

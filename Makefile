@@ -46,7 +46,7 @@ include $(DEVKITPRO)/libnx/switch_rules
 TARGET      := TomoToolNX
 APP_TITLE   := TomoToolNX
 APP_AUTHOR  := Imprimante
-APP_VERSION := 1.3.5
+APP_VERSION := 1.3.6
 # Title ID intentionally left blank for emulator compatibility:
 # Ryubing 1.3.279's Discord-integration module reacts to the "active title
 # changed" event during NRO load and dereferences the not-yet-registered
@@ -142,6 +142,13 @@ BINFILES	:=	$(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.bin)))
 # zstd step; the compressed seed_*_z.bin derivatives are what actually gets
 # linked into the NRO. Embedding both would add ~4.4 MB of dead .rodata.
 BINFILES	:=	$(filter-out seed_Mii.bin seed_Map.bin seed_Player.bin,$(BINFILES))
+# Generated .bin files (zstd seeds + gzipped webui) don't exist yet when the
+# wildcard above runs — `make clean` removes them, and the outer pass
+# regenerates them before the inner pass compiles. List them explicitly so
+# the inner-make BINFILES → OFILES_BIN / HFILES_BIN chain picks them up
+# regardless of wildcard timing. Otherwise `make clean && make` fails with
+# "webui_gz_bin.h: No such file or directory" when http_server.cpp is built.
+BINFILES	:=	$(sort $(BINFILES) seed_Mii_z.bin seed_Map_z.bin seed_Player_z.bin webui_gz.bin)
 
 #---------------------------------------------------------------------------------
 # use CXX for linking C++ projects, CC for standard C
@@ -294,6 +301,14 @@ ifeq ($(strip $(NO_NACP)),)
 $(OUTPUT).nro	:	$(OUTPUT).elf $(OUTPUT).nacp
 else
 $(OUTPUT).nro	:	$(OUTPUT).elf
+endif
+
+# elf2nro bakes the romfs image into the NRO, but the rule above only lists
+# elf / nacp — so editing a romfs asset (lang/*.txt, sfx, u2netp.bin) would
+# NOT trigger a rebuild and the NRO would ship a stale romfs. List every
+# romfs file as an extra prerequisite so any change forces a re-link.
+ifneq ($(ROMFS),)
+$(OUTPUT).nro	:	$(shell find $(TOPDIR)/$(ROMFS) -type f 2>/dev/null)
 endif
 
 # Link: app objects + libhaze.a + system libs
