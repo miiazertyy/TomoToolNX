@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <strings.h>
 #include <bit>
 #include <memory>
 #include <stdint.h>

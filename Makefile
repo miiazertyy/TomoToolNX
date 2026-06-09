@@ -46,7 +46,7 @@ include $(DEVKITPRO)/libnx/switch_rules
 TARGET      := TomoToolNX
 APP_TITLE   := TomoToolNX
 APP_AUTHOR  := Imprimante
-APP_VERSION := 1.3.6
+APP_VERSION := 1.3.7
 # Title ID intentionally left blank for emulator compatibility:
 # Ryubing 1.3.279's Discord-integration module reacts to the "active title
 # changed" event during NRO load and dereferences the not-yet-registered
@@ -227,6 +227,13 @@ setup:
 		git -C $(LIBHAZE_DIR) checkout $(LIBHAZE_COMMIT); \
 		echo "libhaze ready."; \
 	fi
+	@# Overlay our patched headers from libsfix/. Upstream libhaze @$(LIBHAZE_COMMIT)
+	@# calls strcasecmp() without including <strings.h> and only built on older
+	@# devkitA64 toolchains that leaked it transitively. libsfix/.../common.hpp adds
+	@# the include; common.hpp is pulled in by every libhaze TU, so this fixes the
+	@# whole library. Re-applied on every `make setup` so a fresh clone never breaks.
+	@echo "Applying libsfix overrides..."
+	@cp -rf $(TOPDIR)/libsfix/libhaze/. $(LIBHAZE_DIR)/
 
 #---------------------------------------------------------------------------------
 # Pre-compressed data assets. The Switch links zstd already (-lzstd in LIBS),

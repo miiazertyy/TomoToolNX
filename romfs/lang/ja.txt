@@ -1,0 +1,574 @@
+# TomoToolNX — 日本語翻訳 (Japanese translation).
+#
+# '#' で始まる行はコメントです。空行は無視されます。
+# 形式: key = value   ('=' の前後の空白は除去されます)
+#
+# 翻訳に協力するには:
+#   1. romfs/lang/en.txt をコピーして romfs/lang/<コード>.txt を作成
+#   2. '=' の右側 (value) を翻訳。左側 (key) はそのまま
+#   3. source/i18n.cpp の kAvailable にロケールを登録
+#   4. プルリクエストを送信 — 部分的な翻訳でも歓迎です
+
+# ── Tab bar ──────────────────────────────────────────────────────────────────
+tab.webui = ウェブUI
+tab.textures = テクスチャ
+tab.mii = Mii
+tab.player = プレイヤー
+tab.map = マップ
+
+# ── Map tab ──────────────────────────────────────────────────────────────────
+map.loading = Map.sav を読み込み中…
+map.empty.slot = 空きスロット
+map.inspector = オブジェクト
+map.delete.confirm = このオブジェクトを削除しますか？
+map.place.prompt = アクターを選び、タイル上で A を押す
+map.no.empty.slot = 空きスロットがありません
+map.applied = 保存しました
+map.dirty = 未保存の変更
+map.footer.idle = 十字キー/スティック  移動    A  確認    Y  配置    X  取り消し    ZL  ツール    ZR  ズーム    B  戻る
+map.footer.inspect = 十字キー  オブジェクト移動    A  完了    Y  アクター追加    X  削除    B  キャンセル
+map.footer.picker = 十字キー  スクロール    A  選択    B  キャンセル
+map.footer.place = 十字キー/スティック  移動    A  ここに配置    B  キャンセル
+map.footer.paint = 十字キー/スティック  移動    A  ペイント    Y  タイル選択    X  取り消し    ZL  ツール    ZR  ズーム    B  戻る
+map.footer.stats = 十字キー/スティック  移動    A  オブジェクト選択    X  取り消し    ZL  ツール    ZR  ズーム    B  戻る
+map.footer.tilepicker = 十字キー/スティック  スクロール    A  選択    B  キャンセル
+map.tool.select = 選択
+map.tool.paint = ペイント
+map.tool.stats = 統計
+map.undo.btn = 取り消し
+map.redo.btn = やり直し
+map.undo.done = 取り消しました
+map.redo.done = やり直しました
+map.undo.empty = 取り消す操作がありません
+map.redo.empty = やり直す操作がありません
+map.png.btn = PNG出力
+map.png.saved = 島のPNGを保存しました
+map.paint.title = 床をペイント
+map.paint.brush = ブラシサイズ
+map.paint.pick = タイルを選択 (Y)
+map.paint.none = (タイル未選択)
+map.paint.help1 = ZL ツール切替  ·  ZR ズーム切替
+map.paint.help2 = X = 取り消し  ·  Y = タイル選択
+map.stats.title = マップ統計
+map.stats.placed = 配置オブジェクト
+map.stats.terrain = 地形の内訳
+map.stats.no.floor = 床データなし
+map.tile.picker.title = タイルを選択
+
+# ── Settings tab ─────────────────────────────────────────────────────────────
+settings.header = エンコード
+settings.shape = キャンバス形状
+settings.shape.hint.square = 256×256 — 標準（食べ物・服・グッズなど）
+settings.shape.hint.book = 3:4の本の形に合わせる。左右に黒帯
+settings.shape.hint.tv = 16:9のワイドに合わせる。上下に黒帯
+settings.encoder = エンコーダー
+settings.encoder.desc = テクスチャ取り込み時に使う BC1 エンコーダー
+settings.encoder.hint.custom = ガンマ対応の sRGB フィット。最高品質（標準）。
+settings.encoder.hint.pca = PCA端点フィット。高速だがグラデーションに弱い。
+settings.bc1 = BC1モード
+settings.bc1.desc = ブロックモード（ガンマ対応エンコーダーのみ）
+settings.bc1.disabled = 編集するにはガンマ対応エンコーダーに切り替えてください。
+settings.bc1.hint.auto = 各ブロックに最適なモードを選択。推奨。
+settings.bc1.hint.fourColor = よりシャープな色。透明ピクセルも保持されます。
+settings.bc1.hint.threeColor = 透明を含む画像向けに最適化。色の精細さは劣ります。
+settings.fit = フィット
+settings.fit.hint.cover = アスペクト比を保ちテクスチャを埋めるよう切り抜き。
+settings.fit.hint.contain = 画像全体を収め、余白は透明に。
+settings.fit.hint.fill = アスペクト比を無視して引き伸ばし。
+settings.matte = 背景
+settings.matte.desc = Contain フィット時のレターボックス色。
+settings.matte.disabled = フィットが Contain のときのみ使用。
+settings.language = 言語
+settings.language.desc = 本体UIの表示言語。
+settings.language.hint = 翻訳に協力 — GitHubのREADMEをご覧ください。
+settings.footer = 上/下  選択    左/右  調整    L/R  タブ切替    B/+  戻る
+
+# ── Player tab field labels ──────────────────────────────────────────────────
+player.field.Name = 名前
+player.field.Island = 島
+player.field.Money = 所持金
+player.field.Currency = 通貨
+player.field.BootCount = 起動回数
+player.field.SkinTone = 肌の色
+player.field.BdayDay = 誕生日（日）
+player.field.BdayMonth = 誕生日（月）
+player.field.BdayYear = 誕生年
+player.field.IslandSize = 島のサイズ
+player.field.FountainLv = 泉のレベル
+player.field.Wishes = おねがい
+player.field.Region = 地域
+
+# ── Player tab footer ────────────────────────────────────────────────────────
+player.footer = 上/下  選択    左/右  調整    A  編集    X  取り消し    B/+  戻る
+
+# ── Backup prompt ────────────────────────────────────────────────────────────
+backup.title = セーブデータをバックアップしますか？
+backup.action = 今すぐバックアップ
+backup.action.hint = 日時付きのバックアップを作成します
+backup.skip = バックアップしない
+backup.skip.hint = バックアップせずに続行
+backup.footer = A  バックアップ    B  スキップ    +  終了
+backup.full.title = {cur}/{max} 件のバックアップ — 最も古いものを消して空けますか？
+backup.full.action = 最古を削除してバックアップ
+backup.full.hint = 最も古いバックアップを削除します
+backup.footer.full = A  最古を削除してバックアップ    B  スキップ    +  終了
+backup.tip = {cur} / {max} 件のバックアップ
+backup.progress.title = セーブデータをバックアップ中...
+backup.progress.warn = 本体の電源を切らないでください
+mounting.title = セーブをマウント中...
+
+# ── Common labels ────────────────────────────────────────────────────────────
+footer.back = B  戻る
+footer.quit = +  終了
+cancel = キャンセル
+confirm = 決定
+back = 戻る
+prev = 前へ
+next = 次へ
+undo = 取り消し
+loading = 読み込み中…
+empty = (空)
+empty.paren = (空)
+none.paren = (なし)
+unknown.paren = (不明)
+not.set = (未設定)
+of = /
+items = 件
+more = もっと見る
+keyboard = キーボード
+
+# ── Update screens ───────────────────────────────────────────────────────────
+update.checking = アップデートを確認中...
+update.footer.checking = B  スキップ
+update.available = GitHubに新しいアップデートがあります！
+update.download.from = 新しい TomoToolNX.nro はこちらから：
+update.footer.available = A / B  続行    +  終了
+
+# ── Restore picker ───────────────────────────────────────────────────────────
+restore.header = バックアップを復元
+restore.empty.title = バックアップがありません
+restore.empty.hint = ユーザー選択画面のバックアップ画面から作成できます。
+restore.backups.word = バックアップ
+restore.newest.prefix = 最新：
+restore.badge.newest = 最新
+restore.badge.oldest = 最古
+restore.chip.restore = 復元
+restore.chip.delete = 削除
+restore.footer = 上/下  移動    A  復元    X  削除    B  キャンセル
+restore.confirm.delete.title = このバックアップを削除しますか？
+restore.confirm.restore.title = このバックアップを復元しますか？
+restore.confirm.delete.l1 = このバックアップは SD カードから完全に削除されます。
+restore.confirm.delete.l2 = この操作は元に戻せません。
+restore.confirm.restore.l1 = 現在のセーブはこのバックアップの
+restore.confirm.restore.l2 = データで上書きされます。
+restore.progress.title = バックアップを復元中...
+restore.progress.wait = お待ちください。
+
+# ── Settings ─────────────────────────────────────────────────────────────────
+settings.title = 設定
+settings.item.lang = 言語
+settings.item.lang.desc = アプリの表示言語
+settings.item.export = 書き出し先
+settings.item.export.desc = テクスチャ書き出しに使うフォルダ
+settings.item.maxbk = 最大バックアップ数
+settings.item.maxbk.desc = 保持するセーブバックアップの最大数（1〜99）
+settings.item.restore = バックアップを復元
+settings.item.restore.desc = 選択中ユーザーの以前のセーブを復元
+settings.item.theme = テーマ
+settings.item.theme.desc = Switch風かオリジナル
+theme.switch = Switch
+theme.original = オリジナル
+settings.item.accent = アクセントカラー
+settings.item.accent.desc = ハイライト・選択・アクセントの色
+settings.item.bg = 背景色
+settings.item.bg.desc = 背景とパネルの色
+picker.accent = アクセントカラー
+picker.bg = 背景色
+picker.save = 保存
+picker.cancel = キャンセル
+picker.reset = リセット
+picker.footer = スティック / 十字キー  彩度・明度    ZL/ZR  色相    A  保存    X  リセット    B  キャンセル
+settings.change = 変更
+settings.open = 開く
+settings.backups.none = なし
+settings.backups.available = 利用可能
+settings.footer.main = 上/下  移動    左/右  調整    A  実行    B  戻る
+
+# ── User pick ────────────────────────────────────────────────────────────────
+userpick.title = ユーザーを選択
+userpick.footer = 左/右  移動    A  選択    X  復元    -  設定    +  終了
+restore.toast.ok = バックアップを復元しました。
+restore.toast.fail = 復元に失敗しました：
+restore.toast.mount_fail = マウントに失敗しました：
+restore.toast.deleted_last = バックアップを削除しました（このユーザーのバックアップはなくなりました）。
+
+# ── File browser ─────────────────────────────────────────────────────────────
+browse.title.export = 書き出しフォルダを選択
+browse.title.ltd = .ltd を選択
+browse.title.png_ltd = PNG または .ltd を選択
+browse.current = 現在地
+browse.empty = 空のフォルダ
+browse.footer.export = 上/下  移動    A  フォルダを開く    Y  書き出し先に設定    X  キャンセル    B  戻る
+browse.footer.pick = 上/下  移動    A  開く / 選択    B  戻る    X  キャンセル
+
+# ── Applet warning ───────────────────────────────────────────────────────────
+applet.title = アプレットモードは非対応
+applet.body.l1 = TomoToolNX は完全なシステムリソースを必要とし、
+applet.body.l2 = アプレットモード（R + アルバム）では動作しません。
+applet.how = 正しい起動方法
+applet.wrong = 間違った方法
+applet.wrong.hint = アルバムを開く
+applet.right = 正しい方法
+applet.right.hint = R を押しながらゲームを起動
+applet.note = ゲームは起動せず、代わりにホームブリューメニューが開きます。
+applet.exit = + / B  終了
+applet.footer = B / +  アプリ終了
+
+# ── Save warning ─────────────────────────────────────────────────────────────
+warn.title = 警告
+warn.body.l1 = これらの値を変更するとゲームが壊れる可能性があります。
+warn.body.l2 = 編集前にバックアップタブでバックアップを作成してください。
+warn.understand = 理解しました
+
+# ── Thumbnail tip ────────────────────────────────────────────────────────────
+thumbtip.title = 持ち物のサムネイルについて
+thumbtip.l1 = テクスチャは取り込まれましたが、持ち物のサムネイルは
+thumbtip.l2 = ゲーム側が管理しており、自動では更新されません。
+thumbtip.l3 = 更新するには：スタジオワークショップでこのアイテムを開き、
+thumbtip.l4 = テクスチャエディターに入って保存し直すと、ゲームが
+thumbtip.l5 = 自動的にサムネイルを作り直します。
+thumbtip.gotit = 了解
+
+# ── Background removal ───────────────────────────────────────────────────────
+bg.title = 背景を削除しますか？
+bg.body.l1 = 選択したテクスチャがその場で変更されます。
+bg.body.l2 = 最大30秒ほどかかる場合があります。
+bg.removing = 背景を削除中...
+
+# ── Back prompt ──────────────────────────────────────────────────────────────
+backprompt.title = 変更を保存しますか？
+backprompt.body = 「いいえ」を選ぶと未保存の編集は失われます。
+backprompt.save.back = 保存して戻る
+backprompt.save.exit = 保存して終了
+backprompt.discard.back = 破棄して戻る
+backprompt.discard.exit = 破棄して終了
+backprompt.footer.back = A  保存して戻る    B  破棄して戻る    X  キャンセル
+backprompt.footer.exit = A  保存して終了    B  破棄して終了    X  キャンセル
+
+# ── Save feedback / error ────────────────────────────────────────────────────
+save.feedback.title = 保存しました！
+save.feedback.body = 変更を正常に保存しました。
+error.title = エラー
+error.footer = B  戻る     +  終了
+
+# ── Island Generator (no-save bootstrap) ─────────────────────────────────────
+islandgen.title = トモダチコレクションのセーブが見つかりません
+islandgen.body1 = A を押すとこのユーザー用に新しい島を作成します。
+islandgen.body2 = 読み込み後、Web UIからランダムなMiiとランダムなマップで島を埋められます。
+islandgen.no_seed = (このビルドにはシードセーブがありません — seed_*.bin を data/ に入れて再ビルドしてください)
+islandgen.footer = A  生成    B  戻る    +  終了
+islandgen.err_no_seed = シードセーブが同梱されていません。data/README.md を参照してください。
+islandgen.cfg.header = 島ジェネレーター
+islandgen.cfg.title = この島を生成
+islandgen.cfg.body = 新しい島の配置方法を選んでから開始します。
+islandgen.cfg.row.map = マップ
+islandgen.cfg.row.rels = 関係
+islandgen.cfg.row.map.desc  = 定番の100%レイアウトと新規ランダム地形から選択
+islandgen.cfg.row.rels.desc = この島のMii同士がどう知り合っているか
+islandgen.cfg.row.batch       = LTD Miiを一括取り込み
+islandgen.cfg.row.batch.desc  = MTPで入れた.ltdファイルでMiiスロットを上書き
+islandgen.cfg.batch.yes       = はい
+islandgen.cfg.batch.no        = いいえ
+islandgen.batchltd.header     = 島ジェネレーター
+islandgen.batchltd.title      = MTPで.ltdファイルを入れる
+islandgen.batchltd.body1      = 取り込みたい.ltdをすべてこのフォルダに置いてください：
+islandgen.batchltd.body2      = その後 A を押して取り込み、生成を続行します。
+islandgen.batchltd.mtp_on     = MTPを有効化
+islandgen.batchltd.mtp_off    = MTPを無効化
+islandgen.batchltd.go         = 取り込んで続行
+islandgen.batchltd.footer     = Y  MTP     X  取り込んで続行     B  戻る
+islandgen.cfg.row.fetch = TomoShareからMiiを取得
+islandgen.cfg.rels.dense = ランダム
+islandgen.cfg.rels.none = 全員未知
+islandgen.cfg.fetch.on = はい（約30〜60秒）
+islandgen.cfg.fetch.off = スキップ
+islandgen.cfg.go = 生成
+islandgen.cfg.skip = スキップ
+islandgen.cfg.footer = 上/下  選択    左/右  変更    A  生成    B  スキップ
+islandgen.map.random = ランダム
+islandgen.map.classic = クラシック
+islandgen.run.header = 島ジェネレーター
+islandgen.run.title = 島を生成中
+islandgen.run.starting = 開始中…
+islandgen.run.cancel = キャンセル
+islandgen.run.dismiss_done = 完了
+islandgen.run.dismiss_cancel = 戻る
+islandgen.run.dismiss_error = OK
+islandgen.run.footer = B  キャンセル（実行中）    A  続行（完了時）
+
+# ── Save bundle workflow (user-picker "+" tile) ──────────────────────────────
+userpick.new_bundle = 新しい島
+bundle.create.title = 新しい島を作成
+bundle.create.body = 次の画面でこの新しい島を適用するSwitchユーザーを選んでください。コピーは後で使えるようバンドルとしてSDカードにも保存されます。
+bundle.create.footer = A  作成    B  戻る
+bundle.blank.title = 標準100%セーブ
+bundle.blank.desc = 同梱の100%セーブをそのまま適用。全ショップ解放、プレースホルダーMii70体。
+bundle.generated.title = + 島ジェネレーター
+bundle.generated.desc = 同上に加え、直後にオンSwitchの島ジェネレーターを実行。
+bundle.created = バンドルを作成しました：
+bundle.apply.title = この島を適用する先：
+bundle.apply.footer = 左/右  移動    A  適用    B  キャンセル
+bundle.dismissed = キャンセルしました。
+bundle.apply.overwrite.title = このユーザーには既にセーブがあります
+bundle.apply.overwrite.l1 = バンドルを適用すると既存のセーブが上書きされます。
+bundle.apply.overwrite.l2 = 現在のバックアップはSDカードに残ります。
+bundle.apply.overwrite.yes = 上書き
+bundle.apply.overwrite.no = キャンセル
+
+# ── WebUI tab ────────────────────────────────────────────────────────────────
+webui.log.title = アクティビティログ
+webui.log.empty = まだ活動はありません
+webui.active = 起動中
+webui.inactive = 停止中
+webui.footer = L/R  タブ    X  サーバー再起動    Y  MTP切替    B/+  戻る
+webui.mtp.start = MTP開始
+webui.mtp.stop = MTP停止
+webui.mtp.waiting = 待機中…
+webui.mtp.warn.title = USBファイル共有を開始しますか？
+webui.mtp.warn.l1 = MTPは実機のSwitchでのみ動作します。
+webui.mtp.warn.l2 = Ryujinxや多くのエミュレーターではアプリがクラッシュします。
+webui.mtp.warn.l3 = この確認は一度だけ表示されます。
+webui.mtp.warn.yes = 開始
+webui.mtp.warn.no = キャンセル
+
+# ── Textures (UGC) tab ───────────────────────────────────────────────────────
+ugc.filter = フィルター
+ugc.search.placeholder = タップまたは - で検索...
+ugc.no.matches = 一致なし
+ugc.no.preview = プレビューなし
+ugc.import = 取り込み
+ugc.exportpic = 画像を書き出し
+ugc.exportltd = .ltd を書き出し
+ugc.removebg = 背景削除
+ugc.footer = ZL/ZR  スクロール    上/下  選択    A  取り込み    Y  画像書き出し    .ltd書き出し  (タッチ)    X  背景削除    -  検索    L/R  タブ    B/+  戻る
+ugc.rename.guide = UGCスロットの名前を変更
+ugc.rename.ok = 名前を変更しました。
+ugc.rename.fail = 名前変更に失敗しました：
+ugc.kind.picker.title = カテゴリで絞り込み
+ugc.kind.all = すべて
+ugc.kind.food = 食べ物
+ugc.kind.cloth = 服
+ugc.kind.goods = たからもの
+ugc.kind.interior = インテリア
+ugc.kind.exterior = エクステリア
+ugc.kind.map_object = オブジェクト
+ugc.kind.map_floor = 地形
+ugc.kind.face_paint = フェイスペイント
+
+# ── Player tab ───────────────────────────────────────────────────────────────
+player.parse.fail.l1 = Player.sav を解析できませんでした — バックアップから復元するか、
+player.parse.fail.l2 = トモダチコレクションを一度開いてゲームに書き直させてください。
+player.notfound.hint = トモダチコレクションで島をもう設定しましたか？
+player.loading = 現在のプレイヤーセーブを読み込み中...
+player.kbd.edit = キーボードで編集
+player.money.type = 新しい金額を入力
+player.edit.pron = 読みを編集
+player.cycle.lang = 左/右  言語切替
+player.cycle.currency = 左/右  通貨切替
+player.cycle.tone = 左/右  肌の色切替
+player.cycle.size = 左/右  サイズ切替
+player.cycle.region = 左/右  地域切替
+player.islandsize.warn = 他のサイズはセーブファイルを壊します！
+player.wishes.liberated = 現在解放済み
+player.wishes.bulk = おねがいの一括操作  (タッチ)
+player.wishes.unlock = 全おねがいを解放 (268)
+player.wishes.unlock.confirm = もう一度タップで268件すべてを解放
+player.wishes.reset = 解放済みおねがいをリセット
+player.wishes.reset.confirm = もう一度タップで解放済みをリセット
+player.footer.pron = ZL/ZR  項目    A  名前    X  読み    左/右  言語    L/R  タブ    B/+  戻る
+player.footer.value = ZL/ZR  項目    左/右  値    A  編集    X  取り消し    L/R  タブ    B/+  戻る
+player.desc.Name = プレイヤーの表示名。
+player.desc.Island = あなたの島の名前。
+player.desc.Money = 現在の所持コイン。
+player.desc.Currency = ゲーム内に表示される地域通貨記号。
+player.desc.BootCount = ゲームを起動した回数。
+player.desc.SkinTone = プレイヤーの手・肌の色（0〜5）。
+player.desc.BdayDay = 誕生日の日（1〜31）。
+player.desc.BdayMonth = 誕生月（1〜12）。
+player.desc.BdayYear = 誕生年。
+player.desc.IslandSize = 島サイズのプリセット。他の値はセーブを壊します！
+player.desc.FountainLv = ねがいの泉のアップグレードレベル。
+player.desc.Wishes = 叶えたおねがいの数。
+player.desc.Region = プレイヤーの地域（季節と天気に影響）。
+
+# ── Map tab ──────────────────────────────────────────────────────────────────
+map.picker.title = アクターを選択
+map.picker.filter = フィルター
+map.picker.any = (すべて)
+map.slot = スロット
+map.row.posX = 位置 X
+map.row.posY = 位置 Y
+map.row.rotation = 回転
+map.row.linked = リンク先マップ
+map.add.actor = アクターを追加
+map.delete.btn = 削除 (X)
+map.delete.confirm.tap = もう一度タップで削除
+map.place.title = 配置モード
+map.actor = アクター
+map.cursor = カーソル
+map.viewer.title = マップビューア
+map.viewer.l1 = 十字キーかスティックでカーソルを移動。
+map.viewer.l2 = オブジェクトをタップか A で確認。
+map.viewer.l3 = Y で新しいオブジェクトを配置。
+map.viewer.l4 = B で終了 — 必要なら保存 / 破棄の
+map.viewer.l5 = 確認が表示されます。
+map.objects = オブジェクト
+map.slots = スロット
+map.legend = 凡例
+map.group.house = 家
+map.group.facility = 施設
+map.group.deco = 装飾
+map.group.room = 部屋
+map.group.step = 段差
+map.group.ugc = UGC
+map.group.unknown = 不明
+
+# ── Mii Stats ────────────────────────────────────────────────────────────────
+mii.header = Mii ステータス
+mii.parse.fail.l1 = Mii.sav を解析できませんでした — バックアップから復元するか、
+mii.parse.fail.l2 = トモダチコレクションを一度開いてゲームに書き直させてください。
+mii.notfound.hint = 島でMiiをもう作成しましたか？
+mii.loading = 現在のMiiセーブを読み込み中...
+mii.no.miis = Miiがいません
+mii.no.relations = 関係がありません
+mii.no.relationships = 関係がありません
+mii.miis.word = 体
+mii.same.as.name = (名前と同じ)
+mii.cycle.mood = 左/右  気分切替
+mii.file = Miiファイル
+mii.import.ltd = .ltd を取り込み
+mii.export.ltd = .ltd を書き出し
+
+subtab.stats = ステータス
+subtab.items = 持ち物
+subtab.habits = 習慣
+subtab.words = ことば
+subtab.relations = 関係
+subtab.housing = 住まい
+subtab.social = 相関図
+
+words.slot = スロット
+words.kind = 種類
+words.text = ことばの内容
+words.pron = 読み  (任意)
+words.same.as.text = (内容と同じ)
+words.edit.text = 内容を編集
+words.edit.pron = 読みを編集
+
+rel.your.type = あなたの関係
+rel.their.type = 相手の関係  (自動)
+rel.type = 種類
+rel.batch.know = 一括で知り合いに
+rel.meter = メーター
+rel.fixed = 固定
+rel.both.directions = 双方向をまとめて設定
+rel.since = 開始日
+
+bl.filter = フィルター
+bl.select.item = アイテムを選択
+bl.no.matches = 一致なし — X でフィルター解除
+
+habits.empty = このカテゴリに習慣はありません
+habits.hint = A  有効切替    X  所持切替    -  カテゴリ消去    左/右  カテゴリ切替
+
+housing.unavailable = このセーブには住まいデータがありません。
+housing.unavailable.detail = (Mii.Location.HouseMapId / RoomIndex が見つかりません)
+housing.moving = 移動中
+housing.moving.hint = 部屋をタップして配置。現在の住人と入れ替わります。
+housing.idle.hint = Miiをタップして持ち上げ、部屋をタップ。
+housing.housed = 入居済み
+housing.unhoused = 未入居
+housing.unhoused.lower = 未入居
+housing.house = 家
+housing.houses = 家
+housing.no.houses = (この島に家がありません — まずゲーム内で建ててください)
+housing.all.housed = (すべてのMiiが入居済み)
+housing.slot.short = スロット
+housing.room = 部屋
+housing.drop.here = ここに配置
+housing.empty.paren = (空)
+housing.add.resident = 住人を追加
+housing.delete = 削除
+housing.vacate = 退去
+housing.cancel = キャンセル
+housing.evict = 追い出す
+housing.footer.idle = A  Mii選択 / 配置    Y  サブタブ    L/R  タブ    B/+  戻る
+housing.footer.picked = A  配置 / 選択    -  選択中を退去    B  選択解除    L/R  タブ
+
+share.search = 検索
+share.page = ページ
+share.sort = 並び替え
+share.sort.newest = 新しい順
+share.sort.oldest = 古い順
+share.sort.likes = いいね順
+share.importable.only = 取り込み可能のみ
+share.fetching = Y で閲覧に切替 — 最初のページを取得中…
+share.unnamed = (名前なし)
+share.by = 作者
+share.likes = いいね
+share.image.failed = 画像の取得に失敗
+share.platform = プラットフォーム
+share.gender = 性別
+share.mii.id = Mii ID
+share.overwrite.slot = 上書きスロット
+share.slot = スロット
+share.slot.empty = スロットは空です
+share.replaces = 置き換え
+share.download.overwrite = ダウンロードして上書き
+share.footer = A  詳細    X  検索    十字キー  移動 / ページ    ZL/ZR  Mii  (対象スロット)    Y  サブタブ    B  戻る
+
+mii.field.Name = 名前
+mii.field.Level = レベル
+mii.field.LvMeter = レベルメーター
+mii.field.Money = 所持金
+mii.field.BdayDay = 誕生日（日）
+mii.field.BdayMonth = 誕生日（月）
+mii.field.BirthYear = 誕生年
+mii.field.DirectAge = 年齢指定
+mii.field.Activeness = 活発さ
+mii.field.Audacity = 大胆さ
+mii.field.Commonsense = 常識
+mii.field.Gaiety = 陽気さ
+mii.field.Sociability = 社交性
+mii.field.BondMeter = 絆メーター
+mii.field.Mood = 気分
+mii.field.Fullness = 満腹度
+mii.desc.Name = Miiのゲーム内表示名。
+mii.desc.Level = プレイヤーとの仲良し度レベル。
+mii.desc.LvMeter = 次のレベルまでの進捗バー（0〜100）。
+mii.desc.Money = このMiiが現在持っているコイン。
+mii.desc.BdayDay = 誕生日の日（1〜31）。
+mii.desc.BdayMonth = 誕生月（1〜12）。
+mii.desc.BirthYear = 生まれた年。
+mii.desc.DirectAge = 年齢の上書き。-1で自動（誕生日から）。
+mii.desc.Activeness = Miiの活発さ・元気さ（1〜10）。
+mii.desc.Audacity = Miiの大胆さ・勇敢さ（1〜10）。
+mii.desc.Commonsense = Miiの賢さ・分別（1〜10）。
+mii.desc.Gaiety = Miiの陽気さ・明るさ（1〜10）。
+mii.desc.Sociability = Miiの社交性・外向性（1〜10）。
+mii.desc.BondMeter = プレイヤーとの絆の強さ（0〜100）。
+mii.desc.Mood = 現在の感情の状態。
+mii.desc.Fullness = Miiの満腹度。特定のアイテムで100を超えることもあります。
+
+mii.footer.social.focus = ZL/ZR  Mii    Y  サブタブ    X  全体相関図    L/R  タブ    B/+  戻る
+mii.footer.social.global = ZL/ZR  Mii    Y  サブタブ    X  フォーカス表示    L/R  タブ    B/+  戻る
+mii.footer.words = ZL/ZR  Mii    上/下  スロット    左/右  種類    A  内容    X  読み    -  取り消し    Y  サブタブ    L/R  タブ    B/+  戻る
+mii.footer.relations = ZL/ZR  Mii    上/下  関係    左/右  種類    Y  サブタブ    L/R  タブ    B/+  戻る
+mii.footer.bl.picker = ZL/ZR  アイテム    上/下  アイテム    左/右  12個スキップ    A  決定    B  キャンセル
+mii.footer.bl = ZL/ZR  Mii    十字キー  移動    A  アイテム選択    -  色切替    X  消去    Y  サブタブ    L/R  タブ    B/+  戻る
+mii.footer.housing.idle = 十字キー  移動    A  Mii選択 / 配置    Y  サブタブ    L/R  タブ    B/+  戻る
+mii.footer.housing.picked = 十字キー  移動    A  配置 / 選択    -  選択中を退去    B  選択解除    L/R  タブ
+mii.footer.browse = 上/下  Mii    左/右  ページ    ZL/ZR  Mii  (対象スロット)    A  詳細    X  検索    -  並び替え    B/Y  戻る
+mii.footer.browse.detail = ZL/ZR  Mii  (対象スロット)    A  ダウンロードして上書き    B  一覧に戻る
+mii.footer.stats.name = ZL/ZR  Mii    上/下  項目    左/右  選択    A  決定    X  読み    Y  サブタブ    L/R  タブ    B/+  戻る
+mii.footer.stats.value = ZL/ZR  Mii    上/下  項目    左/右  値    X  取り消し    Y  サブタブ    L/R  タブ    B/+  戻る

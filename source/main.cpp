@@ -137,6 +137,125 @@ namespace ThemeNS {
     [[maybe_unused]] static void Init() { Apply(g_current); }
 }
 
+// ─── Custom colour overrides ──────────────────────────────────────────────────
+// Layered on top of the base Switch/Original theme: the user can recolour the
+// accent (highlights / selection / gold) and the background. A background
+// override also re-derives the panel/border/text/dim shades from the chosen
+// colour, so the result stays coherent and text keeps enough contrast to read
+// on any background. Persisted in config.ini as accent_color / bg_color.
+static bool      gAccentCustom = false;
+static SDL_Color gAccentColor  = {222,198,120,255};
+static bool      gBgCustom     = false;
+static SDL_Color gBgColor      = {6,7,12,255};
+
+// HSV colour picker (saturation/value square + hue bar), modal over Settings.
+static bool      gShowColorPicker  = false;
+static int       gPickerTarget     = 0;   // 0 = accent, 1 = background
+static SDL_Color gPickerColor      = {255,255,255,255};
+static SDL_Color gPickerPrevColor  = {255,255,255,255};
+static bool      gPickerPrevCustom = false;
+static float     gPickH = 0.f, gPickS = 0.f, gPickV = 1.f;          // working HSV
+static int       gPickerSqX=0, gPickerSqY=0, gPickerSqW=1, gPickerSqH=1;     // SV square (touch)
+static int       gPickerHueX=0, gPickerHueY=0, gPickerHueW=1, gPickerHueH=1; // hue bar (touch)
+static int       gPickerDrag = 0;   // active touch drag: 0 none, 1 = SV square, 2 = hue bar
+
+static inline uint8_t ClampU8(int v){ return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v)); }
+static inline int     ColorLuma(SDL_Color c){ return (c.r*299 + c.g*587 + c.b*114) / 1000; }
+static inline SDL_Color ShadeBy(SDL_Color c, int amt){
+    return { ClampU8(c.r+amt), ClampU8(c.g+amt), ClampU8(c.b+amt), 255 };
+}
+static bool HexToColor(const std::string& v, SDL_Color& out){
+    if (v.size() != 6) return false;
+    auto hx = [&](int o)->int{ int val=0; for(int i=0;i<2;i++){ char c=v[o+i]; val<<=4;
+        if      (c>='0'&&c<='9') val|=c-'0';
+        else if (c>='a'&&c<='f') val|=c-'a'+10;
+        else if (c>='A'&&c<='F') val|=c-'A'+10;
+        else return -1; } return val; };
+    int r=hx(0),g=hx(2),b=hx(4); if(r<0||g<0||b<0) return false;
+    out = {(uint8_t)r,(uint8_t)g,(uint8_t)b,255}; return true;
+}
+// HSV ↔ RGB. The picker edits in HSV (hue bar + saturation/value square, like
+// the Tomodachi Life / system colour pickers) and stores the resulting RGB.
+static SDL_Color HSVtoRGB(float h, float s, float v){
+    h = fmodf(h, 360.f); if (h < 0) h += 360.f;
+    float c = v*s, x = c*(1.f - fabsf(fmodf(h/60.f, 2.f) - 1.f)), m = v - c;
+    float r=0,g=0,b=0;
+    if      (h <  60){ r=c; g=x; }
+    else if (h < 120){ r=x; g=c; }
+    else if (h < 180){ g=c; b=x; }
+    else if (h < 240){ g=x; b=c; }
+    else if (h < 300){ r=x; b=c; }
+    else             { r=c; b=x; }
+    return { ClampU8((int)((r+m)*255+0.5f)), ClampU8((int)((g+m)*255+0.5f)), ClampU8((int)((b+m)*255+0.5f)), 255 };
+}
+static void RGBtoHSV(SDL_Color col, float& h, float& s, float& v){
+    float r=col.r/255.f, g=col.g/255.f, b=col.b/255.f;
+    float mx=fmaxf(r,fmaxf(g,b)), mn=fminf(r,fminf(g,b)), d=mx-mn;
+    v = mx; s = (mx <= 0.f) ? 0.f : d/mx;
+    if (d <= 0.f){ h = 0.f; return; }
+    if      (mx == r) h = 60.f*fmodf((g-b)/d, 6.f);
+    else if (mx == g) h = 60.f*((b-r)/d + 2.f);
+    else              h = 60.f*((r-g)/d + 4.f);
+    if (h < 0) h += 360.f;
+}
+// Re-derive gTheme from the base theme plus the active overrides. Reset to the
+// base first so repeated edits never compound (e.g. re-shading an already-shaded
+// background). Safe to call every frame / on every slider tick.
+static void ApplyCustomColors(){
+    ThemeNS::Apply(ThemeNS::Current());
+    if (gBgCustom){
+        bool dark = ColorLuma(gBgColor) < 128;
+        int  s    = dark ? 1 : -1;        // lighten panels on a dark bg, darken on a light one
+        gTheme.bg     = gBgColor;
+        gTheme.panel  = ShadeBy(gBgColor, s*16);
+        gTheme.panel2 = ShadeBy(gBgColor, s*26);
+        gTheme.sel    = ShadeBy(gBgColor, s*40);
+        gTheme.border = ShadeBy(gBgColor, s*64);
+        gTheme.text   = dark ? SDL_Color{233,230,222,255} : SDL_Color{24,24,28,255};
+        gTheme.dim    = dark ? SDL_Color{142,142,152,255} : SDL_Color{92,92,102,255};
+    }
+    if (gAccentCustom){
+        gTheme.accent = gAccentColor;
+        gTheme.gold   = gAccentColor;
+        gTheme.glow   = { gAccentColor.r, gAccentColor.g, gAccentColor.b, 130 };
+    }
+}
+// Push the picker's working colour into the live theme so the whole UI recolours
+// behind the modal as the user drags.
+static void PickerCommitLive(){
+    if (gPickerTarget==0){ gAccentColor=gPickerColor; gAccentCustom=true; }
+    else                 { gBgColor    =gPickerColor; gBgCustom    =true; }
+    ApplyCustomColors();
+}
+// Rebuild the working RGB colour from the HSV controls, then push it live.
+static void PickerSetFromHSV(){ gPickerColor = HSVtoRGB(gPickH, gPickS, gPickV); PickerCommitLive(); }
+// Continuous touch-drag: update the grabbed control (square or hue bar) from an
+// absolute screen point. Coordinates are clamped so dragging past an edge pins
+// to the edge rather than stopping — that's what makes the cursor feel smooth.
+static void PickerDragUpdate(int x, int y){
+    if (gPickerDrag == 1){
+        float s = (float)(x - gPickerSqX) / (gPickerSqW > 0 ? gPickerSqW : 1);
+        float v = 1.f - (float)(y - gPickerSqY) / (gPickerSqH > 0 ? gPickerSqH : 1);
+        gPickS = s < 0 ? 0 : (s > 1 ? 1 : s);
+        gPickV = v < 0 ? 0 : (v > 1 ? 1 : v);
+        PickerSetFromHSV();
+    } else if (gPickerDrag == 2){
+        float h = (float)(x - gPickerHueX) / (gPickerHueW > 0 ? gPickerHueW : 1) * 360.f;
+        gPickH = h < 0 ? 0 : (h > 360 ? 360 : h);
+        PickerSetFromHSV();
+    }
+}
+// Begin a drag if (x,y) lands on the square or hue bar; returns true if grabbed.
+static bool PickerTouchDown(int x, int y){
+    if (x >= gPickerSqX && x < gPickerSqX + gPickerSqW &&
+        y >= gPickerSqY && y < gPickerSqY + gPickerSqH)            gPickerDrag = 1;
+    else if (x >= gPickerHueX && x < gPickerHueX + gPickerHueW &&
+             y >= gPickerHueY - 10 && y < gPickerHueY + gPickerHueH + 10) gPickerDrag = 2;
+    else { gPickerDrag = 0; return false; }
+    PickerDragUpdate(x, y);
+    return true;
+}
+
 static PadState      gPad;
 static SDL_Renderer* gRen = nullptr;
 
@@ -158,6 +277,7 @@ static void PickFontForLang(const std::string& code, const void*& outData, size_
     PlSharedFontType type;
     bool wantShared = false;
     if      (code == "zh") { type = PlSharedFontType_ChineseSimplified; wantShared = true; }
+    else if (code == "ja") { type = PlSharedFontType_Standard;          wantShared = true; }
     else if (code == "ru") { type = PlSharedFontType_Standard;          wantShared = true; }
     if (!wantShared) return;
     static bool plReady = false;
@@ -297,43 +417,90 @@ static void DrawRectSquare(int x,int y,int w,int h,SDL_Color c){
     SDL_Rect r{x,y,w,h};SDL_RenderDrawRect(gRen,&r);
 }
 
-// Filled rounded rectangle via scan-line: middle rows draw full width, top/bottom
-// rows use circle math for the corner inset. ~h fill-rect calls per rect.
+// ─── Anti-aliased corner masks ────────────────────────────────────────────────
+// The old rounded primitives plotted one hard pixel per scan-line, which leaves
+// a visible staircase on a 6px radius. Instead we bake a single white quarter
+// corner into a small texture (alpha = sub-pixel coverage) and blit it, tinted,
+// to each of the four corners with the appropriate flip. Coverage is computed
+// with 4×4 supersampling so the edge is smooth. Textures are cached per radius
+// and reused for the life of the process — building is one-time and cheap.
+struct CornerTex { SDL_Texture* fill = nullptr; SDL_Texture* ring = nullptr; };
+static std::map<int, CornerTex> gCornerCache;
+
+// Build an r×r tile for the TOP-LEFT corner. The arc center sits at tile-local
+// (r, r); the rounded cut-away is toward (0,0). `ring` keeps only a ~1px band at
+// the outer edge (for outlines); otherwise the whole disk is filled.
+static SDL_Texture* BuildCornerTexture(int r, bool ring) {
+    std::vector<uint32_t> px((size_t)r * r, 0);
+    const int SS = 4; // 4×4 supersample grid
+    for (int y = 0; y < r; y++) {
+        for (int x = 0; x < r; x++) {
+            int inside = 0;
+            for (int sy = 0; sy < SS; sy++)
+                for (int sx = 0; sx < SS; sx++) {
+                    float fx = (float)x + (sx + 0.5f) / SS;
+                    float fy = (float)y + (sy + 0.5f) / SS;
+                    float dx = fx - (float)r, dy = fy - (float)r;
+                    float d  = sqrtf(dx*dx + dy*dy);
+                    bool in = ring ? (d <= (float)r && d >= (float)r - 1.0f)
+                                   : (d <= (float)r);
+                    if (in) inside++;
+                }
+            uint8_t a = (uint8_t)(255 * inside / (SS * SS));
+            // ABGR8888: 0xAABBGGRR — white RGB so a colour-mod tints it later.
+            px[(size_t)y * r + x] = ((uint32_t)a << 24) | 0x00FFFFFFu;
+        }
+    }
+    SDL_Texture* t = SDL_CreateTexture(gRen, SDL_PIXELFORMAT_ABGR8888,
+                                       SDL_TEXTUREACCESS_STATIC, r, r);
+    if (t) {
+        SDL_UpdateTexture(t, nullptr, px.data(), r * 4);
+        SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
+    }
+    return t;
+}
+static const CornerTex& GetCornerTex(int r) {
+    auto it = gCornerCache.find(r);
+    if (it != gCornerCache.end()) return it->second;
+    CornerTex ct;
+    ct.fill = BuildCornerTexture(r, false);
+    ct.ring = BuildCornerTexture(r, true);
+    return gCornerCache.emplace(r, ct).first->second;
+}
+// Tint `tile` to colour c and stamp it into all four corners of the rect.
+static void BlitCorners(SDL_Texture* tile, int x,int y,int w,int h,int r,SDL_Color c){
+    if (!tile) return;
+    SDL_SetTextureColorMod(tile, c.r, c.g, c.b);
+    SDL_SetTextureAlphaMod(tile, c.a);
+    SDL_Rect d;
+    d = {x,         y,         r, r}; SDL_RenderCopyEx(gRen, tile, nullptr, &d, 0, nullptr, SDL_FLIP_NONE);
+    d = {x+w-r,     y,         r, r}; SDL_RenderCopyEx(gRen, tile, nullptr, &d, 0, nullptr, SDL_FLIP_HORIZONTAL);
+    d = {x,         y+h-r,     r, r}; SDL_RenderCopyEx(gRen, tile, nullptr, &d, 0, nullptr, SDL_FLIP_VERTICAL);
+    d = {x+w-r,     y+h-r,     r, r}; SDL_RenderCopyEx(gRen, tile, nullptr, &d, 0, nullptr,
+                                                       (SDL_RendererFlip)(SDL_FLIP_HORIZONTAL|SDL_FLIP_VERTICAL));
+}
+
+// Filled rounded rectangle: three solid fills cover the body (a full-width
+// middle band plus top/bottom strips between the corners) and four anti-aliased
+// corner tiles round it off. Smooth on a 6px radius, ~3 fills + 4 blits per rect.
 static void FillRectRounded(int x,int y,int w,int h,int r,SDL_Color c){
     if (r <= 0 || w < 2*r || h < 2*r) { FillRectSquare(x,y,w,h,c); return; }
     SDL_SetRenderDrawColor(gRen, c.r, c.g, c.b, c.a);
-    // Middle band — single fill
-    SDL_Rect mid{ x, y + r, w, h - 2*r };
-    SDL_RenderFillRect(gRen, &mid);
-    // Top / bottom caps — scanline with circle inset
-    for (int dy = 0; dy < r; dy++) {
-        float fy = (float)(r - dy) - 0.5f;
-        int   off = r - (int)sqrtf((float)(r*r) - fy*fy);
-        SDL_Rect top{ x + off, y + dy,             w - 2*off, 1 };
-        SDL_Rect bot{ x + off, y + h - 1 - dy,     w - 2*off, 1 };
-        SDL_RenderFillRect(gRen, &top);
-        SDL_RenderFillRect(gRen, &bot);
-    }
+    SDL_Rect mid{ x,     y + r,     w,         h - 2*r }; SDL_RenderFillRect(gRen, &mid);
+    SDL_Rect top{ x + r, y,         w - 2*r,   r       }; SDL_RenderFillRect(gRen, &top);
+    SDL_Rect bot{ x + r, y + h - r, w - 2*r,   r       }; SDL_RenderFillRect(gRen, &bot);
+    BlitCorners(GetCornerTex(r).fill, x, y, w, h, r, c);
 }
 
-// Outline variant — 4 straight edges + 4 corner arcs.
+// Outline variant — 4 straight edges + 4 anti-aliased corner rings.
 static void DrawRectRounded(int x,int y,int w,int h,int r,SDL_Color c){
     if (r <= 0 || w < 2*r || h < 2*r) { DrawRectSquare(x,y,w,h,c); return; }
     SDL_SetRenderDrawColor(gRen, c.r, c.g, c.b, c.a);
-    // Straight edges
-    SDL_RenderDrawLine(gRen, x + r,         y,           x + w - 1 - r, y);
-    SDL_RenderDrawLine(gRen, x + r,         y + h - 1,   x + w - 1 - r, y + h - 1);
-    SDL_RenderDrawLine(gRen, x,             y + r,       x,             y + h - 1 - r);
-    SDL_RenderDrawLine(gRen, x + w - 1,     y + r,       x + w - 1,     y + h - 1 - r);
-    // Corner arcs — sample each "edge pixel" of the quarter circle
-    for (int dy = 0; dy < r; dy++) {
-        float fy = (float)(r - dy) - 0.5f;
-        int   off = r - (int)sqrtf((float)(r*r) - fy*fy);
-        SDL_RenderDrawPoint(gRen, x + off,             y + dy);
-        SDL_RenderDrawPoint(gRen, x + w - 1 - off,     y + dy);
-        SDL_RenderDrawPoint(gRen, x + off,             y + h - 1 - dy);
-        SDL_RenderDrawPoint(gRen, x + w - 1 - off,     y + h - 1 - dy);
-    }
+    SDL_RenderDrawLine(gRen, x + r,     y,           x + w - 1 - r, y);
+    SDL_RenderDrawLine(gRen, x + r,     y + h - 1,   x + w - 1 - r, y + h - 1);
+    SDL_RenderDrawLine(gRen, x,         y + r,       x,             y + h - 1 - r);
+    SDL_RenderDrawLine(gRen, x + w - 1, y + r,       x + w - 1,     y + h - 1 - r);
+    BlitCorners(GetCornerTex(r).ring, x, y, w, h, r, c);
 }
 
 // Soft drop shadow — two stacked translucent rounded rects offset downward.
@@ -595,8 +762,82 @@ static ScreenFade gFade;
 
 // Final present wrapper — paints the fade overlay (if active) on top of
 // whatever the current screen rendered, then flips the back buffer.
+// ── Logo easter egg ──────────────────────────────────────────────────────────
+// Tap "TomoToolNX" in the header and the wordmark peels off, bounces and
+// stretches across the WHOLE screen like it's alive (springy hops, rubber
+// squash-and-stretch, a couple of cheeky spins, a motion-blur trail), then
+// springs back home. Rendered from Present() so it overlays every screen.
+static float       gEggT       = 0.f;
+static int         gEggVariant = 0;    // cycles each tap so you get a different stunt
+static const float EGG_DUR     = 2.6f;
+static void DrawLogoEgg() {
+    if (gEggT <= 0.f) return;
+    gEggT -= gDtSec; if (gEggT < 0.f) gEggT = 0.f;
+    float elapsed = EGG_DUR - gEggT;
+    int lw = 0, lh = 0;
+    SDL_Texture* tex = GetTextTexture("TomoToolNX", Font::Md, COL_GOLD, lw, lh);
+    if (!tex) return;
+    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+    const float HX = 10.f + lw * 0.5f, HY = 14.f;          // resting spot in the header
+    const float CX = SCREEN_W * 0.5f,  CY = SCREEN_H * 0.5f;
+    const int V = gEggVariant;
+    // Each variant leaves home (env=0 at the ends) and springs back. env is a
+    // smootherstep'd 0→1→0 so launch & landing are snappy.
+    auto pose = [&](float t, float& cx, float& cy, float& sx, float& sy, float& ang){
+        float tn = t / EGG_DUR; if (tn < 0) tn = 0; if (tn > 1) tn = 1;
+        float env = sinf((float)M_PI * tn); env = env * env * (3.f - 2.f * env);
+        float base = 1.f + 3.8f * env;
+        cx = HX + (CX - HX) * env;  cy = HY + (CY - HY) * env;
+        float boing = sinf(t * 16.f) * 0.40f * env;
+        sx = base * (1.f + boing);  sy = base * (1.f - boing);
+        ang = sinf(t * 6.f) * 26.f * env;
+        if (V == 0) {                        // ricochet — springy hops, sway, two spins
+            cx += (sinf(t * 5.3f) * 250.f + sinf(t * 11.f) * 40.f) * env;
+            cy += (-fabsf(sinf(t * 4.2f)) * 205.f + sinf(t * 2.1f) * 70.f) * env;
+            float sw = (tn - 0.30f) / 0.40f; if (sw < 0) sw = 0; if (sw > 1) sw = 1;
+            ang += 720.f * sw * (1.f - sw) * 4.f;
+        } else if (V == 1) {                 // orbit — loops a big circle around the centre
+            cx = HX + (CX - HX + cosf(t * 4.2f) * 330.f) * env;
+            cy = HY + (CY - HY + sinf(t * 4.2f) * 200.f) * env;
+            ang = cosf(t * 4.2f) * 35.f * env + t * 55.f * env;
+        } else if (V == 2) {                 // pendulum — swings from the top like on a string
+            cx = HX + (CX - HX + sinf(t * 3.2f) * 360.f) * env;
+            cy = HY + (150.f - HY + fabsf(sinf(t * 3.2f)) * 40.f) * env;
+            ang = sinf(t * 3.2f) * 44.f * env;
+            base = 1.f + 3.2f * env; sx = base; sy = base;
+        } else if (V == 3) {                 // heartbeat — throbs huge dead-centre
+            float beat = sinf(t * 9.f) * 0.5f + 0.5f;
+            float b = 1.f + (2.2f + beat * 3.0f) * env;
+            sx = b * (1.f + sinf(t * 22.f) * 0.08f);
+            sy = b * (1.f - sinf(t * 22.f) * 0.08f);
+            ang = sinf(t * 26.f) * 7.f * env;
+            cx += sinf(t * 13.f) * 30.f * env; cy += cosf(t * 15.f) * 24.f * env;
+        } else {                             // quake — vibrates, then bursts big and snaps back
+            float q = (tn < 0.45f) ? (1.f - tn / 0.45f) : 0.f;
+            cx = CX * env + HX * (1.f - env) + sinf(t * 70.f) * 10.f * q + sinf(t * 4.f) * 120.f * env;
+            cy = CY * env + HY * (1.f - env) + cosf(t * 66.f) * 10.f * q;
+            float burst = 1.f + 5.0f * powf(sinf((float)M_PI * tn), 3.f);
+            sx = burst * (1.f + sinf(t * 20.f) * 0.2f * env);
+            sy = burst * (1.f - sinf(t * 20.f) * 0.2f * env);
+            ang = sinf(t * 9.f) * 50.f * env;
+        }
+    };
+    // Motion-blur trail: a few fading ghosts behind the live wordmark.
+    for (int g = 4; g >= 0; g--) {
+        float t = elapsed - g * 0.04f;
+        if (t < 0.f) continue;
+        float cx, cy, sx, sy, ang; pose(t, cx, cy, sx, sy, ang);
+        int dw = (int)(lw * sx), dh = (int)(lh * sy);
+        SDL_Rect dst{ (int)cx - dw/2, (int)cy - dh/2, dw, dh };
+        SDL_SetTextureAlphaMod(tex, (g == 0) ? 255 : (Uint8)(58 - g * 11));
+        SDL_RenderCopyEx(gRen, tex, nullptr, &dst, ang, nullptr, SDL_FLIP_NONE);
+    }
+    SDL_SetTextureAlphaMod(tex, 255);
+}
+
 static inline void Present() {
     gFade.Draw();
+    DrawLogoEgg();          // overlays the finished frame on every screen
     SDL_RenderPresent(gRen);
 }
 
@@ -1199,6 +1440,7 @@ static void TSelSettingsItem(int i) { gSettingsSel = i; }
 // D-pad press, so the input handler dispatches it to the right row.
 static void TSettingsRowLeft (int row) { gSettingsSel = row; gSimKDown |= HidNpadButton_Left;  }
 static void TSettingsRowRight(int row) { gSettingsSel = row; gSimKDown |= HidNpadButton_Right; }
+static void TSettingsRowA    (int row) { gSettingsSel = row; gSimKDown |= HidNpadButton_A;     }
 static void TSelTexSettingsItem(int i) { gTexSettingsSel = i; }
 static void TRestorePickSel(int i)  { gRestoreSel  = i; }
 static void TRestoreConfirmA(int)   { gSimKDown |= HidNpadButton_A; }
@@ -1646,8 +1888,12 @@ struct HousingNavItem {
     bool conflict;     // two miis in the same (house, room)
 };
 static std::vector<HousingNavItem> gHousingNav;
-static int gHousingNavSel  = 0;     // index into gHousingNav
-static int gHousingScrollY = 0;     // pixel scroll inside the content area
+static int  gHousingNavSel      = 0; // index into gHousingNav
+static bool gHousingUserScrolled = false; // true after a touch-drag scroll, until the d-pad is used (suspends focus-follow)
+static bool gHousingSnapHl       = false; // set on a touch tap so the selection outline jumps to the card instead of sliding
+static int   gHousingScrollY  = 0;  // pixel scroll inside the content area (target)
+static float gHousingScrollYF = 0.f; // eased visual scroll (glides toward the target)
+static int   gHousingSyLast   = 0;  // the int scroll used in the last render pass
 
 static void THousingNavAct(int idx);
 
@@ -2603,6 +2849,8 @@ static void HousingDoNewHouse() {
 static void THousingNavAct(int idx) {
     if (idx < 0 || idx >= (int)gHousingNav.size()) return;
     gHousingNavSel = idx;
+    gHousingSnapHl = true;   // touch select → outline jumps onto the tapped card
+
     const auto& it = gHousingNav[idx];
     switch (it.kind) {
         case 0: // unhoused chip
@@ -3598,6 +3846,11 @@ static void DoUgcImportLtd(const std::string& ltdPath) {
 
 // ─── Draw helpers ─────────────────────────────────────────────────────────────
 
+// Tap target for the logo easter egg (set up in DrawHeader). Lives here because
+// it plays a sound — Audio is declared just above; the animation itself is in
+// DrawLogoEgg(), called from Present().
+static void TLogoEgg(int) { gEggT = EGG_DUR; gEggVariant = (gEggVariant + 1) % 5; Audio::Play(Audio::SfxClick); }
+
 static void DrawHeader(const std::string& title) {
     FillRect(0,0,SCREEN_W,28,COL_PANEL);
     DrawRect(0,27,SCREEN_W,1,COL_BORDER);
@@ -3605,7 +3858,8 @@ static void DrawHeader(const std::string& title) {
     int tw=0,fh=0;
     if(fsm) TTF_SizeUTF8(fsm,"TomoToolNX",&tw,&fh);
     int y=(28-fh)/2;
-    DrawText("TomoToolNX",10,y,COL_GOLD);
+    HitAdd(8, 0, tw+10, 28, TLogoEgg, 0);
+    if (gEggT <= 0.f) DrawText("TomoToolNX",10,y,COL_GOLD);  // hidden while it's off galivanting
     if (!title.empty())
         DrawText(" / "+title, 10+tw, y, COL_DIM);
     int vw=0;
@@ -3874,6 +4128,196 @@ static void DrawRestorePicker() {
     Present();
 }
 
+static void OpenColorPicker(int target){
+    gPickerTarget = target;
+    if (target == 0){ gPickerColor = gAccentCustom ? gAccentColor : gTheme.gold;
+                      gPickerPrevColor = gAccentColor; gPickerPrevCustom = gAccentCustom; }
+    else            { gPickerColor = gBgCustom ? gBgColor : gTheme.bg;
+                      gPickerPrevColor = gBgColor; gPickerPrevCustom = gBgCustom; }
+    RGBtoHSV(gPickerColor, gPickH, gPickS, gPickV);
+    gShowColorPicker = true;
+}
+// Modal HSV picker (preview swatch + saturation/value square + hue bar), drawn
+// on top of an already-rendered Settings screen which recolours live behind it.
+static void DrawColorPicker(){
+    HitClear();  // modal owns input — drop the Settings row hits underneath
+    SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_BLEND);
+    FillRectSquare(0, 0, SCREEN_W, SCREEN_H, SDL_Color{0,0,0,150});
+
+    int cardW = 760, cardH = 486;
+    int cardX = (SCREEN_W - cardW)/2, cardY = (SCREEN_H - cardH)/2;
+    DrawShadow(cardX, cardY, cardW, cardH, gTheme.cornerRadius);
+    FillRect(cardX, cardY, cardW, cardH, gTheme.panel);
+    DrawRect(cardX, cardY, cardW, cardH, gTheme.border);
+    DrawText(Lang::T(gPickerTarget == 0 ? "picker.accent" : "picker.bg"),
+             cardX + 30, cardY + 22, COL_TEXT, Font::Lg);
+
+    const int pad = 26;
+    int previewW = 170, previewH = 250;
+    int pvX = cardX + pad, pvY = cardY + 64;
+
+    // ── Saturation / Value square ──────────────────────────────────────────────
+    int sqX = pvX + previewW + 18, sqY = pvY;
+    int sqW = cardX + cardW - pad - sqX, sqH = previewH;
+    gPickerSqX = sqX; gPickerSqY = sqY; gPickerSqW = sqW; gPickerSqH = sqH;
+    SDL_Color hueFull = HSVtoRGB(gPickH, 1.f, 1.f);
+    SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_NONE);
+    for (int x = 0; x < sqW; x++){               // white → full-hue, left to right
+        float f = (sqW > 1) ? (float)x/(sqW-1) : 0.f;
+        SDL_SetRenderDrawColor(gRen, ClampU8((int)(255 + (hueFull.r-255)*f)),
+                                     ClampU8((int)(255 + (hueFull.g-255)*f)),
+                                     ClampU8((int)(255 + (hueFull.b-255)*f)), 255);
+        SDL_RenderDrawLine(gRen, sqX+x, sqY, sqX+x, sqY+sqH-1);
+    }
+    SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_BLEND);
+    for (int y = 0; y < sqH; y++){               // darken toward the bottom (value)
+        int a = (sqH > 1) ? y*255/(sqH-1) : 0;
+        SDL_SetRenderDrawColor(gRen, 0,0,0,(Uint8)a);
+        SDL_RenderDrawLine(gRen, sqX, sqY+y, sqX+sqW-1, sqY+y);
+    }
+    DrawRect(sqX, sqY, sqW, sqH, gTheme.border);
+    // SV cursor (hollow white ring)
+    int kx = sqX + (int)(gPickS * (sqW-1)), ky = sqY + (int)((1.f - gPickV) * (sqH-1));
+    FillCircle(kx, ky, 9, SDL_Color{0,0,0,70});
+    DrawCircle(kx, ky, 8, SDL_Color{0,0,0,150});
+    DrawCircle(kx, ky, 7, SDL_Color{255,255,255,255});
+    DrawCircle(kx, ky, 6, SDL_Color{255,255,255,255});
+
+    // ── Preview swatch (left column) — colour only, no label ───────────────────
+    DrawShadow(pvX, pvY, previewW, previewH, gTheme.cornerRadius);
+    FillRect(pvX, pvY, previewW, previewH, gPickerColor);
+    DrawRect(pvX, pvY, previewW, previewH, gTheme.border);
+
+    // ── Hue bar ────────────────────────────────────────────────────────────────
+    int hbX = sqX, hbY = sqY + sqH + 18, hbW = sqW, hbH = 24, hr = hbH/2;
+    gPickerHueX = hbX; gPickerHueY = hbY; gPickerHueW = hbW; gPickerHueH = hbH;
+    SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_NONE);
+    for (int x = 0; x < hbW; x++){
+        SDL_Color c = HSVtoRGB((hbW > 1) ? (float)x/(hbW-1)*360.f : 0.f, 1.f, 1.f);
+        int dxEnd = (x < hbW-1-x) ? x : (hbW-1-x), inset = 0;
+        if (dxEnd < hr){ float dy = (float)hr - (dxEnd + 0.5f); float v = (float)(hr*hr) - dy*dy;
+                         inset = (v > 0) ? (int)(hr - sqrtf(v)) : hr; }
+        SDL_SetRenderDrawColor(gRen, c.r, c.g, c.b, 255);
+        SDL_RenderDrawLine(gRen, hbX+x, hbY+inset, hbX+x, hbY+hbH-1-inset);
+    }
+    SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_BLEND);
+    int hmx = hbX + (int)(gPickH/360.f * (hbW-1)), hmy = hbY + hbH/2;
+    FillCircle(hmx, hmy, hr+3, SDL_Color{0,0,0,80});
+    FillCircle(hmx, hmy, hr+1, SDL_Color{255,255,255,255});
+    FillCircle(hmx, hmy, hr-3, HSVtoRGB(gPickH, 1.f, 1.f));
+
+    // ── Hex readout + action buttons + footer ──────────────────────────────────
+    char hex[8]; snprintf(hex, sizeof hex, "#%02X%02X%02X",
+                          gPickerColor.r, gPickerColor.g, gPickerColor.b);
+    int btnH = 40, btnY = hbY + hbH + 16;
+    DrawText(std::string("HEX  ") + hex, hbX, btnY + (btnH - 16) / 2, COL_DIM, Font::Md);
+    // Touch buttons (also fire on controller): Reset / Cancel / Save. These let a
+    // touch-only user leave and save without the physical X / B / A buttons.
+    int sW = 124, cW = 110, rW = 100, g = 10;
+    int sX = cardX + cardW - pad - sW;     // Save  → A
+    int cX = sX - g - cW;                   // Cancel→ B
+    int rX = cX - g - rW;                   // Reset → X
+    FillRect(rX, btnY, rW, btnH, gTheme.panel2);
+    DrawRect(rX, btnY, rW, btnH, gTheme.border);
+    DrawTextC(Lang::T("picker.reset"), rX + rW/2, btnY + btnH/2, COL_DIM, Font::Md);
+    HitAdd(rX, btnY, rW, btnH, [](int){ gSimKDown |= HidNpadButton_X; }, 0);
+    FillRect(cX, btnY, cW, btnH, gTheme.panel2);
+    DrawRect(cX, btnY, cW, btnH, gTheme.border);
+    DrawTextC(Lang::T("picker.cancel"), cX + cW/2, btnY + btnH/2, COL_TEXT, Font::Md);
+    HitAdd(cX, btnY, cW, btnH, [](int){ gSimKDown |= HidNpadButton_B; }, 0);
+    FillRect(sX, btnY, sW, btnH, COL_GOLD);
+    SDL_Color saveTxt = ColorLuma(COL_GOLD) < 128 ? SDL_Color{240,240,240,255} : SDL_Color{20,20,20,255};
+    DrawTextC(Lang::T("picker.save"), sX + sW/2, btnY + btnH/2, saveTxt, Font::Md);
+    HitAdd(sX, btnY, sW, btnH, [](int){ gSimKDown |= HidNpadButton_A; }, 0);
+    DrawTextC(Lang::T("picker.footer"), cardX + cardW/2, cardY + cardH - 22, COL_DIM, Font::Sm);
+}
+
+// A small left/right chevron built from line segments (font-independent, crisp).
+static void DrawChevron(int cx, int cy, int a, bool left, SDL_Color col){
+    SDL_SetRenderDrawColor(gRen, col.r, col.g, col.b, 255);
+    int dir = left ? 1 : -1;
+    for (int t = 0; t < 2; t++){
+        SDL_RenderDrawLine(gRen, cx + dir*a + t, cy - a, cx - dir*a + t, cy);
+        SDL_RenderDrawLine(gRen, cx - dir*a + t, cy, cx + dir*a + t, cy + a);
+    }
+}
+// Pretty "‹ value ›" stepper: a rounded value chip flanked by circular chevron
+// buttons, right-aligned to rightX, gold-accented when the row is selected.
+// Replaces the old three-flat-boxes look. Registers its own L/R touch targets.
+static void DrawStepper(int rightX, int cy, int chipW, const std::string& value, bool sel, int row){
+    int btnR = 18, chipH = 38, gap = 12;
+    int totalW = btnR*2 + gap + chipW + gap + btnR*2;
+    int x = rightX - totalW;
+    int lcx = x + btnR;
+    int chipX = x + btnR*2 + gap;
+    int rcx = chipX + chipW + gap + btnR;
+    SDL_Color ring  = sel ? COL_GOLD : COL_BORDER;
+    SDL_Color arrow = sel ? COL_GOLD : COL_DIM;
+    FillCircle(lcx, cy, btnR, gTheme.panel2);
+    DrawCircle(lcx, cy, btnR, ring);
+    DrawChevron(lcx, cy, 5, true, arrow);
+    HitAdd(lcx - btnR, cy - btnR, btnR*2, btnR*2, TSettingsRowLeft, row);
+    FillRect(chipX, cy - chipH/2, chipW, chipH, gTheme.panel2);
+    DrawRect(chipX, cy - chipH/2, chipW, chipH, ring);
+    DrawTextC(value, chipX + chipW/2, cy, sel ? COL_GOLD : COL_TEXT, Font::Md);
+    FillCircle(rcx, cy, btnR, gTheme.panel2);
+    DrawCircle(rcx, cy, btnR, ring);
+    DrawChevron(rcx, cy, 5, false, arrow);
+    HitAdd(rcx - btnR, cy - btnR, btnR*2, btnR*2, TSettingsRowRight, row);
+}
+
+// Localized name for a Map actor group (0..6). Used by the Stats panel, the
+// legend, and the inspector header so the colour key reads in the user's language.
+static std::string MapGroupName(int g){
+    static const char* keys[7] = {
+        "map.group.house", "map.group.facility", "map.group.deco", "map.group.room",
+        "map.group.step",  "map.group.ugc",      "map.group.unknown"
+    };
+    return Lang::T(keys[(g < 0 || g > 6) ? 6 : g]);
+}
+
+// ── Small line-drawn icons for the Map toolbar ────────────────────────────────
+static void DrawMagnifierIcon(int cx, int cy, int r, SDL_Color col){
+    DrawCircle(cx, cy, r, col);
+    DrawCircle(cx, cy, r - 1, col);
+    SDL_SetRenderDrawColor(gRen, col.r, col.g, col.b, 255);
+    int hx = cx + (int)(r * 0.7f), hy = cy + (int)(r * 0.7f);
+    SDL_RenderDrawLine(gRen, hx,   hy,   hx + 4, hy + 4);
+    SDL_RenderDrawLine(gRen, hx,   hy+1, hx + 4, hy + 5);
+}
+// Curved undo / redo arrow (arc over the top + an arrowhead at the open end).
+static void DrawUndoRedoIcon(int cx, int cy, int r, bool redo, SDL_Color col){
+    SDL_SetRenderDrawColor(gRen, col.r, col.g, col.b, 255);
+    const int N = 16;
+    int px[N+1], py[N+1];
+    for (int i = 0; i <= N; i++){
+        float ang = (float)M_PI * (0.10f + 0.95f * i / N);   // ~18°..189° arc over the top
+        int fx = cx + (int)(r * cosf(ang));
+        int fy = cy - (int)(r * sinf(ang));
+        if (redo) fx = 2*cx - fx;
+        px[i] = fx; py[i] = fy;
+    }
+    for (int i = 0; i < N; i++){
+        SDL_RenderDrawLine(gRen, px[i], py[i],   px[i+1], py[i+1]);
+        SDL_RenderDrawLine(gRen, px[i], py[i]+1, px[i+1], py[i+1]+1);
+    }
+    int ex = px[0], ey = py[0], d = redo ? -1 : 1;
+    SDL_RenderDrawLine(gRen, ex, ey, ex + d*6, ey + 2);
+    SDL_RenderDrawLine(gRen, ex, ey, ex - d*1, ey - 6);
+}
+// Download glyph (down arrow into a tray) for the PNG export button.
+static void DrawDownloadIcon(int cx, int cy, int s, SDL_Color col){
+    SDL_SetRenderDrawColor(gRen, col.r, col.g, col.b, 255);
+    for (int t = -1; t <= 1; t++)
+        SDL_RenderDrawLine(gRen, cx + t, cy - s, cx + t, cy + s - 3);
+    for (int t = 0; t < 2; t++){
+        SDL_RenderDrawLine(gRen, cx, cy + s - 2 + t, cx - s/2 - 1, cy + s/2 - 2 + t);
+        SDL_RenderDrawLine(gRen, cx, cy + s - 2 + t, cx + s/2 + 1, cy + s/2 - 2 + t);
+    }
+    for (int t = 0; t < 2; t++)
+        SDL_RenderDrawLine(gRen, cx - s, cy + s + 2 + t, cx + s, cy + s + 2 + t);
+}
+
 static void DrawSettings() {
     HitClear();
     SDL_SetRenderDrawColor(gRen, COL_BG.r, COL_BG.g, COL_BG.b, 255);
@@ -3892,10 +4336,12 @@ static void DrawSettings() {
     static const SettingsItem ITEMS[] = {
         { "settings.item.lang",       "settings.item.lang.desc"    },
         { "settings.item.theme",      "settings.item.theme.desc"   },
+        { "settings.item.accent",     "settings.item.accent.desc"  },
+        { "settings.item.bg",         "settings.item.bg.desc"      },
         { "settings.item.export",     "settings.item.export.desc"  },
         { "settings.item.maxbk",      "settings.item.maxbk.desc"   },
     };
-    static const int ITEM_COUNT = 4;
+    static const int ITEM_COUNT = 6;
 
     const int listW = 720, listX = (SCREEN_W - listW) / 2;
     const int rowH  = 68,  rowGap = 5;
@@ -3915,10 +4361,20 @@ static void DrawSettings() {
 
         SDL_Color labelCol = sel ? COL_TEXT : COL_DIM;
         SDL_Color descCol  = COL_DIM;
-        DrawText(Lang::T(ITEMS[i].labelKey), listX + 16, ry + 10, labelCol, Font::Md);
-        DrawText(Lang::T(ITEMS[i].descKey),  listX + 16, ry + 40, descCol,  Font::Sm);
+        // Clip the label + description so they never run under the row's
+        // right-side control. ctrlLeft = where that control begins.
+        int ctrlLeft;
+        if      (i == 0 || i == 1) ctrlLeft = listX + listW - 20 - (170 + 96); // stepper (chip 170)
+        else if (i == 5)           ctrlLeft = listX + listW - 20 - (70 + 96);  // stepper (chip 70)
+        else if (i == 2 || i == 3) ctrlLeft = listX + listW - 182;             // colour swatch
+        else                       ctrlLeft = listX + listW - 110;             // export "A change"
+        int textMaxW = ctrlLeft - (listX + 16) - 12;
+        DrawText(FitNodeName(Lang::T(ITEMS[i].labelKey), GetFont(Font::Md), textMaxW),
+                 listX + 16, ry + 10, labelCol, Font::Md);
+        DrawText(FitNodeName(Lang::T(ITEMS[i].descKey),  GetFont(Font::Sm), textMaxW),
+                 listX + 16, ry + 40, descCol,  Font::Sm);
 
-        if (i == 2) {
+        if (i == 4) {
             TTF_Font* fsm = GetFont(Font::Sm);
             int vw = 0, vh = 0;
             if (fsm) TTF_SizeUTF8(fsm, gExportPath.c_str(), &vw, &vh);
@@ -3930,57 +4386,32 @@ static void DrawSettings() {
             }
             DrawText(disp,        listX + listW - vw - 16, ry + 12, sel ? COL_ACCENT : COL_DIM, Font::Sm);
             DrawText("A  " + Lang::T("settings.change"), listX + listW - 100,     ry + 40, sel ? COL_GOLD   : COL_DIM, Font::Sm);
-        } else if (i == 3) {
-            const int arrowW = 36, numW = 48, ctrlH = 34;
-            int ctrlX = listX + listW - arrowW - numW - arrowW - 20;
-            int ctrlY = ry + (rowH - ctrlH) / 2;
-            HitAdd(ctrlX, ctrlY, arrowW, ctrlH, TSettingsRowLeft, i);
-            FillRect(ctrlX, ctrlY, arrowW, ctrlH, COL_PANEL);
-            DrawRect(ctrlX, ctrlY, arrowW, ctrlH, sel ? COL_GOLD : COL_BORDER);
-            DrawTextC("<", ctrlX + arrowW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
-            FillRect(ctrlX + arrowW, ctrlY, numW, ctrlH, COL_PANEL);
-            DrawRect(ctrlX + arrowW, ctrlY, numW, ctrlH, sel ? COL_GOLD : COL_BORDER);
-            DrawTextC(std::to_string(gMaxBackups), ctrlX + arrowW + numW/2, ctrlY + ctrlH/2, sel ? COL_TEXT : COL_DIM, Font::Md);
-            HitAdd(ctrlX + arrowW + numW, ctrlY, arrowW, ctrlH, TSettingsRowRight, i);
-            FillRect(ctrlX + arrowW + numW, ctrlY, arrowW, ctrlH, COL_PANEL);
-            DrawRect(ctrlX + arrowW + numW, ctrlY, arrowW, ctrlH, sel ? COL_GOLD : COL_BORDER);
-            DrawTextC(">", ctrlX + arrowW + numW + arrowW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
+        } else if (i == 5) {
+            // Max Backups: ‹ N › stepper.
+            DrawStepper(listX + listW - 20, ry + rowH/2, 70, std::to_string(gMaxBackups), sel, i);
         } else if (i == 0) {
-            // Language: < [Current] > stepper. Left/Right cycles; A also cycles forward.
+            // Language: ‹ Current › stepper. Left/Right cycles; A also cycles forward.
             const auto& avail = Lang::Available();
             std::string curLabel = Lang::Current();
             for (const auto& e : avail) if (e.code == Lang::Current()) { curLabel = e.label; break; }
-            const int arrowW = 36, chipW = 160, ctrlH = 34;
-            int ctrlX = listX + listW - arrowW - chipW - arrowW - 20;
-            int ctrlY = ry + (rowH - ctrlH) / 2;
-            FillRect(ctrlX, ctrlY, arrowW, ctrlH, COL_PANEL);
-            DrawRect(ctrlX, ctrlY, arrowW, ctrlH, sel ? COL_GOLD : COL_BORDER);
-            DrawTextC("<", ctrlX + arrowW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
-            HitAdd(ctrlX, ctrlY, arrowW, ctrlH, TSettingsRowLeft, i);
-            FillRect(ctrlX + arrowW, ctrlY, chipW, ctrlH, COL_PANEL);
-            DrawRect(ctrlX + arrowW, ctrlY, chipW, ctrlH, sel ? COL_GOLD : COL_BORDER);
-            DrawTextC(curLabel, ctrlX + arrowW + chipW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
-            FillRect(ctrlX + arrowW + chipW, ctrlY, arrowW, ctrlH, COL_PANEL);
-            DrawRect(ctrlX + arrowW + chipW, ctrlY, arrowW, ctrlH, sel ? COL_GOLD : COL_BORDER);
-            DrawTextC(">", ctrlX + arrowW + chipW + arrowW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
-            HitAdd(ctrlX + arrowW + chipW, ctrlY, arrowW, ctrlH, TSettingsRowRight, i);
+            DrawStepper(listX + listW - 20, ry + rowH/2, 170, curLabel, sel, i);
         } else if (i == 1) {
-            // Theme: < [Current] > stepper. Identical pattern to the language row.
-            std::string curLabel = Lang::T("theme." + ThemeNS::Current());
-            const int arrowW = 36, chipW = 160, ctrlH = 34;
-            int ctrlX = listX + listW - arrowW - chipW - arrowW - 20;
-            int ctrlY = ry + (rowH - ctrlH) / 2;
-            FillRect(ctrlX, ctrlY, arrowW, ctrlH, COL_PANEL);
-            DrawRect(ctrlX, ctrlY, arrowW, ctrlH, sel ? COL_GOLD : COL_BORDER);
-            DrawTextC("<", ctrlX + arrowW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
-            HitAdd(ctrlX, ctrlY, arrowW, ctrlH, TSettingsRowLeft, i);
-            FillRect(ctrlX + arrowW, ctrlY, chipW, ctrlH, COL_PANEL);
-            DrawRect(ctrlX + arrowW, ctrlY, chipW, ctrlH, sel ? COL_GOLD : COL_BORDER);
-            DrawTextC(curLabel, ctrlX + arrowW + chipW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
-            FillRect(ctrlX + arrowW + chipW, ctrlY, arrowW, ctrlH, COL_PANEL);
-            DrawRect(ctrlX + arrowW + chipW, ctrlY, arrowW, ctrlH, sel ? COL_GOLD : COL_BORDER);
-            DrawTextC(">", ctrlX + arrowW + chipW + arrowW/2, ctrlY + ctrlH/2, sel ? COL_GOLD : COL_DIM, Font::Md);
-            HitAdd(ctrlX + arrowW + chipW, ctrlY, arrowW, ctrlH, TSettingsRowRight, i);
+            // Theme: ‹ Current › stepper.
+            DrawStepper(listX + listW - 20, ry + rowH/2, 170, Lang::T("theme." + ThemeNS::Current()), sel, i);
+        } else if (i == 2 || i == 3) {
+            // Accent / Background colour: a live swatch + "A edit". Opens the
+            // HSV picker. The swatch shows the effective colour (custom override
+            // if set, otherwise the value the active theme provides).
+            SDL_Color eff = (i == 2) ? (gAccentCustom ? gAccentColor : gTheme.gold)
+                                     : (gBgCustom     ? gBgColor     : gTheme.bg);
+            const int swW = 70, swH = 36;
+            int swX = listX + listW - swW - 112;
+            int swY = ry + (rowH - swH) / 2;
+            FillRect(swX, swY, swW, swH, eff);
+            DrawRect(swX, swY, swW, swH, sel ? COL_GOLD : COL_BORDER);
+            DrawText("A  " + Lang::T("settings.change"), listX + listW - 100, ry + 24,
+                     sel ? COL_GOLD : COL_DIM, Font::Sm);
+            HitAdd(swX, swY, swW + 96, swH, TSettingsRowA, i);  // tap swatch → open picker
         }
     }
 
@@ -3994,6 +4425,7 @@ static void DrawSettings() {
                   gSettingsMsgCol, Font::Sm);
 
     DrawFooter(Lang::T("settings.footer.main"));
+    if (gShowColorPicker) DrawColorPicker();   // modal overlay on top
     Present();
 }
 
@@ -4509,8 +4941,20 @@ static void LoadConfig() {
         if (key == "theme") {
             ThemeNS::SetCurrent(val);
         }
+        if (key == "accent_color") {
+            SDL_Color c;
+            if (val == "default")          gAccentCustom = false;
+            else if (HexToColor(val, c)) { gAccentColor = c; gAccentCustom = true; }
+        }
+        if (key == "bg_color") {
+            SDL_Color c;
+            if (val == "default")          gBgCustom = false;
+            else if (HexToColor(val, c)) { gBgColor = c; gBgCustom = true; }
+        }
     }
     fclose(f);
+    // Fold the saved accent / background overrides into the active theme.
+    ApplyCustomColors();
     // Pre-i18n configs have no language= line; treat as first launch.
     if (!langFromConfig) {
         Lang::SetCurrent(DetectSystemLanguage());
@@ -4543,6 +4987,10 @@ static void SaveConfig() {
     }
     fprintf(f, "language=%s\n", Lang::Current().c_str());
     fprintf(f, "theme=%s\n",    ThemeNS::Current().c_str());
+    if (gAccentCustom) fprintf(f, "accent_color=%02x%02x%02x\n", gAccentColor.r, gAccentColor.g, gAccentColor.b);
+    else               fprintf(f, "accent_color=default\n");
+    if (gBgCustom)     fprintf(f, "bg_color=%02x%02x%02x\n", gBgColor.r, gBgColor.g, gBgColor.b);
+    else               fprintf(f, "bg_color=default\n");
     fclose(f);
 }
 
@@ -4886,16 +5334,36 @@ static void DrawOnSwitch() {
         if (totalFiltered > 0 && gEntryScroll > totalFiltered - LIST_VISIBLE)
             gEntryScroll = std::max(0, totalFiltered - LIST_VISIBLE);
 
+        // Smooth scroll: a render-follower eases toward the integer gEntryScroll,
+        // so touch-drag and stick scrolling glide instead of jumping a row at a
+        // time. Big jumps (Left/Right = first/last) snap rather than scroll past
+        // everything. Rows render at the fractional position and the list is
+        // clipped so partial top/bottom rows don't spill out of the panel.
+        static float gUgcSmoothTop = 0.f;
+        {
+            float tgt = (float)gEntryScroll;
+            if (fabsf(gUgcSmoothTop - tgt) > (float)(2 * LIST_VISIBLE)) gUgcSmoothTop = tgt;
+            gUgcSmoothTop += (tgt - gUgcSmoothTop) * std::min(1.f, gDtSec * 16.f);
+            if (fabsf(gUgcSmoothTop - tgt) < 0.02f) gUgcSmoothTop = tgt;
+        }
+        int firstRow = (int)floorf(gUgcSmoothTop);
+        int fracPx   = (int)((gUgcSmoothTop - firstRow) * ITEM_H);
+
+        SDL_Rect ugcClip{ LIST_X - 4, listPanelY, LIST_W + 8, listPanelH + 4 };
+        SDL_RenderSetClipRect(gRen, &ugcClip);
+
         int selRowY = LIST_TOP_Y;
         bool sawSel = false;
-        for (int i = 0; i < LIST_VISIBLE; i++) {
-            int filtPos = gEntryScroll + i;
-            if (filtPos >= totalFiltered) break;
+        for (int i = -1; i <= LIST_VISIBLE; i++) {
+            int filtPos = firstRow + i;
+            if (filtPos < 0 || filtPos >= totalFiltered) continue;
             int realIdx = gFilteredEntries[filtPos];
             bool sel = (realIdx == gEntrySel);
-            int ry = LIST_TOP_Y + i*ITEM_H;
+            int ry = LIST_TOP_Y + i*ITEM_H - fracPx;
             if (sel) { selRowY = ry; sawSel = true; }
-            HitAdd(LIST_X, ry, LIST_W, ITEM_H-1, TSelUgc, realIdx);
+            int rcy = ry + ITEM_H/2;
+            if (rcy >= listPanelY && rcy <= listPanelY + listPanelH)
+                HitAdd(LIST_X, ry, LIST_W, ITEM_H-1, TSelUgc, realIdx);
             FillRect(LIST_X, ry, LIST_W, ITEM_H-1, sel?COL_SEL:COL_BG);
             if (sel && gTheme.cornerRadius == 0)
                 DrawRectSquare(LIST_X, ry, LIST_W, ITEM_H-1, COL_GOLD);
@@ -4904,6 +5372,7 @@ static void DrawOnSwitch() {
             TTF_Font* f = GetFont(Font::Sm); int fw=0,fh=0; if(f)TTF_SizeUTF8(f,dn.c_str(),&fw,&fh);
             DrawText(dn, LIST_X+6, ry+(ITEM_H-fh)/2, sel?COL_TEXT:COL_DIM);
         }
+        SDL_RenderSetClipRect(gRen, nullptr);
 
         if (sawSel) {
             RequestHighlight((int)Screen::OnSwitch, /*sub=ugc list*/1,
@@ -4917,10 +5386,10 @@ static void DrawOnSwitch() {
 
         if (totalFiltered > LIST_VISIBLE) {
             int barH = listPanelH * LIST_VISIBLE / totalFiltered;
-            int barY = listPanelY + listPanelH * gEntryScroll / totalFiltered;
+            int barY = listPanelY + (int)(listPanelH * gUgcSmoothTop / totalFiltered);
             FillRect(LIST_X+LIST_W+2, barY, 4, barH, COL_BORDER);
         }
-        FillRect(PREVIEW_X,PREVIEW_Y,PREVIEW_W,PREVIEW_H,{8,8,8,255});
+        FillRect(PREVIEW_X,PREVIEW_Y,PREVIEW_W,PREVIEW_H,COL_BG);
         DrawRect(PREVIEW_X,PREVIEW_Y,PREVIEW_W,PREVIEW_H,COL_BORDER);
         // Header strip: show export/import message if active, else the user-
         // facing UGC name in a pill that adapts to the text width, plus a
@@ -4975,6 +5444,9 @@ static void DrawOnSwitch() {
                 float scale=std::min((float)PREVIEW_W/tw,(float)imgH/th);
                 int dw=(int)(tw*scale), dh=(int)(th*scale);
                 SDL_Rect dst{PREVIEW_X+(PREVIEW_W-dw)/2, imgY+(imgH-dh)/2, dw, dh};
+                // Keep the image square itself black so transparent textures read
+                // correctly; only the surrounding panel takes the theme colour.
+                FillRect(dst.x, dst.y, dw, dh, SDL_Color{0,0,0,255});
                 SDL_RenderCopy(gRen,gPreviewTex,nullptr,&dst);
             } else {
                 DrawTextC(Lang::T("ugc.no.preview"), PREVIEW_X+PREVIEW_W/2, imgY+imgH/2, COL_BORDER);
@@ -5575,7 +6047,7 @@ static void DrawPlayer() {
     }
 
     // Right panel: edit controls for selected field
-    FillRect(SE_DETAIL_X, SE_TOP_Y, SE_DETAIL_W, SCREEN_H-SE_TOP_Y-32, {8,8,8,255});
+    FillRect(SE_DETAIL_X, SE_TOP_Y, SE_DETAIL_W, SCREEN_H-SE_TOP_Y-32, COL_BG);
     DrawRect(SE_DETAIL_X, SE_TOP_Y, SE_DETAIL_W, SCREEN_H-SE_TOP_Y-32, COL_BORDER);
 
     const auto& fd = PLAYER_FIELDS[gPlayerFieldSel];
@@ -6433,6 +6905,42 @@ static void MapExportPng() {
 
 // Touch callbacks (registered via HitAdd). Translate the global last-touch
 // coords into tile coords inside the map canvas region.
+// True while a finger that started on the map canvas is being dragged — used to
+// pan/look by moving the cursor continuously (the view follows via MapClampView),
+// the same feel as dragging the cursor in the colour picker.
+static bool gMapCanvasDrag = false;
+
+// Grab-and-pan the map by a finger delta (pixels). The view follows the finger
+// and the cursor rides along so MapClampView never yanks the view back. Pixel
+// deltas accumulate and step the view a tile at a time; at zoom 1 the whole
+// island already fits, so panning is a no-op (nothing more to reveal).
+static float gMapPanAccX = 0.f, gMapPanAccY = 0.f;
+static void MapDragPan(float ddx, float ddy) {
+    int cols, rows, ppx; MapViewMetrics(cols, rows, ppx);
+    gMapPanAccX += ddx; gMapPanAccY += ddy;
+    while (gMapPanAccX >= ppx) { gMapPanAccX -= ppx; if (gMapViewX > 0)              { gMapViewX--; if (gMapCursorX > 0)            gMapCursorX--; } }
+    while (gMapPanAccX <= -ppx){ gMapPanAccX += ppx; if (gMapViewX < MAP_WIDTH-cols)  { gMapViewX++; if (gMapCursorX < MAP_WIDTH-1)  gMapCursorX++; } }
+    while (gMapPanAccY >= ppx) { gMapPanAccY -= ppx; if (gMapViewY > 0)              { gMapViewY--; if (gMapCursorY > 0)            gMapCursorY--; } }
+    while (gMapPanAccY <= -ppx){ gMapPanAccY += ppx; if (gMapViewY < MAP_HEIGHT-rows) { gMapViewY++; if (gMapCursorY < MAP_HEIGHT-1) gMapCursorY++; } }
+}
+// Move the cursor to the tile under an absolute screen point (no action). Used
+// for drag when the whole island already fits (zoom 1) and there's nothing to pan.
+static void MapCursorAtTouch(int fx, int fy) {
+    int cols, rows, ppx; MapViewMetrics(cols, rows, ppx);
+    int tx = gMapViewX + (fx - MAP_CANVAS_X) / ppx;
+    int ty = gMapViewY + (fy - MAP_CANVAS_Y) / ppx;
+    if (tx < 0) tx = 0; if (tx >= MAP_WIDTH)  tx = MAP_WIDTH  - 1;
+    if (ty < 0) ty = 0; if (ty >= MAP_HEIGHT) ty = MAP_HEIGHT - 1;
+    gMapCursorX = tx; gMapCursorY = ty;
+}
+// Drag the map: pan the view when zoomed in, otherwise slide the cursor so the
+// gesture always does something.
+static void MapDragGesture(float ddx, float ddy, int absX, int absY) {
+    int cols, rows, ppx; MapViewMetrics(cols, rows, ppx);
+    if (cols < MAP_WIDTH || rows < MAP_HEIGHT) MapDragPan(ddx, ddy);
+    else                                       MapCursorAtTouch(absX, absY);
+}
+
 static void TMapTapCanvas(int /*unused*/) {
     int rx = gLastTouchFireX - MAP_CANVAS_X;
     int ry = gLastTouchFireY - MAP_CANVAS_Y;
@@ -6579,7 +7087,8 @@ static void DrawMap() {
         }
     }
 
-    // Canvas background
+    // Canvas background — a framed, shadowed card for depth.
+    DrawShadow(MAP_CANVAS_X, MAP_CANVAS_Y, MAP_CANVAS_W, MAP_CANVAS_H, gTheme.cornerRadius);
     FillRect(MAP_CANVAS_X - 2, MAP_CANVAS_Y - 2, MAP_CANVAS_W + 4, MAP_CANVAS_H + 4, COL_BORDER);
     FillRect(MAP_CANVAS_X, MAP_CANVAS_Y, MAP_CANVAS_W, MAP_CANVAS_H, COL_PANEL);
 
@@ -6599,6 +7108,30 @@ static void DrawMap() {
                 FillRect(MAP_CANVAS_X + dx * ppx, MAP_CANVAS_Y + dy * ppx, ppx, ppx, c);
             }
         }
+    }
+
+    // Subtle grid for orientation (premium graph-paper feel). Fine per-tile lines
+    // only when tiles are big enough to not look noisy; brighter major lines on
+    // every 10th absolute tile so coordinates are easy to read at a glance.
+    {
+        int cols, rows, ppx; MapViewMetrics(cols, rows, ppx);
+        int gx2 = MAP_CANVAS_X + cols * ppx - 1, gy2 = MAP_CANVAS_Y + rows * ppx - 1;
+        SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_BLEND);
+        if (ppx >= 12) {
+            SDL_SetRenderDrawColor(gRen, 255, 255, 255, 14);
+            for (int dx = 1; dx < cols; dx++)
+                SDL_RenderDrawLine(gRen, MAP_CANVAS_X + dx*ppx, MAP_CANVAS_Y, MAP_CANVAS_X + dx*ppx, gy2);
+            for (int dy = 1; dy < rows; dy++)
+                SDL_RenderDrawLine(gRen, MAP_CANVAS_X, MAP_CANVAS_Y + dy*ppx, gx2, MAP_CANVAS_Y + dy*ppx);
+        }
+        SDL_SetRenderDrawColor(gRen, 255, 255, 255, 32);
+        for (int dx = 0; dx < cols; dx++)
+            if ((gMapViewX + dx) % 10 == 0)
+                SDL_RenderDrawLine(gRen, MAP_CANVAS_X + dx*ppx, MAP_CANVAS_Y, MAP_CANVAS_X + dx*ppx, gy2);
+        for (int dy = 0; dy < rows; dy++)
+            if ((gMapViewY + dy) % 10 == 0)
+                SDL_RenderDrawLine(gRen, MAP_CANVAS_X, MAP_CANVAS_Y + dy*ppx, gx2, MAP_CANVAS_Y + dy*ppx);
+        SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_NONE);
     }
 
     // Objects pass — apply the actor's footprint origin offset (x0/y0). For
@@ -6654,6 +7187,16 @@ static void DrawMap() {
                 FillRect(rx, ry, rw, rh, SDL_Color{ ti->r, ti->g, ti->b, 110 });
             }
         }
+        // Soft pulsing glow ring (0..1..0 over ~1.4s) under a crisp gold/white core.
+        static float pulseT = 0.f; pulseT += gDtSec;
+        float pulse = 0.5f - 0.5f * cosf(pulseT * 2.f * (float)M_PI / 1.4f);
+        int gw = 2 + (int)(pulse * 4.f);
+        SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_BLEND);
+        SDL_Color glow = COL_GOLD; glow.a = (Uint8)(50 + pulse * 90);
+        DrawRect(rx - 2 - gw, ry - 2 - gw, rw + 4 + 2*gw, rh + 4 + 2*gw, glow);
+        glow.a = (Uint8)(glow.a / 2);
+        DrawRect(rx - 3 - gw, ry - 3 - gw, rw + 6 + 2*gw, rh + 6 + 2*gw, glow);
+        SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_NONE);
         DrawRect(rx - 2, ry - 2, rw + 4, rh + 4, COL_GOLD);
         DrawRect(rx - 1, ry - 1, rw + 2, rh + 2, SDL_Color{ 255, 255, 255, 255 });
     }
@@ -6663,7 +7206,36 @@ static void DrawMap() {
     // keeps the work to one HitAdd entry instead of 9600.
     HitAdd(MAP_CANVAS_X, MAP_CANVAS_Y, MAP_CANVAS_W, MAP_CANVAS_H, TMapTapCanvas, 0);
 
-    // Inspector card
+    // Orientation HUD — a translucent chip over the canvas showing the cursor
+    // coordinate, zoom, and the tile under the cursor. Always knowing "where am
+    // I" is the single biggest usability win on a 120×80 island.
+    {
+        uint32_t hFloor = SaveEditor::Hash(MapKeys::FloorKeyHash);
+        uint32_t k = SaveEditor::GetUIntAt(gMapSav, hFloor, gMapCursorX * MAP_HEIGHT + gMapCursorY, 0);
+        const MapData::TileInfo* ti = MapData::TileLookup(k);
+        std::string tname = ti ? std::string(ti->code) : std::string("—");
+        for (auto& ch : tname) if (ch == '_') ch = ' ';
+        char buf[48];
+        snprintf(buf, sizeof buf, "X %d   Y %d   ·   %dx", gMapCursorX, gMapCursorY, gMapZoom);
+        std::string line1 = buf;
+        TTF_Font* f = GetFont(Font::Sm);
+        int w1=0,h1=0,w2=0,h2=0;
+        if (f) { TTF_SizeUTF8(f, line1.c_str(), &w1, &h1); TTF_SizeUTF8(f, tname.c_str(), &w2, &h2); }
+        int pillW = std::max(w1, w2 + 18) + 28;
+        int pillH = 44, px = MAP_CANVAS_X + 10, py = MAP_CANVAS_Y + 10;
+        SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_BLEND);
+        FillRect(px, py, pillW, pillH, SDL_Color{10, 12, 18, 205});
+        DrawRect(px, py, pillW, pillH, COL_BORDER);
+        SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_NONE);
+        // Vertically center each line on its own row so the font doesn't sit low.
+        int rowA = py + 4, rowB = py + 23;
+        DrawText(line1, px + 14, rowA + (16 - h1)/2, COL_TEXT, Font::Sm);
+        if (ti) FillRect(px + 14, rowB + 2, 12, 12, SDL_Color{ ti->r, ti->g, ti->b, 255 });
+        DrawText(tname, px + (ti ? 32 : 14), rowB + (16 - h2)/2, COL_DIM, Font::Sm);
+    }
+
+    // Inspector card — a shadowed, framed panel for depth.
+    DrawShadow(MAP_INS_X, MAP_INS_Y, MAP_INS_W, MAP_INS_H, gTheme.cornerRadius);
     FillRect(MAP_INS_X, MAP_INS_Y, MAP_INS_W, MAP_INS_H, COL_PANEL);
     DrawRect(MAP_INS_X, MAP_INS_Y, MAP_INS_W, MAP_INS_H, COL_BORDER);
 
@@ -6680,38 +7252,44 @@ static void DrawMap() {
         for (int i = 0; i < 3; i++) {
             int bx = tbX + i * (tw + 2);
             bool sel = ((int)gMapTool == i);
-            FillRect(bx, iy, tw, btnH, sel ? COL_ACCENT : COL_PANEL2);
-            DrawRect(bx, iy, tw, btnH, sel ? COL_ACCENT : COL_BORDER);
+            if (sel) DrawShadow(bx, iy, tw, btnH, gTheme.cornerRadius);
+            FillRect(bx, iy, tw, btnH, sel ? COL_GOLD : COL_PANEL2);
+            DrawRect(bx, iy, tw, btnH, sel ? COL_GOLD : COL_BORDER);
             DrawTextC(Lang::T(toolKeys[i]), bx + tw/2, iy + btnH/2,
                       sel ? COL_BG : COL_TEXT, Font::Sm);
             HitAdd(bx, iy, tw, btnH, TMapSetTool, i);
         }
         iy += btnH + 6;
-        // Zoom / undo / redo / PNG row. Zoom button cycles 1×→2×→3×→4×→1×.
-        int zW = 64, uW = 56, rW = 56;
+        // Zoom / undo / redo / PNG row — icon-forward; disabled buttons dim out.
+        int zW = 72, uW = 50, rW = 50;
         int zX = tbX;
         int uX = zX + zW + 4;
         int rX = uX + uW + 4;
         int pX = rX + rW + 4;
         int pW = tbX + tbW - pX;
+        int cyb = iy + btnH/2;
+        // Zoom (magnifier + Nx)
         FillRect(zX, iy, zW, btnH, COL_PANEL2); DrawRect(zX, iy, zW, btnH, COL_BORDER);
-        DrawTextC(std::to_string(gMapZoom) + "x", zX + zW/2, iy + btnH/2, COL_TEXT, Font::Sm);
+        DrawMagnifierIcon(zX + 16, cyb, 6, COL_TEXT);
+        DrawText(std::to_string(gMapZoom) + "x", zX + 30, cyb - 8, COL_TEXT, Font::Sm);
         HitAdd(zX, iy, zW, btnH, TMapZoom, 0);
+        // Undo
         bool ue = !gMapUndo.empty();
-        FillRect(uX, iy, uW, btnH, COL_PANEL2);
+        FillRect(uX, iy, uW, btnH, ue ? COL_PANEL2 : COL_PANEL);
         DrawRect (uX, iy, uW, btnH, COL_BORDER);
-        DrawTextC(Lang::T("map.undo.btn"), uX + uW/2, iy + btnH/2,
-                  ue ? COL_TEXT : COL_DIM, Font::Sm);
+        DrawUndoRedoIcon(uX + uW/2, cyb + 2, 8, false, ue ? COL_TEXT : COL_DIM);
         if (ue) HitAdd(uX, iy, uW, btnH, TMapUndoBtn, 0);
+        // Redo
         bool re = !gMapRedo.empty();
-        FillRect(rX, iy, rW, btnH, COL_PANEL2);
+        FillRect(rX, iy, rW, btnH, re ? COL_PANEL2 : COL_PANEL);
         DrawRect (rX, iy, rW, btnH, COL_BORDER);
-        DrawTextC(Lang::T("map.redo.btn"), rX + rW/2, iy + btnH/2,
-                  re ? COL_TEXT : COL_DIM, Font::Sm);
+        DrawUndoRedoIcon(rX + rW/2, cyb + 2, 8, true, re ? COL_TEXT : COL_DIM);
         if (re) HitAdd(rX, iy, rW, btnH, TMapRedoBtn, 0);
+        // PNG export (download icon + label)
         FillRect(pX, iy, pW, btnH, COL_PANEL2);
         DrawRect (pX, iy, pW, btnH, COL_BORDER);
-        DrawTextC(Lang::T("map.png.btn"), pX + pW/2, iy + btnH/2, COL_TEXT, Font::Sm);
+        DrawDownloadIcon(pX + 16, cyb - 1, 6, COL_TEXT);
+        DrawText(Lang::T("map.png.btn"), pX + 30, cyb - 8, COL_TEXT, Font::Sm);
         HitAdd(pX, iy, pW, btnH, TMapPngBtn, 0);
         iy += btnH + 10;
     }
@@ -6782,8 +7360,8 @@ static void DrawMap() {
         for (int i = 0; i < 3; i++) {
             int x = bbX + i * (bbW + 4);
             bool sel = (gMapBrush == sizes[i]);
-            FillRect(x, iy, bbW, 28, sel ? COL_ACCENT : COL_PANEL2);
-            DrawRect(x, iy, bbW, 28, sel ? COL_ACCENT : COL_BORDER);
+            FillRect(x, iy, bbW, 28, sel ? COL_GOLD : COL_PANEL2);
+            DrawRect(x, iy, bbW, 28, sel ? COL_GOLD : COL_BORDER);
             DrawTextC(std::to_string(sizes[i]) + "x" + std::to_string(sizes[i]),
                       x + bbW/2, iy + 14, sel ? COL_BG : COL_TEXT, Font::Sm);
             HitAdd(x, iy, bbW, 28, TMapBrushBtn, sizes[i]);
@@ -6806,7 +7384,6 @@ static void DrawMap() {
             const MapData::ActorInfo* info = MapData::ActorLookup(a);
             groups[info ? info->group : MapData::ACTOR_UNKNOWN]++;
         }
-        const char* groupNames[7] = { "house", "facility", "deco", "room", "step", "ugc", "unknown" };
         DrawText(Lang::T("map.stats.placed") + ": "
                  + std::to_string(used) + " / " + std::to_string(actCount),
                  MAP_INS_X + 12, iy, COL_TEXT, Font::Sm);
@@ -6814,7 +7391,7 @@ static void DrawMap() {
         for (int g = 0; g < 7; g++) {
             if (!groups[g]) continue;
             FillRect(MAP_INS_X + 14, iy + 4, 10, 10, MAP_GROUP_SDL_COL[g]);
-            DrawText(groupNames[g], MAP_INS_X + 30, iy, COL_TEXT, Font::Sm);
+            DrawText(MapGroupName(g), MAP_INS_X + 30, iy, COL_TEXT, Font::Sm);
             DrawText(std::to_string(groups[g]),
                      MAP_INS_X + MAP_INS_W - 50, iy, COL_GOLD, Font::Sm);
             iy += 18;
@@ -6911,13 +7488,19 @@ static void DrawMap() {
         uint32_t actor = MapActorAt(gMapSelSlot);
         const MapData::ActorInfo* info = MapData::ActorLookup(actor);
 
-        // Title
-        FillRect(MAP_INS_X + 12, iy + 2, 12, 12,
-                 MAP_GROUP_SDL_COL[info ? info->group : 6]);
-        DrawText(MapActorDisplayLabel(info), MAP_INS_X + 30, iy, COL_GOLD, Font::Md);
-        iy += 24;
-        DrawText(Lang::T("map.slot") + " #" + std::to_string(gMapSelSlot), MAP_INS_X + 12, iy, COL_DIM, Font::Sm);
-        iy += 22;
+        // ── Header card: object swatch + name + slot / group ───────────────────
+        SDL_Color gcol = MAP_GROUP_SDL_COL[info ? info->group : 6];
+        int hdX = MAP_INS_X + 8, hdW = MAP_INS_W - 16, hdH = 44;
+        FillRect(hdX, iy, hdW, hdH, COL_PANEL2);
+        DrawRect(hdX, iy, hdW, hdH, COL_BORDER);
+        FillRect(hdX + 8, iy + 8, 18, hdH - 16, gcol);
+        DrawRect(hdX + 8, iy + 8, 18, hdH - 16, COL_BORDER);
+        DrawText(FitNodeName(MapActorDisplayLabel(info), GetFont(Font::Md), hdW - 44),
+                 hdX + 34, iy + 5, COL_GOLD, Font::Md);
+        DrawText(Lang::T("map.slot") + " #" + std::to_string(gMapSelSlot)
+                 + "  ·  " + MapGroupName(info ? info->group : 6),
+                 hdX + 34, iy + 25, COL_DIM, Font::Sm);
+        iy += hdH + 8;
 
         int xVal = SaveEditor::GetIntAt(gMapSav, hX, gMapSelSlot, 0);
         int yVal = SaveEditor::GetIntAt(gMapSav, hY, gMapSelSlot, 0);
@@ -7019,6 +7602,21 @@ static void DrawMap() {
         if (gMapDirty) {
             DrawText(Lang::T("map.dirty"), MAP_INS_X + 12, iy, COL_GOLD, Font::Sm); iy += 18;
         }
+
+        // ── Legend: what the coloured blocks on the island mean ────────────────
+        iy += 8;
+        FillRect(MAP_INS_X + 12, iy + 8, MAP_INS_W - 24, 1, COL_BORDER);  // divider
+        iy += 16;
+        DrawText(Lang::T("map.legend"), MAP_INS_X + 12, iy, COL_GOLD, Font::Sm); iy += 22;
+        int colW = (MAP_INS_W - 28) / 2;
+        for (int g = 0; g < 7; g++) {
+            int lx = MAP_INS_X + 14 + (g % 2) * colW;
+            int ly = iy + (g / 2) * 20;
+            FillRect(lx, ly + 2, 13, 13, MAP_GROUP_SDL_COL[g]);
+            DrawRect(lx, ly + 2, 13, 13, COL_BORDER);
+            DrawText(MapGroupName(g), lx + 20, ly, COL_TEXT, Font::Sm);
+        }
+        iy += 4 * 20;
     }
 
     // Transient status message (drawn above the footer)
@@ -7037,6 +7635,20 @@ static void DrawMap() {
                                           "map.footer.idle";
     DrawFooter(Lang::T(footerKey));
     Present();
+}
+
+// Eased follower for smooth list scrolling: returns a float "top" that glides
+// toward the integer target so touch / stick scrolling slides instead of
+// teleporting a row at a time. `slot` is a small stable id (0..7); jumps larger
+// than the visible span snap instantly rather than scrolling through everything.
+static float SmoothScrollTop(int slot, int target, int span){
+    static float v[8] = {0,0,0,0,0,0,0,0};
+    if (slot < 0 || slot >= 8) return (float)target;
+    float t = (float)target;
+    if (fabsf(v[slot] - t) > (float)(span + 4)) v[slot] = t;
+    v[slot] += (t - v[slot]) * std::min(1.f, gDtSec * 16.f);
+    if (fabsf(v[slot] - t) < 0.02f) v[slot] = t;
+    return v[slot];
 }
 
 static void DrawMiiStats() {
@@ -7136,12 +7748,26 @@ static void DrawMiiStats() {
         DrawTextC(Lang::T("mii.no.miis"), SE_LIST_X+MSE_LIST_W/2, SE_TOP_Y+80, COL_DIM);
     }
 
-    // Middle: field list for selected mii (hidden in Social/Belongings — panel expands)
+    // Middle: field list for selected mii (hidden in Social/Belongings/… — the
+    // right panel expands to cover it). The layout change is animated via
+    // gMiiMidAnim (0 = middle shown, 1 = middle hidden) so switching between a
+    // "list" subtab (Stats/Words/Relations) and a "full-width" subtab slides
+    // instead of teleporting. The sliding right panel below covers / reveals
+    // this middle list as the value eases.
     int midX = SE_LIST_X + MSE_LIST_W + 12;
     int midW = 340;
     bool midHidden = (gMiiStatsSubTab == MiiStatsSubTab::Social || gMiiStatsSubTab == MiiStatsSubTab::Belongings || gMiiStatsSubTab == MiiStatsSubTab::Habits || gMiiStatsSubTab == MiiStatsSubTab::Housing || gMiiStatsSubTab == MiiStatsSubTab::Browse);
-    if (!midHidden) {
-        FillRect(midX, SE_TOP_Y, midW, SCREEN_H-SE_TOP_Y-32, {8,8,8,255});
+    static float gMiiMidAnim = 0.f;
+    {
+        float target = midHidden ? 1.f : 0.f;
+        gMiiMidAnim += (target - gMiiMidAnim) * std::min(1.f, gDtSec * 14.f);
+        if (std::fabs(gMiiMidAnim - target) < 0.004f) gMiiMidAnim = target;
+    }
+    // Keep the middle frame on screen until it's fully covered; the right panel
+    // slides over it (hide) or off it (reveal).
+    bool drawMid = (gMiiMidAnim < 0.985f);
+    if (drawMid) {
+        FillRect(midX, SE_TOP_Y, midW, SCREEN_H-SE_TOP_Y-32, COL_BG);
         DrawRect(midX, SE_TOP_Y, midW, SCREEN_H-SE_TOP_Y-32, COL_BORDER);
     }
 
@@ -7197,10 +7823,20 @@ static void DrawMiiStats() {
             static const uint32_t H_MNAME_ML = 0x2499bfdau;
             int pairCount = SaveEditor::ArraySize(gMiiSav, H_IDA_ML);
             TTF_Font* fsm2 = GetFont(Font::Sm);
-            int visRow = 0, filtRow = 0;
+            int filtRow = 0;
             int mrSelY = SE_TOP_Y + 2;
             bool mrSawSel = false;
             gMiiRelPairIdx = -1;
+            // Smooth scroll: render at a fractional position eased toward the
+            // integer gMiiRelScroll, clipped to the middle panel.
+            const int REL_RH = 34;
+            int relBot = SCREEN_H - 32;
+            int relVis = (relBot - (SE_TOP_Y + 2)) / REL_RH;
+            float relTop = SmoothScrollTop(0, gMiiRelScroll, relVis);
+            int relFirst = (int)floorf(relTop);
+            int relFrac  = (int)((relTop - relFirst) * REL_RH);
+            SDL_Rect relClip{ midX, SE_TOP_Y, midW, relBot - SE_TOP_Y };
+            SDL_RenderSetClipRect(gRen, &relClip);
             for (int pi = 0; pi < pairCount; pi++) {
                 int a = SaveEditor::GetIntAt(gMiiSav, H_IDA_ML, pi);
                 int b = SaveEditor::GetIntAt(gMiiSav, H_IDB_ML, pi);
@@ -7213,31 +7849,32 @@ static void DrawMiiStats() {
                 SDL_Color tc = RelTypeColor(myType);
                 bool sel = (filtRow == gMiiRelSel);
                 if (sel) { gMiiRelPairIdx = pi; gMiiRelSelfA = selfA; }
-                if (filtRow >= gMiiRelScroll) {
-                    int ry = SE_TOP_Y + 2 + visRow * 34;
-                    if (ry + 34 <= SCREEN_H - 32) {
-                        if (sel) { mrSelY = ry; mrSawSel = true; }
+                int rowOff = filtRow - relFirst;
+                int ry = SE_TOP_Y + 2 + rowOff * REL_RH - relFrac;
+                if (rowOff >= -1 && ry < relBot && ry + REL_RH > SE_TOP_Y) {
+                    if (sel) { mrSelY = ry; mrSawSel = true; }
+                    int rcy = ry + 17;
+                    if (rcy >= SE_TOP_Y + 2 && rcy <= relBot)
                         HitAdd(midX+1, ry, midW-2, 33, TSelMiiRelation, filtRow);
-                        FillRect(midX+1, ry, midW-2, 33, sel?COL_SEL:COL_BG);
-                        if (sel && gTheme.cornerRadius == 0)
-                            DrawRectSquare(midX+1, ry, midW-2, 33, COL_GOLD);
-                        // Type label right-aligned (colored)
-                        const char* tName = RelTypeName(myType);
-                        int tw=0,th=0;
-                        if (fsm2 && tName) TTF_SizeUTF8(fsm2, tName, &tw, &th);
-                        DrawText(tName?tName:"?", midX+midW-tw-8, ry+(33-th)/2, tc);
-                        // Other Mii name left
-                        std::string oName = SaveEditor::GetWStr32At(gMiiSav, H_MNAME_ML, other);
-                        int availRL = midW - tw - (tw?8:0) - 16;
-                        std::string oFit = FitNodeName(oName.empty()?"?":oName, fsm2, availRL);
-                        int rnw=0,rnh=0;
-                        if (fsm2) TTF_SizeUTF8(fsm2, oFit.c_str(), &rnw, &rnh);
-                        DrawText(oFit, midX+8, ry+(33-rnh)/2, sel?COL_TEXT:COL_DIM);
-                        visRow++;
-                    }
+                    FillRect(midX+1, ry, midW-2, 33, sel?COL_SEL:COL_BG);
+                    if (sel && gTheme.cornerRadius == 0)
+                        DrawRectSquare(midX+1, ry, midW-2, 33, COL_GOLD);
+                    // Type label right-aligned (colored)
+                    const char* tName = RelTypeName(myType);
+                    int tw=0,th=0;
+                    if (fsm2 && tName) TTF_SizeUTF8(fsm2, tName, &tw, &th);
+                    DrawText(tName?tName:"?", midX+midW-tw-8, ry+(33-th)/2, tc);
+                    // Other Mii name left
+                    std::string oName = SaveEditor::GetWStr32At(gMiiSav, H_MNAME_ML, other);
+                    int availRL = midW - tw - (tw?8:0) - 16;
+                    std::string oFit = FitNodeName(oName.empty()?"?":oName, fsm2, availRL);
+                    int rnw=0,rnh=0;
+                    if (fsm2) TTF_SizeUTF8(fsm2, oFit.c_str(), &rnw, &rnh);
+                    DrawText(oFit, midX+8, ry+(33-rnh)/2, sel?COL_TEXT:COL_DIM);
                 }
                 filtRow++;
             }
+            SDL_RenderSetClipRect(gRen, nullptr);
             gMiiRelCount = filtRow;
             if (filtRow > 0 && gMiiRelSel >= filtRow) gMiiRelSel = filtRow-1;
             if (filtRow == 0)
@@ -7299,13 +7936,21 @@ static void DrawMiiStats() {
         }
     }
 
-    // Right: edit controls / social / belongings view
-    // Social and Belongings expand left to cover the hidden middle panel
-    int editX = midX + midW + 8;
-    int editW = SCREEN_W - editX - 8;
-    int panelX = midHidden ? midX   : editX;
-    int panelW = midHidden ? (SCREEN_W - midX - 8) : editW;
-    FillRect(panelX, SE_TOP_Y, panelW, SCREEN_H-SE_TOP_Y-32, {6,6,6,255});
+    // Right: edit controls / social / belongings view.
+    // Slide the panel between its "shown" spot (right of the middle list) and its
+    // "hidden" spot (covering the middle, full width) using gMiiMidAnim, so the
+    // layout glides across instead of snapping ~348px in a single frame. The
+    // right-detail content (Stats/Words/Relations) tracks the same sliding rect.
+    float midA          = gMiiMidAnim;
+    int   editXShown    = midX + midW + 8;
+    int   editWShown    = SCREEN_W - editXShown - 8;
+    int   panelXHidden  = midX;
+    int   panelWHidden  = SCREEN_W - midX - 8;
+    int panelX = (int)(editXShown + (panelXHidden - editXShown) * midA + 0.5f);
+    int panelW = (int)(editWShown + (panelWHidden - editWShown) * midA + 0.5f);
+    int editX  = panelX;
+    int editW  = panelW;
+    FillRect(panelX, SE_TOP_Y, panelW, SCREEN_H-SE_TOP_Y-32, COL_BG);
     DrawRect(panelX, SE_TOP_Y, panelW, SCREEN_H-SE_TOP_Y-32, COL_BORDER);
 
     // Sub-tab bar: [Stats] [Belongings] [Habits] [Words] [Relations] [Social] [Housing]
@@ -7367,7 +8012,14 @@ static void DrawMiiStats() {
                     int lblW   = 96;  // generous label width; FitNodeName clips with ellipsis
                     int slotH  = 2*nodeR + lblGap + lblH;
 
-                    int maxR = std::min(panelW/2 - lblW/2 - 8, panelH/2 - slotH/2 - 8);
+                    // The panel is usually wider than it is tall, so a plain
+                    // circle leaves big black bars left/right. Track the width
+                    // and height budgets separately and grow the rings against
+                    // the smaller one, then stretch the final layout into an
+                    // ellipse that fills BOTH axes.
+                    int maxRx = panelW/2 - lblW/2 - 8;
+                    int maxRy = panelH/2 - slotH/2 - 8;
+                    int maxR  = std::min(maxRx, maxRy);
                     int Rcur = std::max(nodeR * 4 + 8, 80);
 
                     struct GRing { int R, first, count; };
@@ -7386,13 +8038,22 @@ static void DrawMiiStats() {
                     }
                     int hidden = N - placed;
 
+                    // Stretch so the outermost ring reaches the panel extents on
+                    // each axis (capped so a handful of miis don't fly to the
+                    // corners). This expands the graph into the empty space.
+                    int Router = grings.empty() ? 1 : grings.back().R;
+                    float sx = (Router > 0) ? std::min(2.4f, (float)maxRx / (float)Router) : 1.f;
+                    float sy = (Router > 0) ? std::min(2.4f, (float)maxRy / (float)Router) : 1.f;
+                    if (sx < 1.f) sx = 1.f;
+                    if (sy < 1.f) sy = 1.f;
+
                     std::vector<int> nx_(N, -9999), ny_(N, -9999);
                     for (auto& gr : grings) {
                         for (int i = 0; i < gr.count; i++) {
                             int j = gr.first + i;
                             float a = -(float)M_PI/2.f + (2.f*(float)M_PI*i)/gr.count;
-                            nx_[j] = gcx + (int)((float)gr.R * cosf(a));
-                            ny_[j] = gcy + (int)((float)gr.R * sinf(a));
+                            nx_[j] = gcx + (int)((float)gr.R * sx * cosf(a));
+                            ny_[j] = gcy + (int)((float)gr.R * sy * sinf(a));
                         }
                     }
 
@@ -7776,15 +8437,20 @@ static void DrawMiiStats() {
                 int cw=0,cntH=0; if(fsm) TTF_SizeUTF8(fsm, cntStr.c_str(), &cw, &cntH);
                 DrawText(cntStr, panelX+panelW-cw-14, panelTop+(PK_HDR_H-cntH)/2, COL_DIM);
 
-                // Item list (uses filtered indices)
+                // Item list (uses filtered indices) — smooth-scrolled + clipped.
                 int bpSelY = listTop;
                 bool bpSawSel = false;
-                for (int i = 0; i < pkVis; i++) {
-                    int filtIdx = gBlPickerScroll + i;
-                    if (filtIdx >= total) break;
+                float bpTop = SmoothScrollTop(1, gBlPickerScroll, pkVis);
+                int bpFirst = (int)floorf(bpTop);
+                int bpFrac  = (int)((bpTop - bpFirst) * PK_ROW_H);
+                SDL_Rect bpClip{ panelX+2, listTop, panelW-4, listH };
+                SDL_RenderSetClipRect(gRen, &bpClip);
+                for (int i = -1; i <= pkVis; i++) {
+                    int filtIdx = bpFirst + i;
+                    if (filtIdx < 0 || filtIdx >= total) continue;
                     int idx = gBlFiltered[filtIdx];
                     bool sel = (filtIdx == gBlPickerSel);
-                    int ry = listTop + i * PK_ROW_H;
+                    int ry = listTop + i * PK_ROW_H - bpFrac;
                     if (sel) { bpSelY = ry; bpSawSel = true; }
                     FillRect(panelX+2, ry, panelW-4, PK_ROW_H-1, sel?COL_SEL:COL_BG);
                     if (sel && gTheme.cornerRadius == 0)
@@ -7796,11 +8462,14 @@ static void DrawMiiStats() {
                     FillRect(selBoxX, selBoxY, SEL_W, SEL_W, sel?COL_GOLD:COL_PANEL);
                     DrawRect(selBoxX, selBoxY, SEL_W, SEL_W, sel?COL_GOLD:COL_BORDER);
                     if (sel) FillRect(selBoxX+5, selBoxY+5, SEL_W-10, SEL_W-10, {10,10,10,255});
-                    HitAdd(panelX+2, ry, panelW-4, PK_ROW_H-1, TBLPickSel, filtIdx);
+                    int rcy = ry + PK_ROW_H/2;
+                    if (rcy >= listTop && rcy <= listTop + listH)
+                        HitAdd(panelX+2, ry, panelW-4, PK_ROW_H-1, TBLPickSel, filtIdx);
                     int lw=0,lh=0; if(fsm) TTF_SizeUTF8(fsm, gBlPickerLabels[idx], &lw, &lh);
                     DrawText(gBlPickerLabels[idx], panelX+44, ry+(PK_ROW_H-lh)/2,
                              sel ? COL_GOLD : COL_TEXT);
                 }
+                SDL_RenderSetClipRect(gRen, nullptr);
 
                 // No-results hint
                 if (total == 0) {
@@ -7811,7 +8480,7 @@ static void DrawMiiStats() {
                 // Scrollbar
                 if (total > pkVis) {
                     int sbH = listH * pkVis / total;
-                    int sbY = listTop + listH * gBlPickerScroll / total;
+                    int sbY = listTop + (int)(listH * bpTop / total);
                     FillRect(panelX+panelW-5, sbY, 3, sbH, COL_BORDER);
                 }
 
@@ -8203,10 +8872,14 @@ static void DrawMiiStats() {
                 // when spamming the d-pad. Adjust scroll BEFORE rebuilding
                 // gHousingNav so the focused item is always inside the clip
                 // region for the upcoming draw.
-                if (gHousingNavSel >= 0 && gHousingNavSel < (int)gHousingNav.size()) {
+                if (!gHousingUserScrolled && gHousingNavSel >= 0 && gHousingNavSel < (int)gHousingNav.size()) {
                     const auto& f = gHousingNav[gHousingNavSel];
-                    if (f.y < contentTopY)       gHousingScrollY -= (contentTopY - f.y) + 10;
-                    if (f.y + f.h > contentBotY) gHousingScrollY += (f.y + f.h - contentBotY) + 10;
+                    // Work in "settled" coordinates — where the card will rest once
+                    // the smooth scroll catches up — so easing can't feed back into
+                    // an over-scroll. (f.y was rendered with gHousingSyLast.)
+                    int sfy = f.y + gHousingSyLast - gHousingScrollY;
+                    if (sfy < contentTopY)       gHousingScrollY -= (contentTopY - sfy) + 10;
+                    if (sfy + f.h > contentBotY) gHousingScrollY += (sfy + f.h - contentBotY) + 10;
                     if (gHousingScrollY < 0)     gHousingScrollY = 0;
                 }
 
@@ -8282,7 +8955,13 @@ static void DrawMiiStats() {
                 SDL_Rect clip = { contentX, contentTopY, contentW, contentH };
                 SDL_RenderSetClipRect(gRen, &clip);
 
-                int yc = contentTopY - gHousingScrollY;
+                // Ease the visual scroll toward the target so housing glides
+                // instead of teleporting when the focus jumps the view.
+                gHousingScrollYF += ((float)gHousingScrollY - gHousingScrollYF) * std::min(1.f, gDtSec * 16.f);
+                if (fabsf(gHousingScrollYF - (float)gHousingScrollY) < 0.5f) gHousingScrollYF = (float)gHousingScrollY;
+                int sy = (int)gHousingScrollYF;
+                gHousingSyLast = sy;
+                int yc = contentTopY - sy;
 
                 auto sectionLabel = [&](const char* lbl){
                     DrawText(lbl, contentX, yc, COL_DIM, Font::Sm);
@@ -8454,16 +9133,18 @@ static void DrawMiiStats() {
 
                 SDL_RenderSetClipRect(gRen, nullptr);
 
-                // Clamp scroll bounds.
-                int contentTotalH = yc + gHousingScrollY - contentTopY + 8;
+                // Clamp scroll bounds. yc was advanced with the eased `sy`, so
+                // recover the real content height with sy (not the target).
+                int contentTotalH = yc + sy - contentTopY + 8;
                 int maxScroll = std::max(0, contentTotalH - contentH);
                 if (gHousingScrollY > maxScroll) gHousingScrollY = maxScroll;
                 if (gHousingScrollY < 0)         gHousingScrollY = 0;
 
-                // Scrollbar (only if content overflows).
+                // Scrollbar (only if content overflows) — tracks the eased scroll.
                 if (contentTotalH > contentH && maxScroll > 0) {
+                    int sbScroll = sy < 0 ? 0 : (sy > maxScroll ? maxScroll : sy);
                     int sbH = std::max(20, contentH * contentH / contentTotalH);
-                    int sbY = contentTopY + (contentH - sbH) * gHousingScrollY / maxScroll;
+                    int sbY = contentTopY + (contentH - sbH) * sbScroll / maxScroll;
                     FillRect(panelX + panelW - 5, sbY, 3, sbH, COL_BORDER);
                 }
 
@@ -8483,8 +9164,16 @@ static void DrawMiiStats() {
                     bool visible = (f.kind == 5) ||
                                    (f.y >= contentTopY && f.y + f.h <= contentBotY);
                     if (visible) {
-                        RequestHighlight((int)Screen::OnSwitch, /*sub=mii housing*/38,
-                                         f.x, f.y, f.w, f.h, gDtSec);
+                        // Touch (tap or 1:1 drag) snaps the outline straight onto
+                        // the card; the d-pad keeps the smooth glide between cards.
+                        if (gHousingUserScrolled || gHousingSnapHl) {
+                            gHighlight[0].Snap(f.x, f.y, f.w, f.h);
+                            gHlOwnerScreen[0] = (int)Screen::OnSwitch; gHlOwnerSub[0] = 38;
+                            gHousingSnapHl = false;
+                        } else {
+                            RequestHighlight((int)Screen::OnSwitch, /*sub=mii housing*/38,
+                                             f.x, f.y, f.w, f.h, gDtSec);
+                        }
                         DrawAnimatedHighlight();
                     }
                 }
@@ -8933,22 +9622,27 @@ static void DrawMiiStats() {
                     int gcy = ibY + ibH/2;
                     int gW  = ibSqr * 7 / 12;   // ~58% of the box
                     int gH  = ibSqr * 7 / 12;
+                    // Bolder upload glyph: a thick chevron head + a solid shaft
+                    // dropping into an open tray. The old version used 2–3px
+                    // strokes, which read as skinny inside the 66px button.
                     SDL_SetRenderDrawColor(gRen,C_SHARE.r,C_SHARE.g,C_SHARE.b,255);
-                    // Tray (open box at the bottom)
-                    for (int t = 0; t < 2; t++) {
-                        SDL_RenderDrawLine(gRen, gcx-gW/2,   gcy+gH/2-4+t, gcx-gW/2,   gcy+gH/2+t);
-                        SDL_RenderDrawLine(gRen, gcx+gW/2-1, gcy+gH/2-4+t, gcx+gW/2-1, gcy+gH/2+t);
-                        SDL_RenderDrawLine(gRen, gcx-gW/2,   gcy+gH/2+t,   gcx+gW/2-1, gcy+gH/2+t);
+                    int topY = gcy - gH/2, botY = gcy + gH/2;
+                    int th   = std::max(4, gW / 7);   // stroke thickness (~5px)
+                    int wing = gW * 5 / 14;           // chevron half-width
+                    // Arrow head — thick chevron (a touch bolder than the shaft)
+                    for (int t = 0; t < th + 2; t++) {
+                        SDL_RenderDrawLine(gRen, gcx, topY+t, gcx-wing, topY+wing+t);
+                        SDL_RenderDrawLine(gRen, gcx, topY+t, gcx+wing, topY+wing+t);
                     }
-                    // Upward arrow shaft (3px wide)
-                    for (int t = -1; t <= 1; t++) {
-                        SDL_RenderDrawLine(gRen, gcx+t, gcy-gH/2+2, gcx+t, gcy+gH/2-6);
+                    // Shaft — solid vertical bar
+                    int trayTop = botY - gH/4;
+                    FillRectSquare(gcx - th/2, topY + th, th, trayTop - (topY + th), C_SHARE);
+                    // Tray — two side walls + a solid base (open top)
+                    for (int t = 0; t < th; t++) {
+                        SDL_RenderDrawLine(gRen, gcx-gW/2+t, trayTop, gcx-gW/2+t, botY);
+                        SDL_RenderDrawLine(gRen, gcx+gW/2-t, trayTop, gcx+gW/2-t, botY);
                     }
-                    // Arrow head (thicker than before)
-                    for (int t = 0; t < 2; t++) {
-                        SDL_RenderDrawLine(gRen, gcx,   gcy-gH/2+1+t, gcx-gW/3, gcy-gH/2+1+gW/3+t);
-                        SDL_RenderDrawLine(gRen, gcx,   gcy-gH/2+1+t, gcx+gW/3, gcy-gH/2+1+gW/3+t);
-                    }
+                    FillRectSquare(gcx-gW/2, botY-th+1, gW+1, th, C_SHARE);
                 }
                 if (ltdSawSel) {
                     RequestHighlight((int)Screen::OnSwitch, /*sub=mii ltd buttons*/41,
@@ -10002,6 +10696,22 @@ static void ApplyTouchScroll(float ddx, float ddy) {
                 if (gBlPickerScroll != prev) s_touch.dragging = true;
             } else {
             }
+        } else if (gMiiStatsSubTab == MiiStatsSubTab::Housing) {
+            // Housing scrolls by pixels — drag to scroll 1:1. Suspending the
+            // keyboard focus-follow (gHousingUserScrolled) keeps it from snapping
+            // back to the selected card mid-drag.
+            if (s_touch.startX < blPanX || s_touch.startX >= blPanX + blPanW) return;
+            if (s_touch.startY < panelTop || s_touch.startY >= SCREEN_H - 32) return;
+            // Ignore tiny finger wiggle so a tap stays a tap; only real drags scroll.
+            s_touch.accumY += ddy;
+            if (!s_touch.dragging && fabsf(s_touch.accumY) < 10.f) return;
+            int prev = gHousingScrollY;
+            gHousingScrollY -= (int)ddy;
+            if (gHousingScrollY < 0) gHousingScrollY = 0;
+            if (gHousingScrollY != prev) {
+                gHousingScrollYF = (float)gHousingScrollY;  // 1:1 with the finger (no ease lag → taps land right)
+                gHousingUserScrolled = true; s_touch.dragging = true;
+            }
         }
     }
 }
@@ -10305,18 +11015,40 @@ int main(int,char**) {
                     s_touch = { true, false,
                                 ev.tfinger.x*SCREEN_W, ev.tfinger.y*SCREEN_H,
                                 0.f, 0.f, ev.tfinger.fingerId };
+                    // Colour picker: grab the square / hue bar so the next moves drag.
+                    gMapCanvasDrag = false;
+                    if (gShowColorPicker) {
+                        PickerTouchDown((int)s_touch.startX, (int)s_touch.startY);
+                    } else if (gScreen == Screen::OnSwitch && gOnSwitchMode == OnSwitchMode::Map
+                               && !gShowFileBrowser
+                               && s_touch.startX >= MAP_CANVAS_X && s_touch.startX < MAP_CANVAS_X + MAP_CANVAS_W
+                               && s_touch.startY >= MAP_CANVAS_Y && s_touch.startY < MAP_CANVAS_Y + MAP_CANVAS_H) {
+                        gMapCanvasDrag = true;   // drag the canvas to pan/look
+                        gMapPanAccX = gMapPanAccY = 0.f;
+                    }
                 }
                 else if (ev.type == SDL_FINGERMOTION && s_touch.active
                          && ev.tfinger.fingerId == s_touch.fid) {
-                    ApplyTouchScroll(ev.tfinger.dx * SCREEN_W,
-                                     ev.tfinger.dy * SCREEN_H);
+                    if (gShowColorPicker && gPickerDrag)
+                        PickerDragUpdate((int)(ev.tfinger.x*SCREEN_W),
+                                         (int)(ev.tfinger.y*SCREEN_H));   // smooth continuous drag
+                    else if (gMapCanvasDrag) {
+                        MapDragGesture(ev.tfinger.dx * SCREEN_W, ev.tfinger.dy * SCREEN_H,
+                                       (int)(ev.tfinger.x * SCREEN_W), (int)(ev.tfinger.y * SCREEN_H));
+                        s_touch.dragging = true;                          // so release isn't a tap
+                    } else
+                        ApplyTouchScroll(ev.tfinger.dx * SCREEN_W,
+                                         ev.tfinger.dy * SCREEN_H);
                 }
                 else if (ev.type == SDL_FINGERUP && s_touch.active
                          && ev.tfinger.fingerId == s_touch.fid) {
-                    if (!s_touch.dragging) {
+                    if (gShowColorPicker && gPickerDrag) {
+                        gPickerDrag = 0;   // release the grab; don't tap-fire under the cursor
+                    } else if (!s_touch.dragging) {
                         HitFire((int)s_touch.startX, (int)s_touch.startY);
                         ProcessTouch((int)s_touch.startX, (int)s_touch.startY, kDown);
                     }
+                    gMapCanvasDrag = false;
                     s_touch.active = false;
                 }
             }
@@ -10541,6 +11273,60 @@ int main(int,char**) {
         }
 
         case Screen::Settings:
+            if (gShowColorPicker) {
+                bool chg = false;
+                float dt = gDtSec > 0.f ? gDtSec : 0.016f;
+                // Left stick (analog) + held D-pad feed a -1..1 vector; the cursor
+                // glides continuously each frame instead of stepping, so it feels
+                // smooth. Square is crossed in ~1.1s at full deflection.
+                HidAnalogStickState ls = padGetStickPos(&gPad, 0);
+                float ax = ls.x / 32767.f, ay = ls.y / 32767.f;
+                if (ax > -0.15f && ax < 0.15f) ax = 0.f;      // deadzone
+                if (ay > -0.15f && ay < 0.15f) ay = 0.f;
+                if (kHeld&HidNpadButton_Left)  ax -= 1.f;
+                if (kHeld&HidNpadButton_Right) ax += 1.f;
+                if (kHeld&HidNpadButton_Up)    ay += 1.f;
+                if (kHeld&HidNpadButton_Down)  ay -= 1.f;
+                ax = ax < -1.f ? -1.f : (ax > 1.f ? 1.f : ax);
+                ay = ay < -1.f ? -1.f : (ay > 1.f ? 1.f : ay);
+                if (ax != 0.f || ay != 0.f) {
+                    float sp = 0.9f * dt;
+                    gPickS = std::min(1.f, std::max(0.f, gPickS + ax * sp));
+                    gPickV = std::min(1.f, std::max(0.f, gPickV + ay * sp));
+                    chg = true;
+                }
+                // ZL/ZR or the right stick X rotate the hue; hold to sweep.
+                HidAnalogStickState rs = padGetStickPos(&gPad, 1);
+                float hx = rs.x / 32767.f; if (hx > -0.2f && hx < 0.2f) hx = 0.f;
+                if (kHeld&HidNpadButton_ZL) hx -= 1.f;
+                if (kHeld&HidNpadButton_ZR) hx += 1.f;
+                if (hx != 0.f) {
+                    gPickH += hx * 150.f * dt;
+                    while (gPickH < 0.f)    gPickH += 360.f;
+                    while (gPickH >= 360.f) gPickH -= 360.f;
+                    chg = true;
+                }
+                if (chg) PickerSetFromHSV();
+                if (kDown&HidNpadButton_X) {            // reset this target to the theme default
+                    if (gPickerTarget == 0) gAccentCustom = false; else gBgCustom = false;
+                    ApplyCustomColors();
+                    gPickerColor = (gPickerTarget == 0) ? gTheme.gold : gTheme.bg;
+                    RGBtoHSV(gPickerColor, gPickH, gPickS, gPickV);
+                }
+                if (kDown&HidNpadButton_A) {            // apply & close
+                    SaveConfig();
+                    gShowColorPicker = false;
+                    gSettingsMsg = "";
+                }
+                if (kDown&HidNpadButton_B) {            // cancel — restore the pre-edit state
+                    if (gPickerTarget == 0) { gAccentColor = gPickerPrevColor; gAccentCustom = gPickerPrevCustom; }
+                    else                    { gBgColor     = gPickerPrevColor; gBgCustom     = gPickerPrevCustom; }
+                    ApplyCustomColors();
+                    gShowColorPicker = false;
+                }
+                DrawSettings();
+                break;
+            }
             if (gShowFileBrowser) {
                 int pvis = (SCREEN_H - 148) / 26;
                 if (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp)) {
@@ -10583,13 +11369,16 @@ int main(int,char**) {
                     gSettingsSel = std::max(0, gSettingsSel - 1);
                 }
                 if (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown)) {
-                    gSettingsSel = std::min(3, gSettingsSel + 1);
+                    gSettingsSel = std::min(5, gSettingsSel + 1);
                 }
-                // Row mapping: 0 = Language, 1 = Theme, 2 = Export Path,
-                //              3 = Max Backups. The old "Restore Backup" row
+                // Row mapping: 0 = Language, 1 = Theme, 2 = Accent Color,
+                //              3 = Background Color, 4 = Export Path,
+                //              5 = Max Backups. The old "Restore Backup" row
                 //              moved out — restore is now a per-user floppy
                 //              button on the user picker.
-                if (gSettingsSel == 2 && kDown&HidNpadButton_A) {
+                if (gSettingsSel == 2 && kDown&HidNpadButton_A) OpenColorPicker(0); // accent
+                if (gSettingsSel == 3 && kDown&HidNpadButton_A) OpenColorPicker(1); // background
+                if (gSettingsSel == 4 && kDown&HidNpadButton_A) {
                     gBrowseForExportDir = true; gBrowseForMii = false;
                     std::string sp = gExportPath;
                     struct stat _st;
@@ -10598,7 +11387,7 @@ int main(int,char**) {
                     }
                     BrowseRefresh(sp); gShowFileBrowser = true;
                 }
-                if (gSettingsSel == 3) {
+                if (gSettingsSel == 5) {
                     if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft)) {
                         gMaxBackups = std::max(1, gMaxBackups - 1); SaveConfig();
                     }
@@ -10639,6 +11428,7 @@ int main(int,char**) {
                             if (left)            next = (curIdx > 0) ? curIdx - 1 : (int)avail.size() - 1;
                             else if (right || a) next = (curIdx + 1 < (int)avail.size()) ? curIdx + 1 : 0;
                             ThemeNS::SetCurrent(avail[next].code);
+                            ApplyCustomColors();   // re-layer custom accent/bg on the new base
                             SaveConfig();
                         }
                     }
@@ -11277,6 +12067,7 @@ int main(int,char**) {
                         HousingRebuild();
                         gHousingNavSel = 0;   // reset card-grid nav on tab enter
                         gHousingScrollY = 0;
+                        gHousingScrollYF = 0.f; gHousingSyLast = 0;  // snap (no scroll anim on enter)
                     }
                 }
                 // X toggles global graph in Social sub-tab only
@@ -11418,6 +12209,7 @@ int main(int,char**) {
                         bool left  = kNav&(HidNpadButton_Left |HidNpadButton_StickLLeft |HidNpadButton_StickRLeft);
                         bool right = kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight);
                         if (up || down || left || right) {
+                            gHousingUserScrolled = false;   // d-pad takes over → resume focus-follow
                             if (gHousingNavSel < 0 || gHousingNavSel >= (int)gHousingNav.size())
                                 gHousingNavSel = 0;
                             const auto& cur = gHousingNav[gHousingNavSel];

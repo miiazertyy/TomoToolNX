@@ -19,9 +19,9 @@ const std::vector<Lang::Entry> kAvailable = {
     {"de", "Deutsch"},
     {"ru", "Русский"},
     {"zh", "简体中文"},
+    {"ja", "日本語"},
     // {"it", "Italiano"},
     // {"pt", "Português"},
-    // {"ja", "日本語"},
     // ...add yours here.
 };
 

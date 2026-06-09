@@ -178,11 +178,11 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .mii-subtab{background:transparent;border:1px solid transparent;color:var(--muted);padding:3px 10px;border-radius:3px 3px 0 0;cursor:pointer;font-size:.78rem;font-family:inherit;transition:all .12s;white-space:nowrap}
 .mii-subtab:hover{color:var(--text)}.mii-subtab.active{border-color:var(--border);border-bottom:1px solid var(--bg);color:var(--accent);background:var(--bg)}
 #mii-subtab-bar-global{display:none}#mii-subtab-bar-global.visible{display:flex}
-#nav-toggle-bar{display:flex;align-items:center;justify-content:center;height:16px;background:var(--surface);border-bottom:1px solid var(--border);cursor:pointer;flex-shrink:0;color:var(--muted);user-select:none}
-#nav-toggle-bar:hover{color:var(--text)}
-#nav-toggle-bar svg{transition:transform .2s}
-body.nav-collapsed header,body.nav-collapsed .tabs,body.nav-collapsed #save-warn,body.nav-collapsed #mii-subtab-bar-global,body.nav-collapsed #save-toolbar-player,body.nav-collapsed #save-toolbar-mii,body.nav-collapsed #mii-ltd-toolbar{display:none!important}
-body.nav-collapsed #nav-toggle-bar svg{transform:rotate(180deg)}
+.nav-toggle-bar{display:flex;align-items:center;justify-content:center;height:16px;background:var(--surface);border-bottom:1px solid var(--border);cursor:pointer;flex-shrink:0;color:var(--muted);user-select:none}
+.nav-toggle-bar:hover{color:var(--text)}
+.nav-toggle-bar svg{transition:transform .2s}
+body.nav-collapsed header,body.nav-collapsed .tabs,body.nav-collapsed #save-warn,body.nav-collapsed #mii-subtab-bar-global,body.nav-collapsed #save-toolbar-player,body.nav-collapsed #save-toolbar-mii,body.nav-collapsed #mii-ltd-toolbar,body.nav-collapsed #map-toolbar{display:none!important}
+body.nav-collapsed .nav-toggle-bar svg{transform:rotate(180deg)}
 .mii-content{flex:1;overflow-y:auto;min-height:0}.mii-content::-webkit-scrollbar{width:4px}.mii-content::-webkit-scrollbar-thumb{background:var(--border)}
 .mii-words-list{display:flex;flex-direction:column;gap:4px;padding:10px 12px}
 .mii-word-row{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:7px 10px;display:flex;gap:8px;align-items:flex-start}.mii-word-row.empty{opacity:.42}
@@ -537,13 +537,13 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
   <button class="mii-subtab" data-i18n="subtab.social" onclick="switchMiiSubTab('social',this)">social</button>
 </div>
 
-<!-- Nav collapse toggle -->
-<div id="nav-toggle-bar" onclick="document.body.classList.toggle('nav-collapsed')" title="toggle navigation">
-  <svg width="12" height="7" viewBox="0 0 12 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6L6 1L11 6"/></svg>
-</div>
+<!-- Nav collapse toggle: one per panel, placed under that tab's top toolbar so
+     the arrow sits beneath the load/import buttons it hides (uses a shared
+     .nav-toggle-bar class rather than a duplicate id). -->
 
 <!-- UGC Panel -->
 <div class="panel active" id="panel-ugc">
+  <div class="nav-toggle-bar" onclick="document.body.classList.toggle('nav-collapsed')" title="toggle navigation"><svg width="12" height="7" viewBox="0 0 12 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6L6 1L11 6"/></svg></div>
   <div class="preview-area checker">
     <div class="preview-placeholder" id="placeholder">no selection</div>
     <img id="preview-img" style="display:none" alt="">
@@ -687,6 +687,7 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
     <button class="btn" onclick="exportSav('player')">export Player.sav</button>
     <div class="status info" id="save-status-player"></div>
   </div>
+  <div class="nav-toggle-bar" onclick="document.body.classList.toggle('nav-collapsed')" title="toggle navigation"><svg width="12" height="7" viewBox="0 0 12 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6L6 1L11 6"/></svg></div>
   <div class="mii-subtab-bar" id="player-subtab-bar">
     <button class="mii-subtab active" data-i18n="player.subtab.edit" onclick="switchPlayerSubTab('edit',this)">edit</button>
     <button class="mii-subtab" data-i18n="player.subtab.dashboard" onclick="switchPlayerSubTab('dashboard',this)">dashboard</button>
@@ -711,6 +712,7 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
     </button>
     <div class="status info" id="mii-io-status"></div>
   </div>
+  <div class="nav-toggle-bar" onclick="document.body.classList.toggle('nav-collapsed')" title="toggle navigation"><svg width="12" height="7" viewBox="0 0 12 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6L6 1L11 6"/></svg></div>
   <div class="save-mii-layout">
     <div id="mii-slots" class="mii-slot-list"></div>
     <div class="mii-right-panel">
@@ -749,6 +751,7 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
     </div>
     <div class="status info" id="map-status"></div>
   </div>
+  <div class="nav-toggle-bar" onclick="document.body.classList.toggle('nav-collapsed')" title="toggle navigation"><svg width="12" height="7" viewBox="0 0 12 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6L6 1L11 6"/></svg></div>
   <div class="map-layout">
     <div class="map-canvas-wrap">
       <canvas id="map-canvas" width="720" height="480"></canvas>
@@ -804,6 +807,7 @@ const LOCALE_META = [
   {code:'de', label:'Deutsch'},
   {code:'ru', label:'Русский'},
   {code:'zh', label:'简体中文'},
+  {code:'ja', label:'日本語'},
 ];
 const LOCALES = {
   en: {
@@ -1117,6 +1121,68 @@ const LOCALES = {
     'map.load':'加载 Map.sav',
     'map.placeMode':'点击空白格子放置',
     'map.placeCancel':'取消放置',
+  },
+  ja: {
+    'tab.textures':'テクスチャ',
+    'tab.mii':'Mii',
+    'tab.player':'プレイヤー',
+    'tab.map':'マップ',
+    'subtab.stats':'ステータス',
+    'subtab.belongings':'持ち物',
+    'subtab.habits':'習慣',
+    'subtab.words':'ことば',
+    'subtab.relations':'関係',
+    'subtab.social':'相関図',
+    'subtab.housing':'住まい',
+    'player.subtab.edit':'編集',
+    'player.subtab.dashboard':'ダッシュボード',
+    'warn.title':'警告',
+    'warn.body':' — セーブデータの変更はゲームを壊す可能性があります。編集前に必ずバックアップを取ってください。',
+    'warn.dismiss':'了解',
+    'settings.title':'設定',
+    'settings.encoder':'エンコーダー',
+    'settings.bc1':'BC1モード',
+    'settings.fit':'フィット',
+    'settings.matte':'背景',
+    'settings.language':'言語',
+    'settings.languageHint':'アプリの表示言語。翻訳に協力 — GitHubのREADMEをご覧ください。',
+    'btn.loadMii':'Mii.sav を読み込み',
+    'btn.loadPlayer':'Player.sav を読み込み',
+    'btn.apply':'Switchに適用',
+    'btn.refresh':'更新',
+    'btn.import':'取り込み',
+    'btn.exportPic':'画像を書き出し',
+    'btn.exportLtd':'.ltd を書き出し',
+    'btn.importLtd':'.ltd を取り込み',
+    'btn.removebg':'背景削除',
+    'map.inspector.empty':'オブジェクト未選択',
+    'map.inspector.title':'オブジェクト',
+    'map.actor':'アクター',
+    'map.position':'位置',
+    'map.rotation':'回転',
+    'map.linkedMap':'リンク先マップID',
+    'map.residents':'住人',
+    'map.delete':'削除',
+    'map.placeHere':'ここに配置',
+    'map.actorPicker.title':'アクターを選択',
+    'map.actorPicker.search':'名前で絞り込み',
+    'map.empty':'空きスロット',
+    'map.unsaved':'未保存の変更',
+    'map.load':'Map.sav を読み込み',
+    'map.placeMode':'空きタイルをクリックして配置',
+    'map.placeCancel':'配置をキャンセル',
+    'map.tool.select':'選択',
+    'map.tool.paint':'ペイント',
+    'map.tool.stats':'統計',
+    'map.paint.title':'床タイルをペイント',
+    'map.paint.help':'タイルを選び、島の上でクリック＆ドラッグ。Alt+クリックでカーソル下のタイルを取得。',
+    'map.paint.brush':'ブラシ',
+    'map.paint.tile':'タイル',
+    'map.stats.title':'マップ統計',
+    'map.stats.load':'統計を見るには Map.sav を読み込んでください。',
+    'map.stats.objects':'オブジェクト',
+    'map.stats.terrain':'地形',
+    'map.stats.placed':'配置オブジェクト',
   },
   // Add new languages here — see the comment block above for instructions.
 };
