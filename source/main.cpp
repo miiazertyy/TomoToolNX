@@ -27,6 +27,7 @@
 #include "i18n.h"
 #include "island_generator.h"
 #include "island_generator_runner.h"
+#include "ui_icons.h"
 #include <string>
 #include <vector>
 #include <dirent.h>
@@ -391,6 +392,15 @@ static void DrawText(const std::string& text, int x, int y, SDL_Color col, Font 
     if (!tex) return;
     SDL_Rect dst{x, y, w, h};
     SDL_RenderCopy(gRen, tex, nullptr, &dst);
+}
+
+// Left-aligned at x, but vertically centered on cy (DrawText anchors the top
+// edge, which leaves labels sitting low next to a vertically-centered icon).
+static void DrawTextVC(const std::string& text, int x, int cy, SDL_Color col, Font f=Font::Sm) {
+    if (text.empty()) return;
+    int w = 0, h = 0;
+    if (TTF_Font* ft = GetFont(f)) TTF_SizeUTF8(ft, text.c_str(), &w, &h);
+    DrawText(text, x, cy - h/2, col, f);
 }
 
 // Draw text centered at (cx,cy)
@@ -835,9 +845,53 @@ static void DrawLogoEgg() {
     SDL_SetTextureAlphaMod(tex, 255);
 }
 
+// Virtual-cursor mode state. Clicking the right stick
+// (HidNpadButton_StickR) toggles it on/off; while on, the right stick
+// moves an on-screen cursor and pressing A fires a simulated touch at
+// the cursor position so touch-only UI (rename pencils, tiny gear
+// icons, action-row pills) can be operated with just a controller.
+// Inspired by Hekate's stick-cursor overlay. Declared up here so
+// DrawVirtualCursor(), called from Present(), can read the flags.
+static bool  gVCursorOn = false;
+static float gVCursorX  = 0.f;
+static float gVCursorY  = 0.f;
+
+// Small Hekate-style translucent dot. Radius ~7 px, semi-transparent
+// white fill with a slightly stronger outline for contrast against
+// bright backgrounds. Approximates a circle by scanning a bounding
+// box and pixel-testing dx²+dy² ≤ r². Called from Present() so it
+// paints over every screen once cursor mode is on.
+static void DrawVirtualCursor() {
+    if (!gVCursorOn) return;
+    int cx = (int)gVCursorX;
+    int cy = (int)gVCursorY;
+    const int r = 7;
+    // Blend mode for the whole dot so both the fill and outline are
+    // properly alpha-blended over whatever's already been drawn.
+    SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_BLEND);
+    // Outline ring (radius r-1..r): darker + slightly more opaque so
+    // the dot stays visible on white / very light backgrounds.
+    SDL_SetRenderDrawColor(gRen, 20, 20, 20, 180);
+    for (int y = -r; y <= r; y++) for (int x = -r; x <= r; x++) {
+        int d2 = x*x + y*y;
+        if (d2 <= r*r && d2 >= (r-1)*(r-1))
+            SDL_RenderDrawPoint(gRen, cx + x, cy + y);
+    }
+    // Interior fill: translucent white so it lets the underlying UI
+    // show through — matches Hekate's dot cursor exactly enough that
+    // the reference feels right.
+    SDL_SetRenderDrawColor(gRen, 245, 245, 245, 150);
+    for (int y = -(r-1); y <= (r-1); y++) for (int x = -(r-1); x <= (r-1); x++) {
+        if (x*x + y*y <= (r-1)*(r-1))
+            SDL_RenderDrawPoint(gRen, cx + x, cy + y);
+    }
+    SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_NONE);
+}
+
 static inline void Present() {
     gFade.Draw();
     DrawLogoEgg();          // overlays the finished frame on every screen
+    DrawVirtualCursor();    // stick-mouse pointer, only when enabled
     SDL_RenderPresent(gRen);
 }
 
@@ -885,243 +939,27 @@ namespace Audio {
     }
 }
 
-// ─── Gear / settings icon ─────────────────────────────────────────────────────
-// Draw a gear silhouette centered at (cx,cy) with outer radius r.
-// 8 teeth, proper hub hole, clean proportions matching the WebUI SVG gear.
+// ─── Button icons ─────────────────────────────────────────────────────────────
+// All glyphs are rendered by UiIcons (source/ui_icons.cpp): anti-aliased
+// stroke icons on a 24-unit grid, baked once per size into cached white
+// textures and tinted per blit — same pattern as the corner masks above.
+// These thin wrappers keep the historical signatures so no call site moves.
+
+// Gear silhouette centred at (cx,cy); `r` is the legacy "outer radius" —
+// the old scan-line gear spanned ~2.5r including teeth, so map size = 2.5r.
 static void DrawGearIcon(int cx, int cy, int r, SDL_Color col) {
-    if (r < 4) return;
-    SDL_SetRenderDrawColor(gRen, col.r, col.g, col.b, col.a);
-
-    // Proportions tuned to match the WebUI feather gear icon
-    float rOuter  = (float)r;
-    float rInner  = rOuter * 0.68f;  // ring inner edge
-    float rHub    = rOuter * 0.30f;  // centre hole
-    float toothH  = rOuter * 0.24f;  // how far teeth stick out beyond rOuter
-    float toothHW = rOuter * 0.16f;  // half-width of each tooth
-    int   nTeeth  = 8;
-
-    // Scan-line fill: for each row, compute X spans for ring + teeth + hub hole
-    for (int dy = -(int)(rOuter + toothH) - 1; dy <= (int)(rOuter + toothH) + 1; dy++) {
-        float y = (float)dy;
-        // Collect all x-interval pairs [xL, xR] filled on this row
-        struct Span { float l, r; };
-        Span spans[16]; int nSpans = 0;
-
-        // 1. Ring band (rHub < dist < rInner) — annulus scan
-        float dOuter = rOuter*rOuter - y*y;
-        float dInner = rInner*rInner - y*y;
-        float dHub   = rHub  *rHub   - y*y;
-        if (dOuter > 0.f) {
-            float xO = sqrtf(dOuter);
-            float xI = (dInner > 0.f) ? sqrtf(dInner) : 0.f;
-            float xH = (dHub   > 0.f) ? sqrtf(dHub)   : 0.f;
-            // left arm of ring: from -xO to -(xI or 0), minus hub
-            if (xO > xH) {
-                spans[nSpans++] = { -(xO), -(std::max(xI, xH)) };
-            }
-            // right arm of ring
-            if (xO > xH) {
-                spans[nSpans++] = { std::max(xI, xH), xO };
-            }
-            // inner ring (between xI and xH) if ring reaches there
-            if (dInner > 0.f && xI > xH) {
-                spans[nSpans++] = { -xI, -xH };
-                spans[nSpans++] = {  xH,  xI };
-            }
-        }
-
-        // 2. Teeth: rectangular blocks rotated around the gear
-        for (int ti = 0; ti < nTeeth; ti++) {
-            float a  = (float)(2.0 * M_PI * ti / nTeeth);
-            float nx = cosf(a), ny = sinf(a);   // radial outward direction
-            float tx = -sinf(a), ty = cosf(a);  // tangential direction
-
-            // Tooth rectangle from rInner to rOuter+toothH, half-width toothHW
-            float corners[4][2] = {
-                { nx*(rOuter+toothH) + tx*toothHW,  ny*(rOuter+toothH) + ty*toothHW  },
-                { nx*(rOuter+toothH) - tx*toothHW,  ny*(rOuter+toothH) - ty*toothHW  },
-                { nx*(rInner*0.92f)  - tx*toothHW,  ny*(rInner*0.92f)  - ty*toothHW  },
-                { nx*(rInner*0.92f)  + tx*toothHW,  ny*(rInner*0.92f)  + ty*toothHW  },
-            };
-
-            float minY = corners[0][1], maxY = corners[0][1];
-            for (int k = 1; k < 4; k++) {
-                if (corners[k][1] < minY) minY = corners[k][1];
-                if (corners[k][1] > maxY) maxY = corners[k][1];
-            }
-            if (y < minY - 0.5f || y > maxY + 0.5f) continue;
-
-            float xL =  1e9f, xR = -1e9f;
-            for (int e = 0; e < 4; e++) {
-                float y0 = corners[e][1], y1 = corners[(e+1)%4][1];
-                float x0 = corners[e][0], x1 = corners[(e+1)%4][0];
-                float dy2 = y1 - y0;
-                if (fabsf(dy2) < 0.001f) continue;
-                float t = (y - y0) / dy2;
-                if (t < -0.001f || t > 1.001f) continue;
-                float xi = x0 + (x1-x0)*t;
-                if (xi < xL) xL = xi;
-                if (xi > xR) xR = xi;
-            }
-            if (xR > xL) {
-                // Clip tooth to outside rHub to keep hole clean
-                float xH2 = (dHub > 0.f) ? sqrtf(dHub) : 0.f;
-                if (xR > xH2)  spans[nSpans++] = { std::max(xL,  xH2), xR };
-                if (xL < -xH2) spans[nSpans++] = { xL, std::min(xR, -xH2) };
-            }
-        }
-
-        // Render all spans for this row
-        for (int s = 0; s < nSpans; s++) {
-            int x0 = cx + (int)floorf(spans[s].l);
-            int x1 = cx + (int)ceilf (spans[s].r);
-            if (x1 >= x0) {
-                SDL_Rect sr{ x0, cy + dy, x1 - x0 + 1, 1 };
-                SDL_RenderFillRect(gRen, &sr);
-            }
-        }
-    }
+    UiIcons::Draw(UiIcons::Id::Gear, cx, cy, r * 5 / 2, col);
 }
 
-
-
-
-
-
-
-
-
-// Floppy-disk glyph — outline disk shell, a small "shutter" at the top, and
-// a "label" rectangle in the lower half. `size` is the bounding box side
-// length; the icon is drawn centred on (cx, cy). Used as the per-user
+// Floppy-disk glyph — `size` is the bounding box. Used as the per-user
 // restore-picker button under each card in DrawUserPick.
 static void DrawFloppyIcon(int cx, int cy, int size, SDL_Color col) {
-    if (size < 8) return;
-    int s = size;
-    int x0 = cx - s/2;
-    int y0 = cy - s/2;
-
-    // Use FillRectSquare throughout so the floppy keeps its sharp 90°
-    // corners on every theme. Plain FillRect respects the theme's corner
-    // radius — fine for the surrounding pill box, but it turned the actual
-    // floppy body into a rounded blob on the Switch theme, which doesn't
-    // read as a floppy disk anymore.
-
-    // Outer disk shell — filled body with a slightly inset border for depth.
-    FillRectSquare(x0, y0, s, s, col);
-
-    // Shutter (top): small inset rectangle missing one corner — drawn as a
-    // darker recess so the shape reads as a floppy. We use the background
-    // colour to "punch" it out.
-    int shW = s * 60 / 100;
-    int shH = s * 30 / 100;
-    int shX = cx - shW/2;
-    int shY = y0 + s * 12 / 100;
-    FillRectSquare(shX, shY, shW, shH, COL_BG);
-    // Notched corner cue — small square on the shutter's top-right.
-    int notch = s * 14 / 100;
-    if (notch > 1)
-        FillRectSquare(shX + shW - notch, shY, notch, notch, col);
-
-    // Label (bottom): inset rectangle in the lower half of the disk.
-    int lbW = s * 76 / 100;
-    int lbH = s * 36 / 100;
-    int lbX = cx - lbW/2;
-    int lbY = y0 + s - lbH - (s * 10 / 100);
-    FillRectSquare(lbX, lbY, lbW, lbH, COL_BG);
-    // Two faint "lines" on the label for the floppy paper-strip look.
-    int lineH = std::max(1, s / 14);
-    FillRectSquare(lbX + lbW * 12/100, lbY + lbH * 30/100, lbW * 76/100, lineH, col);
-    FillRectSquare(lbX + lbW * 12/100, lbY + lbH * 60/100, lbW * 76/100, lineH, col);
+    UiIcons::Draw(UiIcons::Id::Floppy, cx, cy, size, col);
 }
 
-// Pencil glyph posed like a real writing pencil: tip pointing straight
-// down, eraser at the top, with a gentle 15° lean to the right so it reads
-// "held by a right hand mid-write" rather than "abstract diagonal stroke".
-// The body is split into sharpened lead → wood → ferrule → eraser cap, so
-// the silhouette is recognisable even at icon size.
+// Pencil glyph (edit/rename affordance) — `size` is the bounding box.
 static void DrawPencilIcon(int cx, int cy, int size, SDL_Color col) {
-    if (size < 8) return;
-    int s = size;
-    int x0 = cx - s/2;
-    int y0 = cy - s/2;
-
-    // Pencil axis: vertical, length = s. We define a local frame where
-    //   frac = 0  → bottom-of-box centre  (the sharpened tip)
-    //   frac = 1  → top-of-box centre     (the back of the eraser)
-    // and lean the top of the pencil slightly right of the bottom so the
-    // shape reads as a held writing pencil rather than a flagpole.
-    const float L          = (float)(s - 1);
-    // Lean ~30% of the icon size: the bottom (tip) sits to the LEFT of
-    // center and the top (eraser) sits to the RIGHT. At small icon sizes
-    // anything under ~20% reads as a straight vertical pencil; 30% gives
-    // a clear "writing-at-an-angle" silhouette pointing down-left.
-    const float leanPx     = s * 0.30f;
-    const float halfT      = s * 0.16f; // body half-thickness, horizontal
-    const float tipFrac    = 0.22f;     // 0..tipFrac: tapered lead+wood
-    const float bandFrac   = 0.74f;     // ferrule line position
-    const float eraserFrac = 0.82f;     // eraserFrac..1.0: eraser cap
-    // Eraser sticks out a touch wider than the wood body — same trick a
-    // real pencil ferrule does, and it gives the top of the icon a clear
-    // silhouette beat distinct from the shaft.
-    const float eraserBoost = 1.18f;
-
-    SDL_Color dark = { (uint8_t)(col.r * 55 / 100),
-                       (uint8_t)(col.g * 55 / 100),
-                       (uint8_t)(col.b * 55 / 100), col.a };
-
-    auto putPx = [&](int x, int y, SDL_Color c) {
-        SDL_SetRenderDrawColor(gRen, c.r, c.g, c.b, c.a);
-        SDL_RenderDrawPoint(gRen, x, y);
-    };
-
-    for (int dy = 0; dy < s; dy++) {
-        // u runs UP the pencil — bottom row is u=0 (the tip), top row is u=L.
-        float u    = (float)(s - 1 - dy);
-        float frac = u / L;
-
-        // Centerline X for this row, in LOCAL [0, s) coordinates — the inner
-        // loop compares against `dx` which is local, so mixing absolute `cx`
-        // here would push the entire shape off-screen (a long-standing bug
-        // hidden by the old surrounding black-box background).
-        float localMid = (float)(s - 1) * 0.5f;
-        float tipCx    = localMid - leanPx * 0.5f;
-        float eraserCx = localMid + leanPx * 0.5f;
-        float centerX  = tipCx + (eraserCx - tipCx) * frac;
-
-        // Thickness as a function of position along the axis.
-        float t = halfT;
-        if (frac < tipFrac) {
-            // Sharp cone — linearly taper from 0 (point) to halfT.
-            t = halfT * (frac / tipFrac);
-        } else if (frac >= eraserFrac) {
-            t = halfT * eraserBoost;
-        }
-
-        for (int dx = 0; dx < s; dx++) {
-            float v = (float)dx - centerX;
-            if (fabsf(v) > t) continue;
-
-            // 1-pixel gap perpendicular to the axis at the wood→ferrule
-            // and ferrule→eraser joins, so the eye reads three sections.
-            if (fabsf(frac - bandFrac)   * L < 0.55f) continue;
-            if (fabsf(frac - eraserFrac) * L < 0.55f) continue;
-
-            SDL_Color c;
-            if (frac < tipFrac * 0.45f) {
-                c = dark;       // bare graphite lead at the very tip
-            } else if (frac < tipFrac) {
-                c = col;        // wood reveal between lead and body
-            } else if (frac >= bandFrac && frac < eraserFrac) {
-                c = dark;       // metal ferrule band
-            } else if (frac >= eraserFrac) {
-                c = col;        // eraser cap — same colour, wider silhouette
-            } else {
-                c = col;        // wood body
-            }
-            putPx(x0 + dx, y0 + dy, c);
-        }
-    }
+    UiIcons::Draw(UiIcons::Id::Pencil, cx, cy, size, col);
 }
 
 // ─── Screens ──────────────────────────────────────────────────────────────────
@@ -1203,6 +1041,10 @@ static OnSwitchMode gOnSwitchMode = OnSwitchMode::WebUI;
 
 static std::vector<UgcTextureEntry> gEntries;
 static int          gEntrySel    = 0;
+// True when the pinned "+ blank UGC" row at the top of the list owns the
+// selection cursor. Kept separate from gEntrySel (which is the real entry
+// index) so no code path accidentally indexes gEntries with a sentinel.
+static bool          gUgcBlankRowSel = false;
 static int          gEntryScroll = 0;          // position in filtered list (top of visible window)
 static std::string  gUgcFilter;                // active substring filter (lowercase)
 // Active category filter for the UGC list. -1 means "All categories"; otherwise
@@ -1212,6 +1054,21 @@ static int          gUgcKindFilter = -1;
 // True while the category picker modal is open.
 static bool         gShowUgcKindPicker = false;
 static int          gUgcKindPickerSel  = 0;
+// When true the picker is being used to choose the KIND of a brand-new
+// blank UGC slot (not to change the filter). Set by
+// TPromptOrCreateBlankUgc when the current filter is "All"; the pick
+// handler then reads it and hands off to TDoCreateBlankUgc instead of
+// changing the filter chip.
+static bool         gUgcKindPickerForBlank = false;
+// UGC delete confirmation state. Armed by the "× delete" button in the
+// action row; the modal renders centered with a red "confirm" pill so
+// a stray tap can't wipe a slot the user didn't mean to. gEntrySel at
+// modal-arm time is captured into gUgcDeleteConfirmStem so a later
+// selection change (e.g. via touch on a different row while the modal
+// is up) still deletes the intended slot.
+static bool         gUgcDeleteConfirmOpen = false;
+static std::string  gUgcDeleteConfirmStem;
+static std::string  gUgcDeleteConfirmName;
 static std::vector<int> gFilteredEntries;      // indices into gEntries that match the filter
 static SDL_Texture* gPreviewTex  = nullptr;
 static std::string  gPreviewStem;
@@ -1251,6 +1108,9 @@ struct TouchHit { int x,y,w,h; TouchFn fn; int param; };
 static TouchHit gHits[256];
 static int      gHitCount = 0;
 static u64      gSimKDown = 0;
+// (Virtual-cursor state declared earlier — see the forward-declaration
+// block near Present(). This block used to live here but had to move
+// so DrawVirtualCursor could see the flags.)
 // gFrameKDown / gPNDir live higher up the file so EmitPrevNextHighlight can
 // reference them — see the forward-declared block near DrawAnimatedHighlight.
 static int      gTouchScale = 1; // multiplier for nudge actions
@@ -1263,7 +1123,10 @@ static void HitAdd(int x,int y,int w,int h, TouchFn fn, int param=0) {
 // (e.g. the Map tab's canvas-wide hit zone uses this to derive tile X/Y).
 static int gLastTouchFireX = 0;
 static int gLastTouchFireY = 0;
-static void HitFire(int tx, int ty) {
+// Fire the top-most HitAdd region covering (tx,ty). Returns true if a region
+// was hit — callers can then skip the legacy ProcessTouch coordinate-synth
+// path so a single tap/click isn't dispatched twice.
+static bool HitFire(int tx, int ty) {
     // Reverse so inner / last-registered hits win over the container they
     // sit inside (e.g. Settings prev/next arrows over the row hit).
     for (int i = gHitCount - 1; i >= 0; i--) {
@@ -1277,9 +1140,10 @@ static void HitFire(int tx, int ty) {
             u64 simBefore = gSimKDown;
             h.fn(h.param);
             if (gSimKDown == simBefore) Audio::Play(Audio::SfxClick);
-            break;
+            return true;
         }
     }
+    return false;
 }
 
 // Touch handler helpers
@@ -1289,6 +1153,7 @@ static void TSetMode(int mode)  { gOnSwitchMode = (OnSwitchMode)mode; gOnSwitchM
 // Defined after their target globals are declared (forward refs below via lambdas are fine as fn ptrs)
 static void TSelUser (int idx);
 static void TSelUgc  (int idx);
+static void TSelUgcBlankRow(int);
 static void TUgcOpenSearch(int);
 static void TUgcClearSearch(int);
 static void TUgcOpenKindPicker(int);
@@ -1309,6 +1174,8 @@ static void TSelMiiRelation(int idx);
 static void TRelMeterAdj(int delta);
 static void TRelDateKbd(int idx);
 static void TRelBatchKnow(int unused);
+static void TRelBatchBoost(int unused);
+static void TRelBatchZero(int unused);
 static void TSetSocialView(int v);
 static void TSelHabitCat(int c);
 static void TSelHabitItem(int posInCat);
@@ -1350,6 +1217,11 @@ static int    gPlayerScroll     = 0;
 static int    gMiiStatsMiiSel   = 0; // index into gMiis
 static int    gMiiStatsFieldSel = 0;
 static int    gMiiStatsScroll   = 0;
+// True when the pinned "+ blank mii" row at the top of the left Mii
+// list is focused (touch selection). Mirrors gUgcBlankRowSel on the
+// texture tab. Touch-first: tapping the row once focuses it, tapping
+// again (or A while focused) creates the blank Mii.
+static bool   gMiiBlankRowSel   = false;
 static std::string gPlayerMsg, gMiiStatsMsg;
 static SDL_Color   gPlayerMsgCol = COL_TEXT, gMiiStatsMsgCol = COL_TEXT;
 static int         gMiiStatsMsgFrames = 0;  // auto-fade countdown for transient habit/edit messages
@@ -1383,6 +1255,7 @@ static WordSlotUndo gWordUndo;
 static int  gPlayerBtnSel   = 3;     // 0-7 for 8 Player numeric buttons
 static int  gMiiBtnSel      = 2;     // 0-5 for 6 MiiStats numeric buttons
 static int  gMiiLtdBtnSel   = 0;     // 0=import .ltd  1=export .ltd  2=download from TomodachiShare (Name field)
+static int  gUgcBtnSel      = 0;     // 0-5 texture action bar: import/exportpic/exportltd/removebg/delete/settings
 static bool gMiiNameKbdReq  = false; // touch-triggered open of name keyboard
 // Touch-triggered open of the on-screen keyboard for renaming the currently
 // previewed UGC slot. Handled at end-of-frame in the OnSwitch loop so the
@@ -1464,6 +1337,9 @@ struct SaveFieldDef {
     bool isRegion;   // Named region enum cycle (9 values)
     bool isLang;     // Named language enum cycle (preset labels)
     bool isRawEnum;  // Raw unsigned nudge (GetAnyScalar/SetAnyScalar)
+    bool isUInt64Time; // Scalar DT_UInt64 timestamp. Display = "active" /
+                       // "cleared"; A press zeroes the value. Used for
+                       // Player.LastPenaltyTime (time-travel penalty).
     int32_t minVal, maxVal; // -1 = unclamped
     const char* desc;
     // Action-only fields (no save hash); A press runs an action with a
@@ -1500,23 +1376,28 @@ static const struct { const char* name; const char* label; } LANG_OPTIONS[] = {
     {"TWzh",  "Chinese (Traditional)"},
 };
 static const int LANG_OPTION_COUNT = 11;
-//                    label           fieldName                              rawHash      Str    UInt   Enum   Int    Skin   Island Region Lang   RawEn  min  max  desc                                                                       Action  actionId
+//                    label           fieldName                              rawHash      Str    UInt   Enum   Int    Skin   Island Region Lang   RawEn  U64T  min  max  desc                                                                       Action  actionId
 static const SaveFieldDef PLAYER_FIELDS[] = {
-    {"Name",          "Player.Name",                           0,           true,  false, false, false, false, false, false, false, false, 0,   0,   "Your player's display name.",                                              false, 0},
-    {"Island",        "Player.IslandName",                     0,           true,  false, false, false, false, false, false, false, false, 0,   0,   "The name of your island.",                                                 false, 0},
-    {"Money",         "Player.Money",                          0,           false, true,  false, false, false, false, false, false, false, 0,   -1,  "Current coin balance.",                                                    false, 0},
-    {"Currency",      "Player.Currency",                       0,           false, false, true,  false, false, false, false, false, false, 0,   -1,  "Regional currency symbol shown in-game.",                                  false, 0},
-    {"Boot Count",    "Player.BootNum",                        0,           false, true,  false, false, false, false, false, false, false, 0,   -1,  "Number of times the game has been launched.",                              false, 0},
-    {"Skin Tone",     "Player.SkinColorIndex",                 0,           false, false, false, false, true,  false, false, false, false, 0,   5,   "Player hand/skin color (0-5).",                                            false, 0},
-    {"Bday Day",      "",                                      0xdb7786bbu, false, false, false, false, false, false, false, false, true,  1,   31,  "Birthday day of the month (1-31).",                                        false, 0},
-    {"Bday Month",    "",                                      0xc754bef3u, false, false, false, false, false, false, false, false, true,  1,   12,  "Birthday month (1-12).",                                                   false, 0},
-    {"Bday Year",     "",                                      0x11996629u, false, false, false, true,  false, false, false, false, false, -1,  -1,  "Birthday year.",                                                           false, 0},
-    {"Island Size",   "",                                      0x870a807cu, false, false, false, false, false, true,  false, false, false, 1,   4,   "Island size preset. Other values corrupt the save!",                       false, 0},
-    {"Fountain Lv",   "Liberation.FountainLevel",              0,           false, false, false, false, false, false, false, false, true,  0,   -1,  "Wishing fountain upgrade level.",                                          false, 0},
-    {"Wishes",        "",                                      0xa32f7e47u, false, false, false, false, false, false, false, false, true,  0,   -1,  "Number of wishes made.",                                                   false, 0},
-    {"Region",        "Player.Region",                         0,           false, false, false, false, false, false, true,  false, false, 0,   -1,  "Player region (affects seasons and weather).",                             false, 0},
+    {"Name",          "Player.Name",                           0,           true,  false, false, false, false, false, false, false, false, false, 0,   0,   "Your player's display name.",                                              false, 0},
+    {"Island",        "Player.IslandName",                     0,           true,  false, false, false, false, false, false, false, false, false, 0,   0,   "The name of your island.",                                                 false, 0},
+    {"Money",         "Player.Money",                          0,           false, true,  false, false, false, false, false, false, false, false, 0,   -1,  "Current coin balance.",                                                    false, 0},
+    {"Currency",      "Player.Currency",                       0,           false, false, true,  false, false, false, false, false, false, false, 0,   -1,  "Regional currency symbol shown in-game.",                                  false, 0},
+    {"Boot Count",    "Player.BootNum",                        0,           false, true,  false, false, false, false, false, false, false, false, 0,   -1,  "Number of times the game has been launched.",                              false, 0},
+    {"Skin Tone",     "Player.SkinColorIndex",                 0,           false, false, false, false, true,  false, false, false, false, false, 0,   5,   "Player hand/skin color (0-5).",                                            false, 0},
+    {"Bday Day",      "",                                      0xdb7786bbu, false, false, false, false, false, false, false, false, true,  false, 1,   31,  "Birthday day of the month (1-31).",                                        false, 0},
+    {"Bday Month",    "",                                      0xc754bef3u, false, false, false, false, false, false, false, false, true,  false, 1,   12,  "Birthday month (1-12).",                                                   false, 0},
+    {"Bday Year",     "",                                      0x11996629u, false, false, false, true,  false, false, false, false, false, false, -1,  -1,  "Birthday year.",                                                           false, 0},
+    {"Island Size",   "",                                      0x870a807cu, false, false, false, false, false, true,  false, false, false, false, 1,   4,   "Island size preset. Other values corrupt the save!",                       false, 0},
+    {"Fountain Lv",   "Liberation.FountainLevel",              0,           false, false, false, false, false, false, false, false, true,  false, 0,   -1,  "Wishing fountain upgrade level.",                                          false, 0},
+    {"Wishes",        "",                                      0xa32f7e47u, false, false, false, false, false, false, false, false, true,  false, 0,   -1,  "Number of wishes made.",                                                   false, 0},
+    {"Region",        "Player.Region",                         0,           false, false, false, false, false, false, true,  false, false, false, 0,   -1,  "Player region (affects seasons and weather).",                             false, 0},
+    // Time-travel penalty stamp. The game writes this when it detects the
+    // system clock jumped backwards; while non-zero, shops won't restock
+    // and trips to other islands stay locked. Zero it here to skip the
+    // 72-hour cooldown (issue #32). Hash from 2.13.0 player schema.
+    {"TT Penalty",    "",                                      0x71e3ba15u, false, false, false, false, false, false, false, false, false, true,  0,   -1,  "Time-travel penalty timestamp. Press A to clear so shops restock.",        false, 0},
 };
-static const int PLAYER_FIELD_COUNT = 13;
+static const int PLAYER_FIELD_COUNT = 14;
 
 // ─── Mii stats field table ─────────────────────────────────────────────────────
 struct MiiStatsDef {
@@ -1548,8 +1429,14 @@ static const MiiStatsDef MII_STATS_FIELDS[] = {
     {"Bond Meter",  "Mii.MiiMisc.BondInfo.Meter",         false,false,false, false,0, 0,  0,100, "Strength of the bond with the player (0-100)."},
     {"Mood",        "Mii.Feeling.Type",                    false,false,true,  false,0, 0,  0, -1, "Current emotional state."},
     {"Fullness",    "Mii.MiiMisc.EatInfo.EatFullness",     false,false,false, false,0, 0,  0, -1, "How well-fed the Mii is. Can exceed 100 with certain items."},
+    // Action row: deleting the current Mii. Sits at the end of the field
+    // list so it's the last thing the cursor lands on — same discovery
+    // pattern as how + blank UGC pins to the texture list. Pressing A
+    // opens the three-save warning modal; nothing is mutated until the
+    // modal's confirm button fires.
+    {"Delete Mii",  "",                                    false,false,false, true, 3, 0,  0,  0, "Wipe this Mii from Mii.sav. Player.sav + Map.sav must also be applied to the Switch after."},
 };
-static const int MII_STATS_FIELD_COUNT = 16;
+static const int MII_STATS_FIELD_COUNT = 17;
 
 // Feeling.Type enum hash → display label (from Mii.Feeling.Type EnumArray)
 static const struct { uint32_t hash; const char* label; } FEELING_LABELS[] = {
@@ -1664,6 +1551,282 @@ static uint32_t RelTypeCounterpart(uint32_t hash) {
 }
 static bool RelMeterFixed(uint32_t hash) {
     return hash==0x0784a8dcu || hash==0x7e3d1e46u; // Other or Invalid
+}
+
+#include "rel_tier_labels.h"
+
+// Map a (relationship-type hash, meter, isFight) tuple to a short tier
+// description like "Soulmate" / "Not a great match...". Mirrors
+// ltd-save-editor-2.13.0's subRelationKey + subRelationLabel: universal
+// RANK_THRESHOLDS [11, 41, 81, 120, 160, 190] decide the tier, then we
+// pull the localized label from rel_tier_labels.h. Returns nullptr for
+// relationship types we don't have labels for (currently family /
+// invalid / unknown — those just don't render a tier blurb).
+static int RelTierIndex(int32_t meter) {
+    static const int32_t T[6] = { 11, 41, 81, 120, 160, 190 };
+    for (int i = 0; i < 6; i++) if (meter < T[i]) return i;
+    return 6;
+}
+static const char* RelTierLabel(uint32_t typeHash, int32_t meter, bool isFight) {
+    int t = RelTierIndex(meter);
+    // Map relationship type → tier-label array. Fight variants exist
+    // for Couple / Friend / Lover and both OneSideLove types (per
+    // subRelationLabels.ts's SUB_RELATIONS map in 2.13.0); everything
+    // else ignores isFight. Family is a many-to-one merge: 2.13.0
+    // routes Family / Relative / Parent / Child / BrotherSisterOlder /
+    // BrotherSisterYounger / GrandParent / GrandChild all into the
+    // Family label group.
+    switch (typeHash) {
+        case 0xc2d067a7u: return isFight ? REL_TIER_COUPLE_FIGHT[t] : REL_TIER_COUPLE[t];
+        case 0xba939a42u: return isFight ? REL_TIER_FRIEND_FIGHT[t] : REL_TIER_FRIEND[t];
+        case 0xb7ce0c18u: return isFight ? REL_TIER_LOVER_FIGHT[t]  : REL_TIER_LOVER[t];
+        // OneSideLove has TWO in-game hashes:
+        //   0x4cfcf0b9 = FriendOnesideLoveWithoutTwosideLove
+        //   0x68ef8aab = KnowOnesideLoveOrOverFriend
+        // 2.13.0's subRelationLabels merges both into the OnesideLove
+        // label group; a hash of the string "OnesideLove" (what our
+        // old code used) never appears in an actual save.
+        case 0x4cfcf0b9u:
+        case 0x68ef8aabu:
+            return isFight ? REL_TIER_ONESIDELOVE_FIGHT[t]
+                           : REL_TIER_ONESIDELOVE[t];
+        case 0x354a0515u: return REL_TIER_KNOW[t];
+        case 0x535e93a8u: return REL_TIER_EXFRIEND[t];
+        case 0x7783d4c3u: return REL_TIER_EXLOVER[t];
+        case 0xfe59f825u: return REL_TIER_DIVORCE[t];
+        case 0xdcfc7603u: case 0xe193c5a2u:
+        case 0x1918f808u: case 0x3b1d200au:
+        case 0x2fd9785bu: case 0x7e3cd550u:
+        case 0x804172f3u: return REL_TIER_FAMILY[t];
+        default: return nullptr;
+    }
+}
+
+// Persist a feeling/mood change so the in-game tick doesn't immediately
+// expire it. Mirrors what the game itself writes when a feeling is
+// triggered: pushes Feeling.EndGameTime far into the future and clears
+// the link to whatever in-game event would normally drive the feeling.
+// Without this the game's mood-tick code sees EndGameTime <= now and
+// snaps the feeling straight back to the default, which is why setting
+// "Deject" from the editor never applied.
+//
+// Also clears IsFight on every relationship pair involving this Mii —
+// otherwise two angry Miis stay locked in a fight even after the user
+// changes both of their moods.
+static void RelMoodPersistAndCalmFights(int miiIdx) {
+    if (!gMiiSav.loaded) return;
+    static const uint32_t H_END   = SaveEditor::Hash("Mii.Feeling.FeelingEndGameTime");
+    static const uint32_t H_FIGHT = SaveEditor::Hash("Mii.Relation.Info.IsFight");
+    static const uint32_t H_IA    = 0xf7420afbu;
+    static const uint32_t H_IB    = 0x4071f71cu;
+    // ~50 game-years in seconds (game-local clock); safely past any
+    // normal play session and still well below UINT64 wraparound. The
+    // game's tick code expires a feeling when EndGameTime <= now-game,
+    // so pushing this forward keeps the chosen mood "stuck" indefinitely.
+    constexpr uint64_t kFarFuture = (uint64_t)50ull * 365ull * 24ull * 3600ull;
+    SaveEditor::SetUInt64At(gMiiSav, H_END, miiIdx, kFarFuture);
+    // (We intentionally don't touch Mii.Feeling.MiiHistoryId — Int64
+    // writer isn't exposed yet, and the game tolerates whatever value
+    // is currently there as long as EndGameTime is in the future.)
+    // Walk pair table, clear IsFight on any slot involving this Mii.
+    int pairCount = SaveEditor::ArraySize(gMiiSav, H_IA);
+    for (int p = 0; p < pairCount; p++) {
+        int a = SaveEditor::GetIntAt(gMiiSav, H_IA, p, -1);
+        int b = SaveEditor::GetIntAt(gMiiSav, H_IB, p, -1);
+        if (a == miiIdx || b == miiIdx)
+            SaveEditor::SetBoolAt(gMiiSav, H_FIGHT, p, false);
+    }
+}
+
+// Mii-delete confirmation overlay state. Set true by the "× delete"
+// button on the Mii action row; the modal renders centered with a
+// destructive-action warning that explicitly calls out the three-save
+// requirement (Mii.sav + Player.sav + Map.sav must all be applied to
+// the Switch after a delete, otherwise the game would still see the
+// old Mii referenced by the other two files). Mirrors the warning +
+// confirm pattern from 2.13.0's MiiSlotSelector / deleteMii flow.
+static bool gMiiDeleteConfirmOpen = false;
+static int  gMiiDeleteConfirmSlot = -1;  // 0-based Mii slot pending deletion
+
+// Port of 2.13.0's deleteMii() — clears every per-Mii field for `miiIdx`
+// so the game treats the slot as empty again. Returns true if Mii.sav
+// was actually loaded and the slot was clearable, false otherwise.
+// Touches Mii.sav fields (name, CharInfoEx, feeling, relations, family
+// refs, housing); Map.sav and Player.sav cleanup is delegated to the
+// user's "apply to Switch" step on those files (the confirm dialog
+// makes this requirement explicit). The 2.13.0 reference also compacts
+// history/news ring buffers in Player.sav and rebuilds the map's House
+// table — those are intentionally skipped here: the game tolerates
+// stale ring-buffer entries (it indexes by -1-sentinel anyway), and
+// rebuilding the map house table from a partial state is the riskier
+// path. The user is told to re-apply Player.sav + Map.sav so the game
+// re-derives whatever it needs on next launch.
+static bool DeleteMii(int miiIdx) {
+    if (!gMiiSav.loaded) return false;
+    if (miiIdx < 0) return false;
+    // Hashes for the per-Mii fields we touch.
+    static const uint32_t H_NAME      = SaveEditor::Hash("Mii.Name.Name");
+    static const uint32_t H_CHARINFOX = SaveEditor::Hash("Mii.CharInfoEx");
+    static const uint32_t H_END_GT    = SaveEditor::Hash("Mii.Feeling.FeelingEndGameTime");
+    static const uint32_t H_BLOOD_REF = SaveEditor::Hash("Mii.MiiMisc.EntryInfo.BloodMiiIndex");
+    static const uint32_t H_CARE_PEND = SaveEditor::Hash("Childcare.Pending.ParentMiiIndex");
+    static const uint32_t H_CARE_RES  = SaveEditor::Hash("Childcare.Reserve.ParentMiiIndex");
+    // Hash locally (HASH_HOUSE_MAPID is declared further down the file
+    // for the housing UI's exclusive use; we don't pull it in here to
+    // avoid a forward-decl cycle).
+    static const uint32_t H_HOUSE_ID  = SaveEditor::Hash("Mii.Location.HouseMapId");
+    static const uint32_t H_ROOM_IDX  = SaveEditor::Hash("Mii.Location.RoomIndex");
+    // Relations.
+    static const uint32_t H_IA        = 0xf7420afbu;  // RelationId.Id_a
+    static const uint32_t H_IB        = 0x4071f71cu;  // RelationId.Id_b
+    static const uint32_t H_BASE      = 0x8b41897eu;  // direction Base type (per-direction)
+    static const uint32_t H_METER     = 0x42c2fc2fu;  // direction Meter
+    static const uint32_t H_FIGHT     = SaveEditor::Hash("Mii.Relation.Info.IsFight");
+    static const uint32_t H_TST       = 0x1a892e50u;  // TypeSetTime
+    static const uint32_t H_INVALID   = 0x7e3d1e46u;  // 'Invalid' enum
+
+    // 1. Reset every relation pair where this Mii participates. Both
+    //    directions get type=Invalid + meter=0; pair endpoint ids → -1;
+    //    IsFight → false; TypeSetTime → 0.
+    int pairCount = SaveEditor::ArraySize(gMiiSav, H_IA);
+    for (int p = 0; p < pairCount; p++) {
+        int a = SaveEditor::GetIntAt(gMiiSav, H_IA, p, -1);
+        int b = SaveEditor::GetIntAt(gMiiSav, H_IB, p, -1);
+        if (a != miiIdx && b != miiIdx) continue;
+        SaveEditor::SetIntAt(gMiiSav, H_IA, p, -1);
+        SaveEditor::SetIntAt(gMiiSav, H_IB, p, -1);
+        SaveEditor::SetEnumAt(gMiiSav, H_BASE, p * 2,     H_INVALID);
+        SaveEditor::SetEnumAt(gMiiSav, H_BASE, p * 2 + 1, H_INVALID);
+        SaveEditor::SetIntAt (gMiiSav, H_METER, p * 2,     0);
+        SaveEditor::SetIntAt (gMiiSav, H_METER, p * 2 + 1, 0);
+        SaveEditor::SetBoolAt(gMiiSav, H_FIGHT, p, false);
+        SaveEditor::SetUInt64At(gMiiSav, H_TST, p, 0);
+    }
+
+    // 2. Clear -1-sentinel references to this Mii in BloodMiiIndex and
+    //    the Childcare arrays (parent references). Each entry that
+    //    points at miiIdx gets set back to -1 so the game treats the
+    //    relationship as severed instead of pointing at a now-empty slot.
+    auto clearRefArray = [](uint32_t hash, int target) {
+        int n = SaveEditor::ArraySize(gMiiSav, hash);
+        for (int i = 0; i < n; i++) {
+            if (SaveEditor::GetIntAt(gMiiSav, hash, i, -1) == target)
+                SaveEditor::SetIntAt(gMiiSav, hash, i, -1);
+        }
+    };
+    clearRefArray(H_BLOOD_REF, miiIdx);
+    clearRefArray(H_CARE_PEND, miiIdx);
+    clearRefArray(H_CARE_RES,  miiIdx);
+
+    // 3. Evict from housing (Mii-side). HouseMapId / RoomIndex go to -1
+    //    so the slot is unhoused. The map's House table still keeps the
+    //    physical house; the user is told to re-apply Map.sav so the
+    //    game can re-derive house ownership cleanly on next launch.
+    SaveEditor::SetIntAt(gMiiSav, H_HOUSE_ID, miiIdx, -1);
+    SaveEditor::SetIntAt(gMiiSav, H_ROOM_IDX, miiIdx, -1);
+
+    // 4. Zero the slot's identity: 152-byte CharInfoEx blob → all zeros,
+    //    name → empty, feeling-end time → 0. The CharInfoEx zero matches
+    //    what 2.13.0 writes to clear the slot. Game treats a zero
+    //    CharInfoEx as "empty resident slot" and the roster shrinks.
+    {
+        const uint32_t H_BIN = SaveEditor::Hash("Mii.CharInfoEx");
+        // Mii.CharInfoEx is a BinaryArray (DT_BinArray) whose on-disk
+        // layout is:
+        //   [count: 4]  then per-element [size: 4][data: size bytes]
+        // For CharInfoEx every element's size is 152, so each slot's
+        // record is 4 + 152 = 156 bytes and the data window for slot
+        // `miiIdx` starts at:
+        //     4 (count) + miiIdx * 156 (skip earlier slots) + 4 (size prefix)
+        //   = 8 + miiIdx * 156
+        // Zero the 152 data bytes but LEAVE the 4-byte size prefix
+        // intact — the game (and ListMiis' sum==152 empty check) both
+        // rely on the size prefix staying at 152. An earlier version of
+        // this code used a naive 4 + idx*152 stride, which lands mid-
+        // record for any slot after the first and corrupted adjacent
+        // slots' size prefixes.
+        int binCount = SaveEditor::ArraySize(gMiiSav, H_BIN);
+        if (binCount > miiIdx) {
+            SaveEditor::Entry* e = nullptr;
+            for (auto& en : gMiiSav.entries) {
+                if (en.hash == H_BIN) { e = &en; break; }
+            }
+            if (e) {
+                size_t dataOff = 8 + (size_t)miiIdx * 156;
+                if (e->payload.size() >= dataOff + 152) {
+                    std::fill_n(e->payload.data() + dataOff, 152, (uint8_t)0);
+                }
+            }
+        }
+    }
+    SaveEditor::SetWStr32At(gMiiSav, H_NAME, miiIdx, "");
+    SaveEditor::SetUInt64At(gMiiSav, H_END_GT, miiIdx, 0);
+    (void)H_CHARINFOX;  // hash kept for symmetry / future readback
+
+    // gMiis cache (the displayed roster) is rebuilt by the caller — it
+    // owns the SDL-side selection state and needs to clamp gMiiStatsMiiSel
+    // in the same transaction. See TConfirmMiiDelete.
+    return true;
+}
+
+// Touch handler: arm the delete-confirm modal for the currently selected
+// Mii. Two-tap pattern matches every other irreversible action in this
+// codebase (the Housing conflict modal, the wishes batch ops, etc.) —
+// users get a clearly destructive prompt before anything is mutated.
+static void TOpenMiiDeleteConfirm(int) {
+    if (gMiis.empty() || gMiiStatsMiiSel < 0
+        || gMiiStatsMiiSel >= (int)gMiis.size()) return;
+    gMiiDeleteConfirmSlot = gMiis[gMiiStatsMiiSel].slot - 1;  // 0-based
+    gMiiDeleteConfirmOpen = true;
+}
+
+// Touch handler: user accepted the warning. Run DeleteMii on the slot
+// the modal was opened for, then rebuild the roster cache so the list
+// drops the now-empty slot and selection lands on the previous Mii.
+static void TConfirmMiiDelete(int) {
+    if (!gMiiDeleteConfirmOpen) return;
+    int idx = gMiiDeleteConfirmSlot;
+    gMiiDeleteConfirmOpen = false;
+    gMiiDeleteConfirmSlot = -1;
+    if (!DeleteMii(idx)) {
+        gMiiStatsMsg    = "Delete failed";
+        gMiiStatsMsgCol = COL_RED;
+        gMiiStatsMsgFrames = 180;
+        return;
+    }
+    gMiiSavDirty = true;
+    // ListMiis() reads Mii.sav from disk, so we have to flush the
+    // in-memory delete first or the roster rebuild would show the
+    // stale slot. Persisting here also matches user expectation —
+    // pressing "confirm delete" should make the slot actually go away,
+    // not stage a delete that won't materialise until some later
+    // unrelated apply step.
+    {
+        std::string err = SaveEditor::Save(SAVE_MII_SAV, gMiiSav);
+        if (!err.empty()) {
+            gMiiStatsMsg    = "Delete save failed: " + err;
+            gMiiStatsMsgCol = COL_RED;
+            gMiiStatsMsgFrames = 240;
+            return;
+        }
+        gMiiSavDirty = false;  // disk and memory are now in sync
+    }
+    // Rebuild the cached roster + clamp selection so the UI keeps a
+    // valid current Mii after the slot disappears.
+    gMiis = MiiManager::ListMiis();
+    if (gMiis.empty()) {
+        gMiiStatsMiiSel = 0;
+    } else {
+        if (gMiiStatsMiiSel >= (int)gMiis.size())
+            gMiiStatsMiiSel = (int)gMiis.size() - 1;
+    }
+    gMiiStatsMsg    = Lang::T("mii.delete.ok");
+    gMiiStatsMsgCol = COL_GREEN;
+    gMiiStatsMsgFrames = 180;
+}
+static void TCancelMiiDelete(int) {
+    gMiiDeleteConfirmOpen = false;
+    gMiiDeleteConfirmSlot = -1;
 }
 
 // Fit a UTF-8 string to maxW pixels wide using font f, appending "…" if truncated.
@@ -1849,6 +2012,10 @@ struct HousingRow {
 static std::vector<HousingRow> gHousingRows;
 static int  gHousingSel    = 0;   // index into selectable rows (skipping headers)
 static int  gHousingScroll = 0;   // first visible row index (into gHousingRows)
+// (Mii-delete confirm state declared earlier so the DeleteMii handler
+//  at the top of the file can see it. Originally lived here next to
+//  Housing's conflict overlay state — moved up to avoid a forward-decl
+//  dance.)
 // Conflict resolution overlay
 static bool gHousingConfirmOpen   = false;
 static int  gHousingConfirmEditor = -1;   // mii slot idx that triggered the conflict
@@ -1947,6 +2114,7 @@ static int            gMiiRelScroll    = 0;   // first visible row in filtered r
 static int            gMiiRelCount     = 0;   // total filtered rows for the selected Mii (updated each draw)
 static int            gMiiRelPairIdx   = -1;  // actual pair array index (set during draw)
 static bool           gMiiRelSelfA     = true; // selected Mii is 'A' in the pair
+static int            gMiiRelFocus     = 0;    // 0 = editing rank type, 1 = editing meter (X toggles)
 
 // WebUI standby prevention
 static bool            gStandbyOff      = false;
@@ -2048,7 +2216,7 @@ static void TSetIslandSize(int val) {
     gPlayerSavDirty = true;
 }
 static void TSelMiiStatsMii(int idx) {
-    if (idx>=0 && idx<(int)gMiis.size()) { gMiiStatsMiiSel=idx; gMiiRelSel=0; gMiiRelScroll=0; }
+    if (idx>=0 && idx<(int)gMiis.size()) { gMiiStatsMiiSel=idx; gMiiRelSel=0; gMiiRelScroll=0; gMiiBlankRowSel=false; }
 }
 // Tap on a TomodachiShare card. Sets gShareSel (NOT gMiiStatsMiiSel — that's
 // the left-side mii list).
@@ -2067,9 +2235,13 @@ static void TRelMeterAdj(int delta) {
     int otDir = gMiiRelSelfA ? gMiiRelPairIdx*2+1 : gMiiRelPairIdx*2;
     uint32_t myType = SaveEditor::GetEnumAt(gMiiSav, H_BASE_RA, myDir, 0x0784a8dcu);
     if (RelMeterFixed(myType)) return;
+    // Cap raised from 100 to 200 — the in-game maximum for every
+    // relationship type is 200 (Couple/Lover hit "Soulmate" / "Wants to
+    // marry!" at 190+), but we used to silently clip at 100 which left
+    // the upper half of every tier unreachable.
     auto adjM = [&](int dir) {
         int32_t m = SaveEditor::GetIntAt(gMiiSav, H_METER_RA, dir);
-        m = std::max(0, std::min(100, m + delta));
+        m = std::max(0, std::min(200, m + delta));
         SaveEditor::SetIntAt(gMiiSav, H_METER_RA, dir, m);
     };
     adjM(myDir);
@@ -2125,6 +2297,89 @@ static void TRelBatchKnow(int /*unused*/) {
     }
     if (changed > 0) gMiiSavDirty = true;
 }
+
+// Batch-boost every low-tier relationship this Mii is in. Mirrors the
+// issue #33 request: "one button that turns all Not-a-great-match / Unhappy /
+// Strained sub-relationships into their best tier." Iterates the pair
+// table, skips fixed-meter types (Unknown / Invalid — the game ignores
+// their meter), and any pair where the current meter is already above
+// the two bottom tiers stays untouched so we don't clobber Miis that
+// are just "getting acquainted". Both directions of a matching pair are
+// bumped to 200 so the relationship stays symmetric.
+static void TRelBatchBoost(int /*unused*/) {
+    if (!gMiiSav.loaded || gMiis.empty()) return;
+    if (gMiiStatsMiiSel < 0 || gMiiStatsMiiSel >= (int)gMiis.size()) return;
+    static const uint32_t H_IDA   = 0xf7420afbu;
+    static const uint32_t H_IDB   = 0x4071f71cu;
+    static const uint32_t H_BASE  = 0x8b41897eu;
+    static const uint32_t H_METER = 0x42c2fc2fu;
+    // Threshold matches the universal RANK_THRESHOLDS from 2.13.0: any
+    // meter < 41 sits in the bottom two tiers ("Unhappy" / "Slightly
+    // unhappy" for couples, "Not a great match" / "A bit awkward" for
+    // friends, etc.). 200 = top tier ("Soulmate" / "Best friend forever").
+    static const int32_t LOW_MAX = 41;
+    static const int32_t BOOST   = 200;
+    int miiSlotIdx = gMiis[gMiiStatsMiiSel].slot - 1;
+    int n = SaveEditor::ArraySize(gMiiSav, H_IDA);
+    int changed = 0;
+    for (int pi = 0; pi < n; pi++) {
+        int a = SaveEditor::GetIntAt(gMiiSav, H_IDA, pi);
+        int b = SaveEditor::GetIntAt(gMiiSav, H_IDB, pi);
+        if (a < 0 || b < 0) continue;
+        if (a != miiSlotIdx && b != miiSlotIdx) continue;
+        bool selfA = (a == miiSlotIdx);
+        int myDir = selfA ? pi*2   : pi*2+1;
+        int otDir = selfA ? pi*2+1 : pi*2;
+        uint32_t myType = SaveEditor::GetEnumAt(gMiiSav, H_BASE, myDir, 0u);
+        if (RelMeterFixed(myType)) continue;  // Unknown/Invalid have no meaningful meter
+        int32_t myM = SaveEditor::GetIntAt(gMiiSav, H_METER, myDir);
+        if (myM >= LOW_MAX) continue;  // already above the low tiers
+        SaveEditor::SetIntAt(gMiiSav, H_METER, myDir, BOOST);
+        SaveEditor::SetIntAt(gMiiSav, H_METER, otDir, BOOST);
+        changed++;
+    }
+    if (changed > 0) gMiiSavDirty = true;
+    gMiiStatsMsg = Lang::T("rel.batch.boost.done");
+    gMiiStatsMsgCol = COL_GREEN;
+    gMiiStatsMsgFrames = 180;
+}
+
+// Batch-zero every relationship meter this Mii is in. Symmetric with
+// Boost — bumps meters back to 0 in both directions of every pair
+// touching this Mii, skipping fixed-meter types. Useful for wiping the
+// slate before rebuilding relationships from scratch.
+static void TRelBatchZero(int /*unused*/) {
+    if (!gMiiSav.loaded || gMiis.empty()) return;
+    if (gMiiStatsMiiSel < 0 || gMiiStatsMiiSel >= (int)gMiis.size()) return;
+    static const uint32_t H_IDA   = 0xf7420afbu;
+    static const uint32_t H_IDB   = 0x4071f71cu;
+    static const uint32_t H_BASE  = 0x8b41897eu;
+    static const uint32_t H_METER = 0x42c2fc2fu;
+    int miiSlotIdx = gMiis[gMiiStatsMiiSel].slot - 1;
+    int n = SaveEditor::ArraySize(gMiiSav, H_IDA);
+    int changed = 0;
+    for (int pi = 0; pi < n; pi++) {
+        int a = SaveEditor::GetIntAt(gMiiSav, H_IDA, pi);
+        int b = SaveEditor::GetIntAt(gMiiSav, H_IDB, pi);
+        if (a < 0 || b < 0) continue;
+        if (a != miiSlotIdx && b != miiSlotIdx) continue;
+        bool selfA = (a == miiSlotIdx);
+        int myDir = selfA ? pi*2   : pi*2+1;
+        int otDir = selfA ? pi*2+1 : pi*2;
+        uint32_t myType = SaveEditor::GetEnumAt(gMiiSav, H_BASE, myDir, 0u);
+        if (RelMeterFixed(myType)) continue;
+        if (SaveEditor::GetIntAt(gMiiSav, H_METER, myDir) == 0
+         && SaveEditor::GetIntAt(gMiiSav, H_METER, otDir) == 0) continue;
+        SaveEditor::SetIntAt(gMiiSav, H_METER, myDir, 0);
+        SaveEditor::SetIntAt(gMiiSav, H_METER, otDir, 0);
+        changed++;
+    }
+    if (changed > 0) gMiiSavDirty = true;
+    gMiiStatsMsg = Lang::T("rel.batch.zero.done");
+    gMiiStatsMsgCol = COL_GREEN;
+    gMiiStatsMsgFrames = 180;
+}
+
 static void TSelHabitCat(int c) {
     if (c >= 0 && c < HABIT_CAT_COUNT) {
         gHabitCatSel = c; gHabitItemSel = 0; gHabitScroll = 0;
@@ -3708,6 +3963,54 @@ static void TDoMiiExport(int) {
     else{gMiiStatsMsg="Exported: "+fname;gMiiStatsMsgCol=COL_GREEN;LogOK("Exported to: "+outPath);}
 }
 
+// Create-blank handlers — port of ltd-save-editor-2.13.0 addMii() /
+// buildBlankUgcAdd(). Find the next empty slot via MiiManager, allocate
+// it with default data, refresh the in-memory caches so the new slot is
+// immediately visible in the list/grid. Errors are surfaced via the same
+// gMiiStatsMsg toast the import/export buttons use.
+// Touch handler for the pinned "+ blank mii" list row. First tap
+// focuses it; a second tap (row already focused) fires the create.
+// Matches the texture tab's TSelUgcBlankRow behaviour.
+static void TDoCreateBlankMii(int);
+static void TSelMiiBlankRow(int) {
+    if (gMiiBlankRowSel) { TDoCreateBlankMii(0); return; }
+    gMiiBlankRowSel = true;
+}
+static void TDoCreateBlankMii(int) {
+    gMiiBlankRowSel = false;
+    int slot = MiiManager::FirstEmptyMiiSlot();
+    if (slot < 0) {
+        gMiiStatsMsg = Lang::T("mii.blank.full");
+        gMiiStatsMsgCol = COL_RED;
+        return;
+    }
+    LogINF("Creating blank Mii at slot " + std::to_string(slot) + "...");
+    std::string err = MiiManager::CreateBlankMii(slot);
+    if (!err.empty()) {
+        gMiiStatsMsg = err; gMiiStatsMsgCol = COL_RED;
+        LogERR("Blank Mii failed: " + err);
+        return;
+    }
+    // Reload Mii.sav so in-memory state reflects the new slot, then mark
+    // dirty so the normal save/discard prompt fires on exit.
+    gMiiSav = SaveEditor::SavFile{};
+    std::string lerr;
+    if (!SaveEditor::Load(SAVE_MII_SAV, gMiiSav, lerr)) {
+        gMiiStatsMsg = "Reload error: " + lerr; gMiiStatsMsgCol = COL_RED;
+        return;
+    }
+    gMiiSavDirty = true;
+    gMiis = MiiManager::ListMiis();
+    // Jump selection to the newly created slot so the user can immediately
+    // edit it without scrolling.
+    for (size_t i = 0; i < gMiis.size(); i++) {
+        if (gMiis[i].slot == slot) { gMiiStatsMiiSel = (int)i; break; }
+    }
+    gMiiStatsMsg = Lang::T("mii.blank.ok");
+    gMiiStatsMsgCol = COL_GREEN;
+    LogOK("Blank Mii created at slot " + std::to_string(slot));
+}
+
 static void DoMiiImport(const std::string& ltdPath) {
     if (gMiis.empty()) return;
     int slot = gMiis[gMiiStatsMiiSel].slot;
@@ -3791,6 +4094,59 @@ static void DoUgcExportLtd() {
     LogOK("Exported .ltd: " + outPath + kExt[kind]);
 }
 static void TDoUgcExportLtd(int) { DoUgcExportLtd(); }
+// Export the selected texture as a PNG (the old Y-button action, now an
+// entry in the left/right action bar). No-op on the blank row.
+static void TDoUgcExportPic(int) {
+    if (gEntries.empty() || gUgcBlankRowSel) return;
+    if (gEntrySel < 0 || gEntrySel >= (int)gEntries.size()) return;
+    const auto& e = gEntries[gEntrySel];
+    LogINF("Exporting " + e.stem + "...");
+    RgbaImage img;
+    std::string err = TextureProcessor::DecodeFile(e.ugctexPath, img, true);
+    if (!err.empty()) { gOnSwitchMsg=err; gOnSwitchMsgCol=COL_RED; LogERR("Export failed: "+err); return; }
+    TextureProcessor::ConvertLinearToSrgb(img.pixels);
+    std::string outPath = gExportPath + "/" + e.stem + ".png";
+    SDL_Surface* surf = SDL_CreateRGBSurfaceWithFormatFrom(
+        img.pixels.data(), img.width, img.height, 32, img.width*4, SDL_PIXELFORMAT_RGBA32);
+    if (surf) {
+        IMG_SavePNG(surf, outPath.c_str());
+        SDL_FreeSurface(surf);
+        gOnSwitchMsg = "Exported to: " + outPath; gOnSwitchMsgCol = COL_GREEN;
+        LogOK("Exported to: " + outPath);
+    }
+}
+// Kick off u2net background removal on the selected texture (the old X-button
+// action). No-op on the blank row / when the model file is missing.
+static void TDoUgcRemoveBg(int) {
+    if (gEntries.empty() || gUgcBlankRowSel) return;
+    FILE* mf = fopen(kBgModelPath, "rb");
+    if (!mf) {
+        gOnSwitchMsg = "u2netp.bin missing from romfs (corrupt install?)";
+        gOnSwitchMsgCol = COL_RED;
+    } else {
+        fclose(mf);
+        gShowBgRemovePrompt = true;
+    }
+}
+static void TOpenUgcDeleteConfirm(int); // defined below; used by the action bar
+// Activate the currently-focused texture action-bar button (shared by the
+// controller A-press and touch taps). Indices match gUgcBtnSel:
+//   0 import  1 export pic  2 export .ltd  3 remove BG  4 delete  5 settings
+static void TUgcActivateBtn(int) {
+    if (gEntries.empty()) return;
+    switch (gUgcBtnSel) {
+        case 0: // import — open the PNG file browser
+            gBrowseForMii=false; gBrowseForExportDir=false;
+            BrowseRefresh(gBrowsePngPath); gShowFileBrowser=true; break;
+        case 1: TDoUgcExportPic(0); break;
+        case 2: TDoUgcExportLtd(0); break;
+        case 3: TDoUgcRemoveBg(0);  break;
+        case 4: TOpenUgcDeleteConfirm(0); break;
+        case 5: TSetMode((int)OnSwitchMode::TexSettings); break;
+    }
+}
+// Touch entry-point: focus the tapped button, then run it.
+static void TUgcBtnTap(int i) { gUgcBtnSel = i; TUgcActivateBtn(0); }
 static void TSetEncMode(int v) { gEncMode = (TextureProcessor::Bc1Encoder)v; SaveConfig(); }
 static void TSetBc1Mode(int v) { gBc1Mode = (TextureProcessor::Bc1Mode)v; SaveConfig(); }
 static void TSetFitMode(int v) { gFitMode = (TextureProcessor::FitMode)v; SaveConfig(); }
@@ -3804,6 +4160,179 @@ static void TSetMatte  (int v) {
     else if (v == 1) gMatte = TextureProcessor::Matte{255, 255, 255, 255}; // white
     else             gMatte = TextureProcessor::Matte{  0,   0,   0, 255}; // black
     SaveConfig();
+}
+
+// + Blank UGC handler. Kind is derived from the current category filter
+// (gUgcFilter / the kind picker) when set, otherwise defaults to MapObject
+// — the most common case for a "blank slot ready for a custom PNG" workflow.
+// On success the entry list is rebuilt so the new slot becomes immediately
+// selectable; the texture files themselves stay un-created until the user
+// drops a PNG into the slot via the regular Import flow.
+// kindArg semantics: 0..6 pins the kind directly (used by the
+// kind-picker "create blank" path); any other value falls back to the
+// current filter chip. We no longer silently default to MapObject when
+// nothing is chosen — callers that don't know a kind should route
+// through TPromptOrCreateBlankUgc so the user picks explicitly.
+static void TDoCreateBlankUgc(int kindArg) {
+    int kind = (kindArg >= 0 && kindArg < 7) ? kindArg
+             : ((gUgcKindFilter >= 0 && gUgcKindFilter < 7) ? gUgcKindFilter : 5);
+    int slot = MiiManager::FirstEmptyUgcSlot(kind);
+    if (slot < 0) {
+        gOnSwitchMsg = Lang::T("ugc.blank.full");
+        gOnSwitchMsgCol = COL_RED;
+        return;
+    }
+    LogINF("Creating blank UGC kind=" + std::to_string(kind) + " slot=" + std::to_string(slot));
+    std::string err = MiiManager::CreateBlankUgc(kind, slot);
+    if (!err.empty()) {
+        gOnSwitchMsg = err;
+        gOnSwitchMsgCol = COL_RED;
+        LogERR("Blank UGC failed: " + err);
+        return;
+    }
+    // Write a white 256² placeholder texture for the new slot. Without
+    // this the scanner can't see the slot (it only picks up entries that
+    // have .ugctex.zs on disk), so the user would see "created!" and
+    // nothing in the list. Mirrors 2.13.0's encodeWhiteUgc — feeds an
+    // all-255 RGBA buffer through the normal encode pipeline so the
+    // resulting .canvas.zs / .ugctex.zs / .thumb files are byte-shape
+    // identical to anything the user would import via the PNG flow.
+    {
+        static const char* kPfx[] = {"Food","Cloth","Goods","Interior","Exterior","MapObject","MapFloor"};
+        char stem[32];
+        snprintf(stem, sizeof(stem), "Ugc%s%03d", kPfx[kind], slot - 1);
+        RgbaImage white(256, 256);
+        std::fill(white.pixels.begin(), white.pixels.end(), (uint8_t)255);
+        TextureProcessor::ImportOptions opts;
+        opts.destStem    = std::string(SAVE_UGC_PATH) + "/" + stem;
+        opts.writeCanvas = true;
+        opts.writeThumb  = true;
+        opts.noSrgb      = false;
+        opts.canvasShape = gCanvasShape;
+        std::string werr = TextureProcessor::ImportRgbaImage(white, opts);
+        if (!werr.empty()) {
+            gOnSwitchMsg = werr;
+            gOnSwitchMsgCol = COL_RED;
+            LogERR("Blank UGC placeholder write failed: " + werr);
+            return;
+        }
+    }
+    // Rebuild the entry list so the new slot is visible in the grid.
+    gEntries = UgcScanner::Scan(SAVE_UGC_PATH);
+    RebuildUgcFilter();
+    // Jump selection to the brand-new slot so the user can immediately
+    // see what they just made and isn't left guessing where it landed.
+    {
+        static const char* kPfx[] = {"Food","Cloth","Goods","Interior","Exterior","MapObject","MapFloor"};
+        char wantStem[32];
+        snprintf(wantStem, sizeof(wantStem), "Ugc%s%03d", kPfx[kind], slot - 1);
+        for (int i = 0; i < (int)gEntries.size(); i++) {
+            if (gEntries[i].stem == wantStem) {
+                gEntrySel = i;
+                gUgcBlankRowSel = false;
+                // Jump the scroll so the new entry is visible near the
+                // top of the list. Previously we only set gEntrySel and
+                // relied on the list-render clamp to correct scroll on
+                // the next pass — but if the new entry lived below the
+                // current viewport the user just saw the same untouched
+                // window and thought nothing happened (issue: kept
+                // spamming the button). Landing it near the top makes
+                // "yep, that's my new slot" obvious. UgcFilterPos maps
+                // the real index to its filtered position; -5 gives a
+                // few rows of context above.
+                int filtPos = UgcFilterPos(gEntrySel);
+                if (filtPos >= 0) gEntryScroll = std::max(0, filtPos - 5);
+                LoadPreview(gEntries[gEntrySel]);
+                break;
+            }
+        }
+    }
+    gOnSwitchMsg = Lang::T("ugc.blank.ok");
+    gOnSwitchMsgCol = COL_GREEN;
+    LogOK("Blank UGC created");
+}
+
+// Delete-UGC handlers. Two-step confirm mirrors the Delete-Mii flow:
+// arming opens the modal (which shows the stem + name so the user can
+// double-check), and only the modal's confirm pill actually runs the
+// wipe. Cancel path leaves the entry list untouched.
+static void TOpenUgcDeleteConfirm(int) {
+    if (gEntries.empty() || gEntrySel < 0
+        || gEntrySel >= (int)gEntries.size()) return;
+    gUgcDeleteConfirmStem = gEntries[gEntrySel].stem;
+    std::string nm = MiiManager::GetUgcName(gUgcDeleteConfirmStem);
+    gUgcDeleteConfirmName = nm.empty() ? gUgcDeleteConfirmStem : nm;
+    gUgcDeleteConfirmOpen = true;
+}
+static void TCancelUgcDelete(int) {
+    gUgcDeleteConfirmOpen = false;
+    gUgcDeleteConfirmStem.clear();
+    gUgcDeleteConfirmName.clear();
+}
+static void TConfirmUgcDelete(int) {
+    if (!gUgcDeleteConfirmOpen) return;
+    std::string stem = gUgcDeleteConfirmStem;
+    gUgcDeleteConfirmOpen = false;
+    gUgcDeleteConfirmStem.clear();
+    gUgcDeleteConfirmName.clear();
+    // Parse the stem back into (kind, slot) — same table the create
+    // flow uses. Guard against a corrupted stem in case the confirmed
+    // slot went stale between arm and confirm.
+    static const char* kPfx[] = {"Food","Cloth","Goods","Interior","Exterior","MapObject","MapFloor"};
+    int kind = -1, slot0 = 0;
+    if (stem.size() > 3 && stem.substr(0,3) == "Ugc") {
+        std::string rest = stem.substr(3);
+        for (int k = 0; k < 7; k++) {
+            size_t pl = strlen(kPfx[k]);
+            if (rest.size() > pl && rest.substr(0,pl) == kPfx[k]) {
+                kind = k; slot0 = atoi(rest.substr(pl).c_str()); break;
+            }
+        }
+    }
+    if (kind < 0) {
+        gOnSwitchMsg = "Delete UGC: unrecognised stem " + stem;
+        gOnSwitchMsgCol = COL_RED;
+        return;
+    }
+    LogINF("Deleting UGC " + stem);
+    std::string err = MiiManager::DeleteUgc(kind, slot0 + 1);
+    if (!err.empty()) {
+        gOnSwitchMsg = err;
+        gOnSwitchMsgCol = COL_RED;
+        LogERR("Delete UGC failed: " + err);
+        return;
+    }
+    // Rebuild list + preview so the deleted slot drops out and the
+    // cursor lands somewhere sensible (previous entry, or blank row
+    // if the list is now empty).
+    gEntries = UgcScanner::Scan(SAVE_UGC_PATH);
+    RebuildUgcFilter();
+    if (gEntries.empty()) {
+        gEntrySel = 0;
+        gUgcBlankRowSel = true;
+    } else if (gEntrySel >= (int)gEntries.size()) {
+        gEntrySel = (int)gEntries.size() - 1;
+    }
+    if (!gEntries.empty()) LoadPreview(gEntries[gEntrySel]);
+    else                    FreePreview();
+    gOnSwitchMsg = Lang::T("ugc.delete.ok");
+    gOnSwitchMsgCol = COL_GREEN;
+    LogOK("UGC deleted: " + stem);
+}
+
+// Prompt-then-create wrapper for the "+ blank UGC" affordance. Always
+// opens the kind picker in "create" mode so the user's next tap picks
+// the kind explicitly — even when the filter chip is already targeting
+// a specific category. Users kept hitting the button with the filter
+// on MapObject / All and quickly stacking up items they didn't want;
+// making the picker mandatory is one extra tap in the common case but
+// zero mis-created slots.
+static void TPromptOrCreateBlankUgc(int) {
+    gShowUgcKindPicker    = true;
+    gUgcKindPickerForBlank = true;
+    // In create mode the picker skips the "All" tile, so index 0 is
+    // the first kind (Food) rather than "All". Seed the cursor there.
+    gUgcKindPickerSel     = 0;
 }
 
 static void DoUgcImportLtd(const std::string& ltdPath) {
@@ -4276,46 +4805,20 @@ static std::string MapGroupName(int g){
     return Lang::T(keys[(g < 0 || g > 6) ? 6 : g]);
 }
 
-// ── Small line-drawn icons for the Map toolbar ────────────────────────────────
+// ── Map toolbar icons — UiIcons wrappers (legacy size params preserved) ──────
+// Magnifier: `r` was the lens radius; the 24-grid design uses a 6.8u lens,
+// so total size = r*24/6.8 keeps the lens the same on screen.
 static void DrawMagnifierIcon(int cx, int cy, int r, SDL_Color col){
-    DrawCircle(cx, cy, r, col);
-    DrawCircle(cx, cy, r - 1, col);
-    SDL_SetRenderDrawColor(gRen, col.r, col.g, col.b, 255);
-    int hx = cx + (int)(r * 0.7f), hy = cy + (int)(r * 0.7f);
-    SDL_RenderDrawLine(gRen, hx,   hy,   hx + 4, hy + 4);
-    SDL_RenderDrawLine(gRen, hx,   hy+1, hx + 4, hy + 5);
+    UiIcons::Draw(UiIcons::Id::Magnifier, cx, cy, r * 24 / 7, col);
 }
-// Curved undo / redo arrow (arc over the top + an arrowhead at the open end).
+// Curved undo / redo arrow. `r` was the arc radius (design arc = 5.5u).
 static void DrawUndoRedoIcon(int cx, int cy, int r, bool redo, SDL_Color col){
-    SDL_SetRenderDrawColor(gRen, col.r, col.g, col.b, 255);
-    const int N = 16;
-    int px[N+1], py[N+1];
-    for (int i = 0; i <= N; i++){
-        float ang = (float)M_PI * (0.10f + 0.95f * i / N);   // ~18°..189° arc over the top
-        int fx = cx + (int)(r * cosf(ang));
-        int fy = cy - (int)(r * sinf(ang));
-        if (redo) fx = 2*cx - fx;
-        px[i] = fx; py[i] = fy;
-    }
-    for (int i = 0; i < N; i++){
-        SDL_RenderDrawLine(gRen, px[i], py[i],   px[i+1], py[i+1]);
-        SDL_RenderDrawLine(gRen, px[i], py[i]+1, px[i+1], py[i+1]+1);
-    }
-    int ex = px[0], ey = py[0], d = redo ? -1 : 1;
-    SDL_RenderDrawLine(gRen, ex, ey, ex + d*6, ey + 2);
-    SDL_RenderDrawLine(gRen, ex, ey, ex - d*1, ey - 6);
+    UiIcons::Draw(redo ? UiIcons::Id::Redo : UiIcons::Id::Undo,
+                  cx, cy, r * 11 / 4, col);
 }
-// Download glyph (down arrow into a tray) for the PNG export button.
+// Download glyph (arrow into a tray) for the PNG export button.
 static void DrawDownloadIcon(int cx, int cy, int s, SDL_Color col){
-    SDL_SetRenderDrawColor(gRen, col.r, col.g, col.b, 255);
-    for (int t = -1; t <= 1; t++)
-        SDL_RenderDrawLine(gRen, cx + t, cy - s, cx + t, cy + s - 3);
-    for (int t = 0; t < 2; t++){
-        SDL_RenderDrawLine(gRen, cx, cy + s - 2 + t, cx - s/2 - 1, cy + s/2 - 2 + t);
-        SDL_RenderDrawLine(gRen, cx, cy + s - 2 + t, cx + s/2 + 1, cy + s/2 - 2 + t);
-    }
-    for (int t = 0; t < 2; t++)
-        SDL_RenderDrawLine(gRen, cx - s, cy + s + 2 + t, cx + s, cy + s + 2 + t);
+    UiIcons::Draw(UiIcons::Id::Download, cx, cy, s * 10 / 3, col);
 }
 
 static void DrawSettings() {
@@ -4568,7 +5071,10 @@ static void DrawUserPick() {
         gBundleMsgFrames--;
     }
 
-    DrawFooter(Lang::T("userpick.footer"));
+    // This screen supports the R-stick virtual cursor, so surface it in the
+    // footer — and flip the hint to the "click" action once it's active.
+    DrawFooter(Lang::T("userpick.footer") + "    "
+               + Lang::T(gVCursorOn ? "cursor.hint.on" : "cursor.hint.off"));
     Present();
 }
 
@@ -4623,6 +5129,26 @@ static void DrawBackupPrompt() {
     std::string tip = sub(sub(Lang::T("backup.tip"), "{cur}", cur), "{max}", mx);
     DrawTextC(tip, SCREEN_W/2, cy+ch+18, COL_DIM, Font::Sm);
 
+    // Floppy hint — same row that DrawBackingUp shows during the progress
+    // screen, mirrored here on the confirmation prompt so the user knows
+    // where the backup will land BEFORE they accept it (not just after it
+    // finishes). Uses the same string key so the two screens read the
+    // same to the user across the backup flow.
+    {
+        const int floppyS = 28;
+        TTF_Font* fsm = GetFont(Font::Sm);
+        std::string hint = Lang::T("backup.progress.hint");
+        int hw = 0, hh = 0;
+        if (fsm) TTF_SizeUTF8(fsm, hint.c_str(), &hw, &hh);
+        const int gap = 10;
+        int rowW = floppyS + gap + hw;
+        int rowX = SCREEN_W/2 - rowW/2;
+        int rowY = cy + ch + 56;
+        DrawFloppyIcon(rowX + floppyS/2, rowY + floppyS/2, floppyS - 4, COL_GOLD);
+        DrawText(hint, rowX + floppyS + gap, rowY + (floppyS - hh) / 2,
+                 COL_DIM, Font::Sm);
+    }
+
     Present();
 }
 
@@ -4639,6 +5165,27 @@ static void DrawBackingUp() {
     char pct[16]; snprintf(pct,sizeof(pct),"%d%%",(int)(prog*100));
     DrawTextC(pct, SCREEN_W/2, by+bh+18, COL_DIM);
     DrawTextC(Lang::T("backup.progress.warn"), SCREEN_W/2, by+bh+42, COL_DIM);
+
+    // "Where will this backup live?" hint: a tiny floppy icon followed by a
+    // sentence that points at the per-user floppy button on the User Pick
+    // screen. People kept asking "how do I find this later" right after the
+    // backup finished — this shows them the answer while the bar is still
+    // running.
+    {
+        const int floppyS = 28;
+        TTF_Font* fsm = GetFont(Font::Sm);
+        std::string hint = Lang::T("backup.progress.hint");
+        int hw = 0, hh = 0;
+        if (fsm) TTF_SizeUTF8(fsm, hint.c_str(), &hw, &hh);
+        const int gap = 10;
+        int rowW = floppyS + gap + hw;
+        int rowX = SCREEN_W/2 - rowW/2;
+        int rowY = by + bh + 90;
+        DrawFloppyIcon(rowX + floppyS/2, rowY + floppyS/2, floppyS - 4, COL_GOLD);
+        DrawText(hint, rowX + floppyS + gap, rowY + (floppyS - hh) / 2,
+                 COL_DIM, Font::Sm);
+    }
+
     Present();
 }
 
@@ -4657,12 +5204,22 @@ static const int PREVIEW_X=400, PREVIEW_Y=LIST_Y, PREVIEW_W=868, PREVIEW_H=LIST_
 static const int UGC_SEARCH_H   = 30;
 static const int UGC_SEARCH_GAP = 10;
 static const int UGC_LIST_TOP_Y = LIST_Y + UGC_SEARCH_H + UGC_SEARCH_GAP + 4;
-static const int VISIBLE = (LIST_H - UGC_SEARCH_H - UGC_SEARCH_GAP - 4) / ITEM_H;
+// Rows-visible count used by the UGC list navigation. Must stay in
+// sync with the LIST_VISIBLE recomputation in DrawOnSwitch — the
+// render side subtracts the pinned "+ blank UGC" row's height + gap
+// from the panel before dividing, so we do the same here. Off-by-one
+// with the render side would leave the last entry clipped (half-
+// visible at the bottom of the panel) when the user scrolls to the
+// end of the list, since the nav math would let gEntryScroll go one
+// row too high.
+static const int VISIBLE = (LIST_H - UGC_SEARCH_H - UGC_SEARCH_GAP - 4
+                            - ((ITEM_H + 4) + 3)) / ITEM_H;
 
 // Implementations deferred to here because they reference VISIBLE and LoadPreview
 static void TSelUgc(int idx) {
     if (idx>=0 && idx<(int)gEntries.size()) {
         gEntrySel=idx;
+        gUgcBlankRowSel = false;  // any real-entry tap leaves the pinned row
         // Scroll position is in filtered space; keep selected entry visible
         int p = UgcFilterPos(gEntrySel);
         if (p >= 0) {
@@ -4671,6 +5228,15 @@ static void TSelUgc(int idx) {
         }
         LoadPreview(gEntries[gEntrySel]);
     }
+}
+
+// Touch handler for the pinned "+ blank UGC" row. First tap selects it
+// (so the user can see what they're about to do); a second tap with the
+// row already selected fires the create action. Matches the regular
+// list rows: tap-to-select, A (or second tap) commits.
+static void TSelUgcBlankRow(int) {
+    if (gUgcBlankRowSel) { TPromptOrCreateBlankUgc(0); return; }
+    gUgcBlankRowSel = true;
 }
 
 static void TUgcOpenSearch(int) {
@@ -4716,9 +5282,18 @@ static void TUgcOpenKindPicker(int) {
 }
 
 // Tile tap in the category picker. `idx` is 0 for "All", or 1..N for a kind
-// (offset by +1 so 0 stays reserved for "All").
+// (offset by +1 so 0 stays reserved for "All"). When the picker was
+// opened by the "+ blank UGC" affordance, tapping a real kind hands off
+// to TDoCreateBlankUgc instead of applying a filter — tapping "All"
+// (idx 0) cancels the blank flow since we can't create "all kinds".
 static void TUgcPickKind(int idx) {
     gUgcKindPickerSel = idx;
+    if (gUgcKindPickerForBlank) {
+        gUgcKindPickerForBlank = false;
+        gShowUgcKindPicker     = false;
+        if (idx > 0) TDoCreateBlankUgc(idx - 1);  // 0 = "All" → cancel
+        return;
+    }
     TUgcApplyKind(idx == 0 ? -1 : (idx - 1));
     gShowUgcKindPicker = false;
 }
@@ -4727,7 +5302,8 @@ static void TUgcPickKind(int idx) {
 // the active filter — mirrors how the back-prompt and save-warning modals
 // behave for off-target taps.
 static void TUgcCloseKindPicker(int) {
-    gShowUgcKindPicker = false;
+    gShowUgcKindPicker    = false;
+    gUgcKindPickerForBlank = false;  // cancel any pending blank flow too
 }
 
 
@@ -5288,15 +5864,13 @@ static void DrawOnSwitch() {
             FillRect(chipX, chipY, chipW, SEARCH_H, COL_BG);
             DrawRect(chipX, chipY, chipW, SEARCH_H,
                      kindActive ? COL_ACCENT : COL_BORDER);
-            // Funnel icon — small inverted trapezoid.
-            int icSize = 12;
+            // Funnel icon — anti-aliased glyph from the shared icon set.
+            int icSize = 15;
             int icX = chipX + 8;
             int icY = chipY + (SEARCH_H - icSize) / 2;
             SDL_Color icCol = kindActive ? COL_ACCENT : COL_DIM;
-            FillRect(icX,         icY,       icSize,     2, icCol);  // top bar
-            FillRect(icX + 2,     icY + 3,   icSize - 4, 2, icCol);  // mid bar
-            FillRect(icX + 4,     icY + 6,   icSize - 8, 2, icCol);  // stem
-            FillRect(icX + icSize/2 - 1, icY + 8, 2, icSize - 8, icCol);
+            UiIcons::Draw(UiIcons::Id::Funnel,
+                          icX + icSize/2, icY + icSize/2, icSize, icCol);
             // Label.
             std::string lbl = (gUgcKindFilter < 0)
                 ? Lang::T("ugc.kind.all")
@@ -5325,9 +5899,69 @@ static void DrawOnSwitch() {
         FillRect(LIST_X-4, listPanelY, LIST_W+8, listPanelH+4, COL_PANEL);
         DrawRect(LIST_X-4, listPanelY, LIST_W+8, listPanelH+4, COL_BORDER);
 
-        const int LIST_TOP_Y = listPanelY + 4;
-        const int LIST_VIS_H = listPanelH - 4;
+        // Pinned "+ blank UGC" row at the very top of the list panel.
+        // Tapping it lands a new blank item in the kind chosen by the filter
+        // chip — gives users an in-list affordance to create a UGC instead
+        // of hunting for a button in the preview area (per user feedback:
+        // having it live in the list reads more coherently with the rest
+        // of the texture tab's left-hand navigation).
+        const int BLANK_ROW_H  = ITEM_H + 4;
+        const int BLANK_ROW_Y  = listPanelY + 4;
+        {
+            static const SDL_Color C_UGC_BLANK_ROW = {120, 200, 130, 255};
+            // Touch hit area uses TSelUgcBlankRow so a tap focuses the
+            // pinned row first (matching how tapping a regular entry just
+            // selects it). A second A press fires the create action via
+            // the controller path below — same pattern as regular entries.
+            HitAdd(LIST_X, BLANK_ROW_Y, LIST_W, BLANK_ROW_H - 1,
+                   TSelUgcBlankRow, 0);
+            FillRect(LIST_X, BLANK_ROW_Y, LIST_W, BLANK_ROW_H - 1,
+                     gUgcBlankRowSel ? COL_SEL : COL_BG);
+            DrawRect(LIST_X, BLANK_ROW_Y, LIST_W, BLANK_ROW_H - 1,
+                     C_UGC_BLANK_ROW);
+            if (gUgcBlankRowSel && gTheme.cornerRadius == 0) {
+                DrawRectSquare(LIST_X, BLANK_ROW_Y,
+                               LIST_W, BLANK_ROW_H - 1, COL_GOLD);
+            }
+            DrawTextC(Lang::T("ugc.blank.btn"),
+                      LIST_X + LIST_W / 2,
+                      BLANK_ROW_Y + (BLANK_ROW_H - 1) / 2,
+                      C_UGC_BLANK_ROW, Font::Sm);
+            // Thin divider so the pinned row reads as a separate
+            // affordance from the scrollable entry list below it.
+            // Drawn BEFORE the animated highlight so the highlight ring
+            // paints over the divider during an Up transition from an
+            // entry to the blank row — otherwise the divider clipped
+            // the ring's bottom edge and it looked "stuck" mid-move.
+            SDL_SetRenderDrawColor(gRen,
+                                   COL_BORDER.r, COL_BORDER.g, COL_BORDER.b,
+                                   140);
+            SDL_RenderDrawLine(gRen,
+                               LIST_X, BLANK_ROW_Y + BLANK_ROW_H,
+                               LIST_X + LIST_W, BLANK_ROW_Y + BLANK_ROW_H);
+            // Animation Request only — the actual Draw is deferred to
+            // AFTER the entry list renders below. Same shared slot as the
+            // entry list means the two animate through one state; but
+            // drawing here would put the ring UNDERNEATH the entry-list
+            // rendering that follows, so during an Up transition (blank
+            // gaining focus, ring interpolating up FROM the entry area
+            // TO the blank row) the entry list paints over the ring's
+            // intermediate positions and the ring looks like it just
+            // "appears" once it reaches the top. Deferring the draw
+            // lets the ring paint over everything.
+            if (gUgcBlankRowSel) {
+                RequestHighlight((int)Screen::OnSwitch, /*sub=ugc list*/1,
+                                 LIST_X, BLANK_ROW_Y,
+                                 LIST_W, BLANK_ROW_H - 1, gDtSec);
+            }
+        }
+        const int LIST_TOP_Y = BLANK_ROW_Y + BLANK_ROW_H + 3;
+        const int LIST_VIS_H = listPanelH - 4 - (BLANK_ROW_H + 3);
         const int LIST_VISIBLE = LIST_VIS_H / ITEM_H;
+        // Rows rarely divide the list height evenly (~13 px left over at 720p);
+        // split the remainder top/bottom so the column reads as centered instead
+        // of a gap under the last row (matches the Mii tab left list).
+        const int LIST_ROWS_TOP = LIST_TOP_Y + (LIST_VIS_H - LIST_VISIBLE * ITEM_H) / 2;
         int totalFiltered = (int)gFilteredEntries.size();
 
         if (gEntryScroll < 0) gEntryScroll = 0;
@@ -5349,17 +5983,28 @@ static void DrawOnSwitch() {
         int firstRow = (int)floorf(gUgcSmoothTop);
         int fracPx   = (int)((gUgcSmoothTop - firstRow) * ITEM_H);
 
-        SDL_Rect ugcClip{ LIST_X - 4, listPanelY, LIST_W + 8, listPanelH + 4 };
+        // Clip starts at LIST_TOP_Y (not listPanelY) so the partial top row
+        // of the scrollable list can't bleed up across the divider into the
+        // pinned "+ blank UGC" row above it.
+        SDL_Rect ugcClip{ LIST_X - 4, LIST_ROWS_TOP, LIST_W + 8,
+                          LIST_VISIBLE * ITEM_H };
         SDL_RenderSetClipRect(gRen, &ugcClip);
 
-        int selRowY = LIST_TOP_Y;
+        int selRowY = LIST_ROWS_TOP;
         bool sawSel = false;
         for (int i = -1; i <= LIST_VISIBLE; i++) {
             int filtPos = firstRow + i;
             if (filtPos < 0 || filtPos >= totalFiltered) continue;
             int realIdx = gFilteredEntries[filtPos];
-            bool sel = (realIdx == gEntrySel);
-            int ry = LIST_TOP_Y + i*ITEM_H - fracPx;
+            // While the pinned "+ blank UGC" row owns the selection, no
+            // entry row is considered selected — otherwise the previously-
+            // focused entry keeps its highlight AND its RequestHighlight
+            // call, which competes with the blank row's own animation
+            // request on the same slot. That was the "outline animates
+            // and stops halfway" glitch: both rows were pulling the ring
+            // toward their own position, so it landed between the two.
+            bool sel = (realIdx == gEntrySel) && !gUgcBlankRowSel;
+            int ry = LIST_ROWS_TOP + i*ITEM_H - fracPx;
             if (sel) { selRowY = ry; sawSel = true; }
             int rcy = ry + ITEM_H/2;
             if (rcy >= listPanelY && rcy <= listPanelY + listPanelH)
@@ -5378,6 +6023,12 @@ static void DrawOnSwitch() {
             RequestHighlight((int)Screen::OnSwitch, /*sub=ugc list*/1,
                              LIST_X, selRowY, LIST_W, ITEM_H-1, gDtSec);
             DrawAnimatedHighlight();
+        } else if (gUgcBlankRowSel) {
+            // The blank row already fired RequestHighlight above; draw
+            // the ring here (after the entry list rendering) so the
+            // transitioning ring paints OVER the entry list instead of
+            // being covered by it.
+            DrawAnimatedHighlight();
         }
 
         if (totalFiltered == 0 && !gEntries.empty()) {
@@ -5391,50 +6042,55 @@ static void DrawOnSwitch() {
         }
         FillRect(PREVIEW_X,PREVIEW_Y,PREVIEW_W,PREVIEW_H,COL_BG);
         DrawRect(PREVIEW_X,PREVIEW_Y,PREVIEW_W,PREVIEW_H,COL_BORDER);
+        // The "+ blank UGC" row is a create action, not a selection — so the
+        // preview panel shows nothing but a hint (no stale texture / name /
+        // action buttons for a slot we're not actually looking at).
+        if (gUgcBlankRowSel) {
+            DrawTextC(Lang::T("ugc.blank.hint"),
+                      PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+PREVIEW_H/2, COL_DIM, Font::Md);
+        }
         // Header strip: show export/import message if active, else the user-
         // facing UGC name in a pill that adapts to the text width, plus a
         // small pencil button on its right that opens the on-screen keyboard
         // to rename the selected slot.
         if (!gOnSwitchMsg.empty()) {
             DrawTextC(gOnSwitchMsg, PREVIEW_X+PREVIEW_W/2, PREVIEW_Y+14, gOnSwitchMsgCol);
-        } else if (!gPreviewStem.empty()) {
+        } else if (!gPreviewStem.empty() && !gUgcBlankRowSel) {
             std::string shown = MiiManager::GetUgcName(gPreviewStem);
             if (shown.empty()) shown = gPreviewStem;
             TTF_Font* fmd = GetFont(Font::Md);
-            int tw = 0, th = 0;
-            if (fmd) TTF_SizeUTF8(fmd, shown.c_str(), &tw, &th);
-            const int PILL_PAD = 12;
-            const int ICON_BOX = 22;
-            const int ICON_GAP = 8;
-            const int PILL_H   = 24;
-            int maxPillW = PREVIEW_W - 24;
-            int pillW    = std::min(maxPillW, tw + PILL_PAD*2 + ICON_GAP + ICON_BOX);
-            int pillX    = PREVIEW_X + (PREVIEW_W - pillW) / 2;
-            int pillY    = PREVIEW_Y + 14 - PILL_H/2;
-            FillRect(pillX, pillY, pillW, PILL_H, COL_PANEL);
-            DrawRect(pillX, pillY, pillW, PILL_H, COL_BORDER);
-            // Text — left-aligned inside the pill, ellipsised if it overflows.
-            int textBudget = pillW - PILL_PAD - ICON_GAP - ICON_BOX - 6;
+            const int ICON_BOX = 22;      // small square edit button (like the backup floppy)
+            const int GAP      = 8;
+            const int cy       = PREVIEW_Y + 14;
+            // The name is plain text (no box); only the pencil sits in a squared
+            // frame. Ellipsise the name if needed, then centre the name + edit
+            // button together as one unit.
+            int maxTextW = PREVIEW_W - 24 - ICON_BOX - GAP;
             std::string disp = shown;
-            if (fmd && tw > textBudget) {
-                while (disp.size() > 4) {
+            int tw = 0, th = 0;
+            if (fmd) TTF_SizeUTF8(fmd, disp.c_str(), &tw, &th);
+            if (fmd && tw > maxTextW) {
+                while (disp.size() > 1) {
                     disp.pop_back();
                     int w2 = 0, h2 = 0;
                     TTF_SizeUTF8(fmd, (disp + "…").c_str(), &w2, &h2);
-                    if (w2 <= textBudget) { disp += "…"; break; }
+                    if (w2 <= maxTextW) { disp += "…"; tw = w2; break; }
                 }
             }
-            DrawText(disp, pillX + PILL_PAD, pillY + (PILL_H - th) / 2, COL_TEXT, Font::Md);
-            // Pencil glyph at the right side of the pill — no box / border,
-            // just the icon so it reads as "tap to edit the name" and not as
-            // a separate UI element.
-            int iconX = pillX + pillW - ICON_BOX - 4;
-            int iconY = pillY + (PILL_H - ICON_BOX) / 2;
-            DrawPencilIcon(iconX + ICON_BOX/2, iconY + ICON_BOX/2,
-                           ICON_BOX - 2, COL_GOLD);
-            HitAdd(iconX - 4, pillY, ICON_BOX + 8, PILL_H, TUgcRenameTap, 0);
+            int totalW = tw + GAP + ICON_BOX;
+            int startX = PREVIEW_X + (PREVIEW_W - totalW) / 2;
+            // Name — plain text, no box behind it.
+            DrawText(disp, startX, cy - th/2, COL_TEXT, Font::Md);
+            // Edit button — pencil in a small square frame (panel fill + border,
+            // icon centred), matching the per-user backup floppy button.
+            int boxX = startX + tw + GAP;
+            int boxY = cy - ICON_BOX/2;
+            FillRect(boxX, boxY, ICON_BOX, ICON_BOX, COL_PANEL);
+            DrawRect(boxX, boxY, ICON_BOX, ICON_BOX, COL_BORDER);
+            DrawPencilIcon(boxX + ICON_BOX/2, boxY + ICON_BOX/2, ICON_BOX - 6, COL_GOLD);
+            HitAdd(boxX - 4, boxY - 4, ICON_BOX + 8, ICON_BOX + 8, TUgcRenameTap, 0);
         }
-        {
+        if (!gUgcBlankRowSel) {
             // Reserve space at the bottom for the import/export buttons
             const int kBtnH=46, kBtnGap=8, kBtnSlot=kBtnH+kBtnGap+4; // 58px total
             int imgY = PREVIEW_Y + 28;
@@ -5451,37 +6107,89 @@ static void DrawOnSwitch() {
             } else {
                 DrawTextC(Lang::T("ugc.no.preview"), PREVIEW_X+PREVIEW_W/2, imgY+imgH/2, COL_BORDER);
             }
+            // (The empty-state Blank-UGC fallback that used to live here
+            // moved into the left-side list as a pinned "+ blank UGC" row
+            // at the top — coherent with the rest of the texture tab's
+            // left-hand navigation. See the list-render block above.)
             if (!gEntries.empty()) {
                 int cx   = PREVIEW_X + PREVIEW_W/2;
                 int btnY = imgY + imgH + kBtnGap;
-                const int btnW=148, btnGap=10, bgSep=28, gearW=kBtnH;
-                int totalW = 3*btnW + 2*btnGap + bgSep + btnW + btnGap + gearW;
+                const int btnW=140, btnGap=10, bgSep=24, gearW=kBtnH;
+                // Action bar — one left/right focus cycle (gUgcBtnSel):
+                //   [import] [export pic] [export .ltd]  [remove BG] [delete] [gear]
+                // Left/Right glides the focus outline; A runs the focused
+                // button. A touch tap focuses + runs a button directly. No
+                // more per-button controller letters (A/Y/X) — matches the
+                // Mii-stats action row.
+                int totalW = 3*btnW + 2*btnGap + bgSep + btnW + btnGap + btnW + btnGap + gearW;
                 int bx0   = cx - totalW/2;
-                int bxLtd = bx0 + 2*(btnW+btnGap);
-                int bxBg  = bxLtd + btnW + btnGap + bgSep;
-                int bxGear = bxBg + btnW + btnGap;
-                // A: import
-                FillRect(bx0,             btnY, btnW, kBtnH, COL_PANEL);
-                DrawRect(bx0,             btnY, btnW, kBtnH, COL_ACCENT);
-                DrawTextC("A  " + Lang::T("ugc.import"), bx0+btnW/2, btnY+kBtnH/2, COL_ACCENT, Font::Md);
-                // Y: export PNG
-                FillRect(bx0+btnW+btnGap, btnY, btnW, kBtnH, COL_PANEL);
-                DrawRect(bx0+btnW+btnGap, btnY, btnW, kBtnH, COL_GOLD);
-                DrawTextC("Y  " + Lang::T("ugc.exportpic"), bx0+btnW+btnGap+btnW/2, btnY+kBtnH/2, COL_GOLD, Font::Md);
-                // export .ltd (touch)
-                FillRect(bxLtd,           btnY, btnW, kBtnH, COL_PANEL);
-                DrawRect(bxLtd,           btnY, btnW, kBtnH, COL_GOLD);
+                int bxImp  = bx0;
+                int bxPic  = bx0 + btnW + btnGap;
+                int bxLtd  = bx0 + 2*(btnW+btnGap);
+                int bxBg   = bxLtd + btnW + btnGap + bgSep;
+                int bxDel  = bxBg + btnW + btnGap;
+                int bxGear = bxDel + btnW + btnGap;
+                static const SDL_Color C_UGC_BG  = {90,140,200,255};
+                static const SDL_Color C_UGC_DEL = {220, 90, 90, 255};
+                // Remember the focused button's rect for the animated outline.
+                int  focX = bx0, focW = btnW; bool sawFoc = false;
+                auto mark = [&](int idx, int x, int w){
+                    if (gUgcBtnSel == idx) { focX = x; focW = w; sawFoc = true; }
+                };
+                // 0: import
+                mark(0, bxImp, btnW);
+                FillRect(bxImp, btnY, btnW, kBtnH, gUgcBtnSel==0?COL_SEL:COL_PANEL);
+                DrawRect(bxImp, btnY, btnW, kBtnH, COL_ACCENT);
+                DrawTextC(Lang::T("ugc.import"), bxImp+btnW/2, btnY+kBtnH/2, COL_ACCENT, Font::Md);
+                HitAdd(bxImp, btnY, btnW, kBtnH, TUgcBtnTap, 0);
+                // 1: export pic
+                mark(1, bxPic, btnW);
+                FillRect(bxPic, btnY, btnW, kBtnH, gUgcBtnSel==1?COL_SEL:COL_PANEL);
+                DrawRect(bxPic, btnY, btnW, kBtnH, COL_GOLD);
+                DrawTextC(Lang::T("ugc.exportpic"), bxPic+btnW/2, btnY+kBtnH/2, COL_GOLD, Font::Md);
+                HitAdd(bxPic, btnY, btnW, kBtnH, TUgcBtnTap, 1);
+                // 2: export .ltd
+                mark(2, bxLtd, btnW);
+                FillRect(bxLtd, btnY, btnW, kBtnH, gUgcBtnSel==2?COL_SEL:COL_PANEL);
+                DrawRect(bxLtd, btnY, btnW, kBtnH, COL_GOLD);
                 DrawTextC(Lang::T("ugc.exportltd"), bxLtd+btnW/2, btnY+kBtnH/2, COL_GOLD, Font::Md);
-                HitAdd(bxLtd, btnY, btnW, kBtnH, TDoUgcExportLtd, 0);
-                // X: remove BG (separated by gap)
-                FillRect(bxBg,            btnY, btnW, kBtnH, COL_SEL);
-                DrawRect(bxBg,            btnY, btnW, kBtnH, {90,140,200,255});
-                DrawTextC("X  " + Lang::T("ugc.removebg"), bxBg+btnW/2, btnY+kBtnH/2, {90,140,200,255}, Font::Md);
-                // Gear: open encoding settings tab (touch only, small square)
-                FillRect(bxGear, btnY, gearW, kBtnH, COL_PANEL);
+                HitAdd(bxLtd, btnY, btnW, kBtnH, TUgcBtnTap, 2);
+                // 3: remove BG (u2net background removal)
+                mark(3, bxBg, btnW);
+                FillRect(bxBg, btnY, btnW, kBtnH, gUgcBtnSel==3?COL_SEL:COL_PANEL);
+                DrawRect(bxBg, btnY, btnW, kBtnH, C_UGC_BG);
+                DrawTextC(Lang::T("ugc.removebg"), bxBg+btnW/2, btnY+kBtnH/2, C_UGC_BG, Font::Md);
+                HitAdd(bxBg, btnY, btnW, kBtnH, TUgcBtnTap, 3);
+                // 4: delete (arms the confirm modal — never wipes directly)
+                mark(4, bxDel, btnW);
+                FillRect(bxDel, btnY, btnW, kBtnH, gUgcBtnSel==4?COL_SEL:COL_PANEL);
+                DrawRect(bxDel, btnY, btnW, kBtnH, C_UGC_DEL);
+                DrawTextC(Lang::T("ugc.delete.btn"), bxDel+btnW/2, btnY+kBtnH/2, C_UGC_DEL, Font::Md);
+                HitAdd(bxDel, btnY, btnW, kBtnH, TUgcBtnTap, 4);
+                // 5: gear / encoding settings (icon square)
+                mark(5, bxGear, gearW);
+                FillRect(bxGear, btnY, gearW, kBtnH, gUgcBtnSel==5?COL_SEL:COL_PANEL);
                 DrawRect(bxGear, btnY, gearW, kBtnH, COL_BORDER);
-                DrawGearIcon(bxGear + gearW/2, btnY + kBtnH/2, kBtnH * 30 / 100, COL_DIM);
-                HitAdd(bxGear, btnY, gearW, kBtnH, TSetMode, (int)OnSwitchMode::TexSettings);
+                DrawGearIcon(bxGear + gearW/2, btnY + kBtnH/2, kBtnH * 30 / 100,
+                             gUgcBtnSel==5?COL_GOLD:COL_DIM);
+                HitAdd(bxGear, btnY, gearW, kBtnH, TUgcBtnTap, 5);
+                // Animated focus outline glides to whichever button is selected.
+                // Slot 3 is dedicated to this bar (slot 2 is the prev/next
+                // animator used by the Player/Mii tabs) so they never clash.
+                if (sawFoc) {
+                    if (gTheme.cornerRadius > 0) {
+                        RequestHighlight((int)Screen::OnSwitch, /*sub=ugc action bar*/21,
+                                         focX, btnY, focW, kBtnH, gDtSec, /*slot=*/3);
+                        DrawAnimatedHighlight(/*slot=*/3);
+                    } else {
+                        // Square themes don't render the rounded glide outline,
+                        // so give the focused button a solid gold border cue
+                        // (matches the Player/Mii stepper rows).
+                        DrawRect(focX, btnY, focW, kBtnH, COL_GOLD);
+                    }
+                }
+                // (The "+ Blank UGC" pill that used to live here moved to the
+                // pinned row at the top of the left list.)
             }
         }
 
@@ -5497,7 +6205,15 @@ static void DrawOnSwitch() {
             // changing the filter. Added before the tiles so tile hits win.
             HitAdd(0, 0, SCREEN_W, SCREEN_H, TUgcCloseKindPicker, 0);
 
-            const int ROWS    = gUgcKindCount + 1; // +1 for the "All" row
+            // Same picker chrome for two modes:
+            //   Filter mode (default): "All" tile at the top so the user
+            //     can clear the filter chip. Title reads "Filter by kind".
+            //   Create mode (gUgcKindPickerForBlank): no "All" tile —
+            //     creating "all kinds at once" isn't a thing. Title reads
+            //     "Which type to create?" and the border/accent go green
+            //     so it's obviously a different flow from the filter chip.
+            const bool creatingBlank = gUgcKindPickerForBlank;
+            const int ROWS    = gUgcKindCount + (creatingBlank ? 0 : 1);
             const int rowH    = 38;
             const int rowGap  = 4;
             const int padX    = 18;
@@ -5508,38 +6224,92 @@ static void DrawOnSwitch() {
             const int mH      = padTop + listH + padBot;
             const int mx      = (SCREEN_W - mW) / 2;
             const int my      = (SCREEN_H - mH) / 2;
+            static const SDL_Color C_UGC_CREATE = {120, 200, 130, 255};
+            const SDL_Color modeAccent = creatingBlank ? C_UGC_CREATE : COL_GOLD;
 
             FillRect(mx, my, mW, mH, {18, 18, 22, 255});
-            DrawRect(mx, my, mW, mH, COL_GOLD);
-            FillRect(mx, my, mW, 4, COL_GOLD);
-            DrawTextC(Lang::T("ugc.kind.picker.title"),
-                      mx + mW/2, my + 26, COL_GOLD, Font::Md);
+            DrawRect(mx, my, mW, mH, modeAccent);
+            FillRect(mx, my, mW, 4, modeAccent);
+            DrawTextC(Lang::T(creatingBlank
+                                ? "ugc.kind.create.title"
+                                : "ugc.kind.picker.title"),
+                      mx + mW/2, my + 26, modeAccent, Font::Md);
 
             int rowY = my + padTop;
             for (int i = 0; i < ROWS; i++) {
-                bool isAll  = (i == 0);
-                bool active = isAll ? (gUgcKindFilter < 0)
-                                    : (gUgcKindFilter == i - 1);
+                // In create mode the loop index maps 1:1 to kinds (skip
+                // the "All" tile); in filter mode i=0 is "All", i=1..N
+                // is kind i-1. Route the tap by pushing the "create-mode"
+                // i through the same 1..N convention TUgcPickKind
+                // already understands (0 = All / cancel).
+                int kindIdx      = creatingBlank ? i     : i - 1;
+                int hitArgForTap = creatingBlank ? i + 1 : i;
+                bool isAllRow = (!creatingBlank && i == 0);
+                bool active = isAllRow ? (gUgcKindFilter < 0)
+                                       : (!creatingBlank
+                                          && gUgcKindFilter == kindIdx);
                 bool sel    = (i == gUgcKindPickerSel);
                 int rx = mx + padX;
                 int rw = mW - padX*2;
                 FillRect(rx, rowY, rw, rowH, sel ? COL_SEL : COL_PANEL);
                 DrawRect(rx, rowY, rw, rowH,
-                         active ? COL_GOLD : (sel ? COL_ACCENT : COL_BORDER));
-                std::string label = isAll
+                         active ? modeAccent
+                                : (sel ? (creatingBlank ? C_UGC_CREATE : COL_ACCENT)
+                                       : COL_BORDER));
+                std::string label = isAllRow
                     ? Lang::T("ugc.kind.all")
-                    : Lang::T(gUgcKinds[i - 1].labelKey);
-                SDL_Color col = active ? COL_GOLD : (sel ? COL_TEXT : COL_DIM);
-                // Centered both horizontally and vertically inside the row.
-                // DrawTextC anchors on the midpoint so we don't have to chase
-                // per-font ascender/descender values.
+                    : Lang::T(gUgcKinds[kindIdx].labelKey);
+                SDL_Color col = active ? modeAccent
+                                       : (sel ? COL_TEXT : COL_DIM);
                 DrawTextC(label, rx + rw/2, rowY + rowH/2, col, Font::Md);
-                HitAdd(rx, rowY, rw, rowH, TUgcPickKind, i);
+                HitAdd(rx, rowY, rw, rowH, TUgcPickKind, hitArgForTap);
                 rowY += rowH + rowGap;
             }
         }
 
-        DrawFooter(Lang::T("ugc.footer"));
+        // Delete-UGC confirmation modal. Drawn last so it sits on top
+        // of the whole texture tab, including the category picker if
+        // that somehow ended up open at the same time. Full-screen tap
+        // catcher on the dim layer routes to cancel so the modal can't
+        // strand the tab if the confirm/cancel buttons are missed.
+        if (gUgcDeleteConfirmOpen) {
+            HitClear();
+            SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(gRen, 0, 0, 0, 200);
+            SDL_Rect full = { 0, 0, SCREEN_W, SCREEN_H };
+            SDL_RenderFillRect(gRen, &full);
+            HitAdd(0, 0, SCREEN_W, SCREEN_H, TCancelUgcDelete, 0);
+
+            const int cardW = 640, cardH = 260;
+            int cardX = SCREEN_W/2 - cardW/2;
+            int cardY = SCREEN_H/2 - cardH/2;
+            FillRect(cardX, cardY, cardW, cardH, COL_PANEL);
+            DrawRect(cardX, cardY, cardW, cardH, COL_RED);
+
+            DrawTextC(Lang::T("ugc.delete.title") + " " + gUgcDeleteConfirmName + " ?",
+                      SCREEN_W/2, cardY + 46, COL_RED, Font::Lg);
+            DrawTextC(Lang::T("ugc.delete.warn"),
+                      SCREEN_W/2, cardY + 96, COL_TEXT, Font::Md);
+
+            int btnW = 240, btnH = 52, btnGap = 20;
+            int bxC = SCREEN_W/2 - btnW - btnGap/2;
+            int bxK = SCREEN_W/2 + btnGap/2;
+            int by  = cardY + cardH - btnH - 24;
+            HitAdd(bxC, by, btnW, btnH, TConfirmUgcDelete, 0);
+            FillRect(bxC, by, btnW, btnH, COL_PANEL);
+            DrawRect(bxC, by, btnW, btnH, COL_RED);
+            DrawTextC("[A] " + Lang::T("ugc.delete.confirm"),
+                      bxC + btnW/2, by + btnH/2, COL_RED, Font::Md);
+            HitAdd(bxK, by, btnW, btnH, TCancelUgcDelete, 0);
+            FillRect(bxK, by, btnW, btnH, COL_PANEL);
+            DrawRect(bxK, by, btnW, btnH, COL_BORDER);
+            DrawTextC("[B] " + Lang::T("ugc.delete.cancel"),
+                      bxK + btnW/2, by + btnH/2, COL_DIM, Font::Md);
+        }
+
+        DrawFooter(gUgcDeleteConfirmOpen
+                   ? Lang::T("ugc.delete.footer")
+                   : Lang::T("ugc.footer"));
     }
 
     // ── WebUI tab ─────────────────────────────────────────────────────────────
@@ -5908,6 +6678,15 @@ static void TPlayerNumKbd(int) {
     if (gPlayerFieldSel < 0 || gPlayerFieldSel >= PLAYER_FIELD_COUNT) return;
     const auto& fd = PLAYER_FIELDS[gPlayerFieldSel];
     uint32_t h = PFHash(fd);
+    // Time-travel penalty clear: not a keyboard edit — just zero the
+    // 8-byte field. No undo entry: a re-time-travel re-stamps it, and the
+    // 32-bit gPlayerUndoVal slot can't hold the original UInt64 anyway.
+    if (fd.isUInt64Time) {
+        if (SaveEditor::GetUInt64(gPlayerSav, h) == 0) return;
+        SaveEditor::SetUInt64(gPlayerSav, h, 0);
+        gPlayerSavDirty = true;
+        return;
+    }
     uint32_t cur = fd.isUInt ? SaveEditor::GetUInt(gPlayerSav, h)
                              : SaveEditor::GetAnyScalar(gPlayerSav, h);
     std::string s = ShowNumberKeyboard(PlayerLabelT(fd.label),
@@ -5980,16 +6759,22 @@ static void DrawPlayer() {
     static const int PL_ROW_H = 33;
     int plListH = SCREEN_H - SE_TOP_Y - 32;
     int plVis   = plListH / PL_ROW_H;
+    // Small top margin so the first row doesn't sit flush on the box's top
+    // border. (Centering doesn't suit this list — there are only 14 fields for
+    // ~18 rows of space, so splitting the leftover just floated the list with a
+    // big gap. A fixed pad keeps it snug at the top like other lists; the empty
+    // space below is inherent to the short field count.)
+    int plPadTop = LIST_PAD_TOP;
     if (gPlayerFieldSel < gPlayerScroll) gPlayerScroll = gPlayerFieldSel;
     if (gPlayerFieldSel >= gPlayerScroll + plVis) gPlayerScroll = gPlayerFieldSel - plVis + 1;
     if (gPlayerScroll < 0) gPlayerScroll = 0;
 
     TTF_Font* fsm_pl = GetFont(Font::Sm);
-    int plSelRowY = SE_TOP_Y;
+    int plSelRowY = SE_TOP_Y + plPadTop;
     bool plSawSel = false;
     for (int i = gPlayerScroll; i < PLAYER_FIELD_COUNT && i < gPlayerScroll + plVis; i++) {
         bool sel = (i == gPlayerFieldSel);
-        int ry = SE_TOP_Y + (i - gPlayerScroll) * PL_ROW_H;
+        int ry = SE_TOP_Y + plPadTop + (i - gPlayerScroll) * PL_ROW_H;
         if (sel) { plSelRowY = ry; plSawSel = true; }
         HitAdd(SE_LIST_X, ry, SE_LIST_W, PL_ROW_H-1, TSelPlayerField, i);
         FillRect(SE_LIST_X, ry, SE_LIST_W, PL_ROW_H-1, sel?COL_SEL:COL_BG);
@@ -6024,6 +6809,14 @@ static void DrawPlayer() {
             if (val.size()>12) val=val.substr(0,10)+"..";
         } else if (fd.isInt) {
             val = std::to_string((int32_t)SaveEditor::GetAnyScalar(gPlayerSav, fh));
+        } else if (fd.isUInt64Time) {
+            // Show "active" when the game has stamped a penalty time and
+            // "cleared" when it's zero. The raw value is a game-clock
+            // timestamp that would look like meaningless seconds-since-epoch
+            // here, so we surface intent rather than the number.
+            val = (SaveEditor::GetUInt64(gPlayerSav, fh) != 0)
+                  ? Lang::T("player.lastpenalty.active")
+                  : Lang::T("player.lastpenalty.cleared");
         } else if (fd.isUInt) {
             // Money (and any future big-uint field) gets thousand separators
             // for readability — "1,234,567" is much easier to parse at a
@@ -6187,6 +6980,25 @@ static void DrawPlayer() {
         DrawTextC(Lang::T("next") + " >", bxR+btnW/2, btnY+btnH/2, COL_DIM);
         DrawTextC(Lang::T("player.cycle.region"), cx, btnY+btnH+14, COL_DIM);
         EmitPrevNextHighlight(/*sub=player region*/114, bxL, bxR, btnY, btnW, btnH);
+    } else if (fd.isUInt64Time) {
+        // Time-travel penalty toggle. The current state shows in big text
+        // ("active" / "cleared"); the only operation is "set to 0" since
+        // hand-typing a 16-digit game-clock timestamp isn't useful — users
+        // hit this field to skip the post-time-travel cooldown.
+        uint64_t cur = SaveEditor::GetUInt64(gPlayerSav, ph);
+        bool active = (cur != 0);
+        DrawTextC(active ? Lang::T("player.lastpenalty.active")
+                         : Lang::T("player.lastpenalty.cleared"),
+                  cx, midY-40, active ? COL_RED : COL_GREEN, Font::Lg);
+        const int bw = 280, bh = 48;
+        int bx = cx - bw / 2;
+        int by = midY + 16;
+        FillRect(bx, by, bw, bh, COL_SEL);
+        DrawRect(bx, by, bw, bh, active ? COL_GOLD : COL_BORDER);
+        DrawTextC("A  " + Lang::T(active ? "player.lastpenalty.clear"
+                                         : "player.lastpenalty.already"),
+                  cx, by + bh / 2, active ? COL_GOLD : COL_DIM, Font::Md);
+        if (active) HitAdd(bx, by, bw, bh, TPlayerNumKbd, 0);
     } else if (fd.isUInt && strcmp(fd.label, "Money") == 0) {
         // Money gets the number-pad-keyboard treatment instead of the +/-
         // stepper grid: nudging a 7-digit value 1/10/100/1000 at a time is
@@ -7164,6 +7976,30 @@ static void DrawMap() {
             int rw = std::max(2, fp.w * ppx);
             int rh = std::max(2, fp.h * ppx);
             FillRect(rx, ry, rw, rh, col);
+
+            // Per-2.13.0 objectsRenderer: distinguish footprint visuals by
+            // category so the map reads at a glance.
+            //   - Buildings (House/Facility) get a darker contour so the
+            //     plot stands out from decorations.
+            //   - IslandStep actors get a small directional arrow (^>v<)
+            //     showing which way they face — copied from 2.13.0's
+            //     drawStairArrow, simplified for SDL.
+            // Decorations stay as the plain colour block they already are.
+            bool isBuilding = (g == MapData::ACTOR_HOUSE || g == MapData::ACTOR_FACILITY);
+            bool isStair    = (g == MapData::ACTOR_STEP);
+            if (isBuilding) {
+                SDL_Color dark = { (Uint8)(col.r * 35 / 100),
+                                   (Uint8)(col.g * 35 / 100),
+                                   (Uint8)(col.b * 35 / 100), 255 };
+                DrawRect(rx, ry, rw, rh, dark);
+            }
+            if (isStair && rw >= 8 && rh >= 8) {
+                float rot = SaveEditor::GetFloatAt(gMapSav, hR, i, 0.0f);
+                int t = ((int)std::lround(rot / 90.0f) % 4 + 4) % 4;
+                static const char* kArrow[4] = { "^", ">", "v", "<" };
+                DrawTextC(kArrow[t], rx + rw/2, ry + rh/2,
+                          SDL_Color{255,255,255,235}, Font::Sm);
+            }
             if (i == gMapSelSlot) {
                 DrawRect(rx - 1, ry - 1, rw + 2, rh + 2, COL_GOLD);
                 DrawRect(rx,     ry,     rw,     rh,     COL_GOLD);
@@ -7271,25 +8107,25 @@ static void DrawMap() {
         // Zoom (magnifier + Nx)
         FillRect(zX, iy, zW, btnH, COL_PANEL2); DrawRect(zX, iy, zW, btnH, COL_BORDER);
         DrawMagnifierIcon(zX + 16, cyb, 6, COL_TEXT);
-        DrawText(std::to_string(gMapZoom) + "x", zX + 30, cyb - 8, COL_TEXT, Font::Sm);
+        DrawTextVC(std::to_string(gMapZoom) + "x", zX + 30, cyb, COL_TEXT, Font::Sm);
         HitAdd(zX, iy, zW, btnH, TMapZoom, 0);
         // Undo
         bool ue = !gMapUndo.empty();
         FillRect(uX, iy, uW, btnH, ue ? COL_PANEL2 : COL_PANEL);
         DrawRect (uX, iy, uW, btnH, COL_BORDER);
-        DrawUndoRedoIcon(uX + uW/2, cyb + 2, 8, false, ue ? COL_TEXT : COL_DIM);
+        DrawUndoRedoIcon(uX + uW/2, cyb, 8, false, ue ? COL_TEXT : COL_DIM);
         if (ue) HitAdd(uX, iy, uW, btnH, TMapUndoBtn, 0);
         // Redo
         bool re = !gMapRedo.empty();
         FillRect(rX, iy, rW, btnH, re ? COL_PANEL2 : COL_PANEL);
         DrawRect (rX, iy, rW, btnH, COL_BORDER);
-        DrawUndoRedoIcon(rX + rW/2, cyb + 2, 8, true, re ? COL_TEXT : COL_DIM);
+        DrawUndoRedoIcon(rX + rW/2, cyb, 8, true, re ? COL_TEXT : COL_DIM);
         if (re) HitAdd(rX, iy, rW, btnH, TMapRedoBtn, 0);
         // PNG export (download icon + label)
         FillRect(pX, iy, pW, btnH, COL_PANEL2);
         DrawRect (pX, iy, pW, btnH, COL_BORDER);
         DrawDownloadIcon(pX + 16, cyb - 1, 6, COL_TEXT);
-        DrawText(Lang::T("map.png.btn"), pX + 30, cyb - 8, COL_TEXT, Font::Sm);
+        DrawTextVC(Lang::T("map.png.btn"), pX + 30, cyb, COL_TEXT, Font::Sm);
         HitAdd(pX, iy, pW, btnH, TMapPngBtn, 0);
         iy += btnH + 10;
     }
@@ -7651,6 +8487,106 @@ static float SmoothScrollTop(int slot, int target, int span){
     return v[slot];
 }
 
+// ─── Island Vibe ────────────────────────────────────────────────────────────
+// Ported from ltd-save-editor-2.13.0/src/lib/mii/vibe/islandVibe.ts.
+// Each Mii contributes a (cx, cy) ∈ {-2,-1,1,2}² point derived from their
+// Gaiety / Activeness / Audaciousness / Sociability sliders (0..8 each).
+// The sum across all residents gives (sx, sy); its octant chooses one of 17
+// island-personality labels (Normal + 8 Strong / 8 Weak variants).
+// Labels copied from ltd-save-editor-2.13.0/static/mii-labels.json#islandVibes.
+struct IslandVibeResult {
+    const char* labelKey;   // "Normal" / "Strong_03" / "Weak_07"
+    const char* label;      // human-readable English
+    SDL_Color color;
+    int residents;
+    int sx, sy;
+};
+
+static const char* kIslandVibeLabels[17][2] = {
+    {"Normal",     "Completely average island"},
+    {"Strong_00",  "Pushy island"},
+    {"Strong_01",  "Reckless island"},
+    {"Strong_02",  "Emotional island"},
+    {"Strong_03",  "Eccentric island"},
+    {"Strong_04",  "Considerate island"},
+    {"Strong_05",  "Intellectual island"},
+    {"Strong_06",  "Calm island"},
+    {"Strong_07",  "Survivalist island"},
+    {"Weak_00",    "Ambitious island"},
+    {"Weak_01",    "Enthusiastic island"},
+    {"Weak_02",    "Lively island"},
+    {"Weak_03",    "Caring island"},
+    {"Weak_04",    "Shy island"},
+    {"Weak_05",    "Quiet island"},
+    {"Weak_06",    "Cautious island"},
+    {"Weak_07",    "Artistic island"},
+};
+// Reuses the same 8 octant colours as the WebUI editor's chart so users
+// who see both UIs build a visual mapping.
+static const SDL_Color kOctantColors[8] = {
+    {194, 92,180,255}, {224, 71, 79,255}, {228,104, 47,255}, {224,144, 46,255},
+    {148,164, 48,255}, { 39,158,111,255}, { 47,155,181,255}, { 79,135,232,255},
+};
+
+static IslandVibeResult ComputeIslandVibe() {
+    IslandVibeResult out = { "Normal", "Completely average island",
+                             {138, 143, 152, 255}, 0, 0, 0 };
+    if (!gMiiSav.loaded || gMiis.empty()) return out;
+    static const uint32_t H_GAIETY  = SaveEditor::Hash("Mii.CharacterParam.Gaiety");
+    static const uint32_t H_ACTIVE  = SaveEditor::Hash("Mii.CharacterParam.Activeness");
+    static const uint32_t H_AUDAC   = SaveEditor::Hash("Mii.CharacterParam.Audaciousness");
+    static const uint32_t H_SOCIAB  = SaveEditor::Hash("Mii.CharacterParam.Sociability");
+    static const int T1[9] = {50, 10, 20, 30, 40, 60, 70, 80, 90};
+    static const int T2[9] = {50,  5, 15, 25, 35, 65, 75, 85, 95};
+    static const int Q[4]  = {-2, -1,  1,  2};
+    auto quart = [](int v) -> int {
+        if (v <=  50) return 0;
+        if (v <= 100) return 1;
+        if (v <= 150) return 2;
+        return 3;
+    };
+    int sx = 0, sy = 0;
+    int residentCount = 0;
+    for (const auto& m : gMiis) {
+        int s = m.slot - 1;  // 0-based
+        int g  = SaveEditor::GetIntAt(gMiiSav, H_GAIETY, s,  0);
+        int a  = SaveEditor::GetIntAt(gMiiSav, H_ACTIVE, s,  0);
+        int au = SaveEditor::GetIntAt(gMiiSav, H_AUDAC,  s,  0);
+        int so = SaveEditor::GetIntAt(gMiiSav, H_SOCIAB, s,  0);
+        if (g  < 0 || g  > 8) g  = 0;
+        if (a  < 0 || a  > 8) a  = 0;
+        if (au < 0 || au > 8) au = 0;
+        if (so < 0 || so > 8) so = 0;
+        int xv = T1[g]  + T2[a];
+        int yv = T1[au] + T2[so];
+        sx += Q[quart(xv)];
+        sy += Q[quart(yv)];
+        residentCount++;
+    }
+    out.residents = residentCount;
+    out.sx = sx;
+    out.sy = sy;
+    if (sx == 0 && sy == 0) {
+        // Defaults already set to Normal.
+        return out;
+    }
+    // Octant from angle, biased by +22.5° so 0..7 lines up with the editor.
+    double rad = atan2((double)sy, (double)sx);
+    double deg = rad * 180.0 / 3.14159265358979323846;
+    double biased = std::fmod(std::fmod(deg + 22.5, 360.0) + 360.0, 360.0);
+    int octant = (int)(biased / 45.0);
+    if (octant < 0) octant = 0;
+    if (octant > 7) octant = 7;
+    int amax = (std::abs(sx) > std::abs(sy)) ? std::abs(sx) : std::abs(sy);
+    bool strong = (double)residentCount < 1.5 * (double)amax;
+    int labelIdx = 1 + (strong ? 0 : 8) + octant;
+    if (labelIdx >= 17) labelIdx = 0;
+    out.labelKey = kIslandVibeLabels[labelIdx][0];
+    out.label    = kIslandVibeLabels[labelIdx][1];
+    out.color    = kOctantColors[octant];
+    return out;
+}
+
 static void DrawMiiStats() {
     HitClear();
     // Auto-fade transient messages (e.g. habit toggle confirmations)
@@ -7714,16 +8650,57 @@ static void DrawMiiStats() {
 
     // Left: mii selector list (with scroll)
     int mseListH = SCREEN_H - SE_TOP_Y - 32;
-    int mseVis   = mseListH / ITEM_H;
     FillRect(SE_LIST_X-4, SE_TOP_Y, MSE_LIST_W+8, mseListH, COL_PANEL);
     DrawRect(SE_LIST_X-4, SE_TOP_Y, MSE_LIST_W+8, mseListH, COL_BORDER);
-    int leftSelY = SE_TOP_Y + LIST_PAD_TOP;
+
+    // Pinned "+ blank mii" row at the very top of the list — mirrors the
+    // texture tab's "+ blank ugc" row. Tapping it creates a new blank Mii
+    // in the first empty slot. Green-tinted to read as a create action.
+    const int MII_BLANK_ROW_H = ITEM_H + 4;
+    const int MII_BLANK_ROW_Y = SE_TOP_Y + LIST_PAD_TOP;
+    {
+        static const SDL_Color C_MII_BLANK = {120, 200, 130, 255};
+        HitAdd(SE_LIST_X, MII_BLANK_ROW_Y, MSE_LIST_W, MII_BLANK_ROW_H - 1,
+               TSelMiiBlankRow, 0);
+        FillRect(SE_LIST_X, MII_BLANK_ROW_Y, MSE_LIST_W, MII_BLANK_ROW_H - 1,
+                 gMiiBlankRowSel ? COL_SEL : COL_BG);
+        DrawRect(SE_LIST_X, MII_BLANK_ROW_Y, MSE_LIST_W, MII_BLANK_ROW_H - 1,
+                 C_MII_BLANK);
+        if (gMiiBlankRowSel && gTheme.cornerRadius == 0)
+            DrawRectSquare(SE_LIST_X, MII_BLANK_ROW_Y,
+                           MSE_LIST_W, MII_BLANK_ROW_H - 1, COL_GOLD);
+        DrawTextC(Lang::T("mii.blank.btn"),
+                  SE_LIST_X + MSE_LIST_W/2,
+                  MII_BLANK_ROW_Y + (MII_BLANK_ROW_H - 1)/2,
+                  C_MII_BLANK, Font::Sm);
+        // Divider below the pinned row.
+        SDL_SetRenderDrawColor(gRen, COL_BORDER.r, COL_BORDER.g, COL_BORDER.b, 140);
+        SDL_RenderDrawLine(gRen, SE_LIST_X, MII_BLANK_ROW_Y + MII_BLANK_ROW_H,
+                           SE_LIST_X + MSE_LIST_W, MII_BLANK_ROW_Y + MII_BLANK_ROW_H);
+        if (gMiiBlankRowSel) {
+            RequestHighlight((int)Screen::OnSwitch, /*sub=mii left list*/33,
+                             SE_LIST_X, MII_BLANK_ROW_Y,
+                             MSE_LIST_W, MII_BLANK_ROW_H - 1, gDtSec, /*slot=*/1);
+        }
+    }
+
+    // Scrollable Mii list starts below the pinned row.
+    const int MSE_LIST_TOP = MII_BLANK_ROW_Y + MII_BLANK_ROW_H + 3;
+    int mseListAvail = (SE_TOP_Y + mseListH) - MSE_LIST_TOP;
+    int mseVis = mseListAvail / ITEM_H;
+    if (mseVis < 1) mseVis = 1;
+    // The rows don't divide the list height evenly (~23 px left over at 720p),
+    // which used to sit as one near-empty row-sized gap at the bottom. Split
+    // the leftover above and below so the column reads as vertically centered.
+    // (mseVis itself is unchanged, so the input-side scroll math still matches.)
+    int mseListPadTop = (mseListAvail - mseVis * ITEM_H) / 2;
+    int leftSelY = MSE_LIST_TOP + mseListPadTop;
     bool leftSawSel = false;
     for (int i = 0; i < mseVis; i++) {
         int idx = gMiiStatsScroll + i;
         if (idx >= (int)gMiis.size()) break;
-        bool sel = (idx == gMiiStatsMiiSel);
-        int ry = SE_TOP_Y + LIST_PAD_TOP + i * ITEM_H;
+        bool sel = (idx == gMiiStatsMiiSel) && !gMiiBlankRowSel;
+        int ry = MSE_LIST_TOP + mseListPadTop + i * ITEM_H;
         if (sel) { leftSelY = ry; leftSawSel = true; }
         HitAdd(SE_LIST_X, ry, MSE_LIST_W, ITEM_H-1, TSelMiiStatsMii, idx);
         FillRect(SE_LIST_X, ry, MSE_LIST_W, ITEM_H-1, sel?COL_SEL:COL_BG);
@@ -7737,15 +8714,17 @@ static void DrawMiiStats() {
         RequestHighlight((int)Screen::OnSwitch, /*sub=mii left list*/33,
                          SE_LIST_X, leftSelY, MSE_LIST_W, ITEM_H-1, gDtSec,
                          /*slot=*/1);
-        DrawAnimatedHighlight(/*slot=*/1);
     }
+    // Draw the shared animation slot once, after the list, so a blank-row↔
+    // entry transition paints over the list rows instead of under them.
+    if (leftSawSel || gMiiBlankRowSel) DrawAnimatedHighlight(/*slot=*/1);
     if ((int)gMiis.size() > mseVis) {
         int barH = mseListH * mseVis / (int)gMiis.size();
-        int barY = SE_TOP_Y + mseListH * gMiiStatsScroll / (int)gMiis.size();
+        int barY = MSE_LIST_TOP + (SE_TOP_Y + mseListH - MSE_LIST_TOP) * gMiiStatsScroll / (int)gMiis.size();
         FillRect(SE_LIST_X+MSE_LIST_W+2, barY, 4, barH, COL_BORDER);
     }
     if (gMiis.empty()) {
-        DrawTextC(Lang::T("mii.no.miis"), SE_LIST_X+MSE_LIST_W/2, SE_TOP_Y+80, COL_DIM);
+        DrawTextC(Lang::T("mii.no.miis"), SE_LIST_X+MSE_LIST_W/2, MSE_LIST_TOP+60, COL_DIM);
     }
 
     // Middle: field list for selected mii (hidden in Social/Belongings/… — the
@@ -7903,12 +8882,19 @@ static void DrawMiiStats() {
                 std::string fdLabel = MiiLabelT(fd.label);
                 if(fsm) TTF_SizeUTF8(fsm,fdLabel.c_str(),&lw,&lh);
                 if (fd.isAction) {
-                    SDL_Color lCol = sel ? COL_GOLD : SDL_Color{160,120,60,255};
+                    // Destructive actions (actionId 3 = Delete Mii) render
+                    // in red so the row reads as "danger" at a glance,
+                    // even before the confirm modal opens. No trailing
+                    // glyph — earlier the row had a ▶ marker but the
+                    // bundled font has no U+25B6 so it rendered as a
+                    // tofu box that users read as a stray "0". The red
+                    // border + red label already say "this is an
+                    // action, not a value".
+                    bool destructive = (fd.actionId == 3);
+                    SDL_Color lCol = destructive
+                        ? (sel ? COL_RED : SDL_Color{160, 70, 70, 255})
+                        : (sel ? COL_GOLD : SDL_Color{160,120,60,255});
                     DrawText(fdLabel, midX+8, ry+(33-lh)/2, lCol);
-                    const char* arrow = "▶";
-                    int aw=0,ah=0;
-                    if(fsm) TTF_SizeUTF8(fsm,arrow,&aw,&ah);
-                    DrawText(arrow, midX+midW-aw-8, ry+(33-ah)/2, sel?COL_GOLD:SDL_Color{100,80,40,255});
                 } else {
                     std::string val;
                     if (fd.isStr) {
@@ -7982,10 +8968,46 @@ static void DrawMiiStats() {
         }
     }
 
-    if (!gMiis.empty() && gMiiStatsMiiSel < (int)gMiis.size()) {
+    // On the "+ blank Mii" create row nothing is selected — show only a hint,
+    // not the previously-viewed Mii's fields/buttons.
+    if (gMiiBlankRowSel) {
+        DrawTextC(Lang::T("mii.blank.hint"),
+                  panelX + panelW/2, SE_TOP_Y + (SCREEN_H-SE_TOP_Y-32)/2,
+                  COL_DIM, Font::Md);
+    }
+    if (!gMiis.empty() && gMiiStatsMiiSel < (int)gMiis.size() && !gMiiBlankRowSel) {
         int miiSlotIdx = gMiis[gMiiStatsMiiSel].slot - 1;
         int panelTop = SE_TOP_Y + 32;
         int panelH   = SCREEN_H - panelTop - 32;
+
+        // Island Vibe chip — only on the Social sub-tab. It's an island-wide
+        // aggregate that lives next to the social graph (which is also an
+        // island-wide view), so it stays out of the per-Mii sub-tabs that
+        // edit a single resident's fields. Computes (sx, sy) from the four
+        // character-param sliders across every populated Mii and looks up
+        // the octant label (matches ltd-save-editor-2.13.0's chart).
+        if (gMiiStatsSubTab == MiiStatsSubTab::Social) {
+            IslandVibeResult vibe = ComputeIslandVibe();
+            const int chipH = 26;
+            const int chipPad = 10;
+            TTF_Font* fsm = GetFont(Font::Sm);
+            std::string txt = Lang::T("mii.vibe.label") + ": " + std::string(vibe.label);
+            int tw = 0, th = 0;
+            if (fsm) TTF_SizeUTF8(fsm, txt.c_str(), &tw, &th);
+            int chipW = tw + chipPad * 2 + 18; // extra space for the colour dot
+            int chipX = editX + editW - chipW - 6;
+            int chipY = SE_TOP_Y + 4;
+            FillRect(chipX, chipY, chipW, chipH, COL_PANEL);
+            DrawRect(chipX, chipY, chipW, chipH, vibe.color);
+            // 8 px colour dot lines up the chip with the octant on the chart.
+            const int dotS = 10;
+            FillRect(chipX + chipPad, chipY + (chipH - dotS) / 2,
+                     dotS, dotS, vibe.color);
+            DrawText(txt,
+                     chipX + chipPad + dotS + 6,
+                     chipY + (chipH - th) / 2,
+                     COL_TEXT, Font::Sm);
+        }
 
         if (gMiiStatsSubTab == MiiStatsSubTab::Social) {
             static const uint32_t H_ID_A  = 0xf7420afbu;
@@ -8312,6 +9334,38 @@ static void DrawMiiStats() {
                 DrawTextC(oName.empty()? Lang::T("unknown.paren") :oName, cx2, panelTop+18, COL_TEXT, Font::Md);
                 SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
                 SDL_RenderDrawLine(gRen, editX+12, panelTop+42, editX+editW-12, panelTop+42);
+                // Bulk boost / reset pills, top-right of the right panel.
+                // Ports the GitHub issue #33 request into an on-Switch
+                // affordance: one tap maxes every low-tier relationship
+                // this Mii has to 200; the twin resets every meter to 0.
+                // Both operate on the *selected* Mii's relations (they're
+                // available whenever a relation is up so their scope is
+                // obvious), skip fixed-meter types, and touch both
+                // directions of each pair so the graph stays symmetric.
+                {
+                    int bkH = 26;
+                    int bkW = 92;
+                    int bkGap = 8;
+                    int bkY = panelTop + 6;
+                    int bkX2 = editX + editW - bkW - 8;
+                    int bkX1 = bkX2 - bkW - bkGap;
+                    HitAdd(bkX1, bkY, bkW, bkH, TRelBatchBoost, 0);
+                    FillRect(bkX1, bkY, bkW, bkH, COL_PANEL);
+                    DrawRect(bkX1, bkY, bkW, bkH, COL_GREEN);
+                    DrawTextC(Lang::T("rel.batch.boost"), bkX1+bkW/2, bkY+bkH/2,
+                              COL_GREEN, Font::Sm);
+                    HitAdd(bkX2, bkY, bkW, bkH, TRelBatchZero, 0);
+                    FillRect(bkX2, bkY, bkW, bkH, COL_PANEL);
+                    DrawRect(bkX2, bkY, bkW, bkH, COL_RED);
+                    DrawTextC(Lang::T("rel.batch.zero"), bkX2+bkW/2, bkY+bkH/2,
+                              COL_RED, Font::Sm);
+                }
+                // ONE animated "select" outline shared by the type + meter
+                // controls: it rides whichever row Left/Right currently edits
+                // and slides down/up when X toggles focus (rather than drawing
+                // a second static box). Target rect is captured below, drawn
+                // once after both controls.
+                int rrX=0, rrY=0, rrW=0, rrH=0; bool rrOn=false;
                 // Your relationship type
                 DrawTextC(Lang::T("rel.your.type"), cx2, panelTop+62, COL_DIM, Font::Sm);
                 SDL_Color myTC = RelTypeColor(myType);
@@ -8326,7 +9380,13 @@ static void DrawMiiStats() {
                     HitAdd(bxR,bY,bW,bH,TSimBtn,(int)HidNpadButton_Right);
                     FillRect(bxR,bY,bW,bH,COL_PANEL); DrawRect(bxR,bY,bW,bH,COL_BORDER);
                     DrawTextC(Lang::T("rel.type") + " >",bxR+bW/2,bY+bH/2,COL_DIM);
-                    EmitPrevNextHighlight(/*sub=mii rel type*/122, bxL, bxR, bY, bW, bH);
+                    // The select outline rides the < type > row while the TYPE
+                    // is the active Left/Right target (gMiiRelFocus==0, and
+                    // always for fixed-meter types). X moves it to the meter.
+                    if (gMiiRelFocus == 0 || RelMeterFixed(myType)) {
+                        rrX = bxL - 6; rrY = bY - 4;
+                        rrW = (bxR + bW) - bxL + 12; rrH = bH + 8; rrOn = true;
+                    }
                     // When the current relationship is Unknown, expose a
                     // "Batch Know" shortcut that flips every Unknown relation
                     // this Mii has into Know with natural game values.
@@ -8352,12 +9412,38 @@ static void DrawMiiStats() {
                 SDL_SetRenderDrawColor(gRen,COL_BORDER.r,COL_BORDER.g,COL_BORDER.b,80);
                 SDL_RenderDrawLine(gRen, editX+12, panelTop+336, editX+editW-12, panelTop+336);
                 DrawTextC(Lang::T("rel.meter"), cx2, panelTop+358, COL_DIM, Font::Sm);
-                std::string mStr = fixed ? ("100 (" + Lang::T("rel.fixed") + ")") : std::to_string(myMeter);
+                // Meter shows "X / 200" instead of just "X" so the new
+                // 0..200 range is visually obvious. Fixed types stay at
+                // a flat "100 (fixed)" since their meter is ignored.
+                std::string mStr = fixed
+                    ? ("100 (" + Lang::T("rel.fixed") + ")")
+                    : (std::to_string(myMeter) + " / 200");
                 DrawTextC(mStr, cx2, panelTop+398, fixed?COL_DIM:COL_TEXT, Font::Lg);
+                // Tier blurb under the meter: "Soulmate" / "Not a great
+                // match..." / etc. Mirrors what the game's UI shows when
+                // you tap a Mii's relationship.
                 if (!fixed) {
-                    static const int MSTEPS[] = {10, 1};
-                    int bW=76,bH=44,bGap=6;
-                    int totalBW = (2*(bW+bGap))*2 + 20;
+                    bool isFightHere = false;
+                    {
+                        static const uint32_t H_FIGHT_RD = SaveEditor::Hash("Mii.Relation.Info.IsFight");
+                        isFightHere = SaveEditor::GetBoolAt(gMiiSav, H_FIGHT_RD, gMiiRelPairIdx, false);
+                    }
+                    const char* tier = RelTierLabel(myType, myMeter, isFightHere);
+                    if (tier) DrawTextC(tier, cx2, panelTop+424, myTC, Font::Sm);
+                }
+                if (!fixed) {
+                    // Meter step buttons: 3 per side. Layout is
+                    //   [-100][-10][-1] gap [+1][+10][+100]
+                    // so the user can nudge by 1 for fine-tuning, 10 for
+                    // moving between tiers, and 100 to cross the full
+                    // 0..200 range in a couple of taps (the meter caps
+                    // at 200 and the top tiers start at 190, so +100
+                    // from any low value lands squarely inside the
+                    // "Best friend forever / Soulmate" band).
+                    static const int MSTEPS[] = {100, 10, 1};
+                    constexpr int kSteps = (int)(sizeof(MSTEPS)/sizeof(MSTEPS[0]));
+                    int bW=68,bH=44,bGap=5;
+                    int totalBW = (kSteps*(bW+bGap))*2 + 16;
                     int bxBase = cx2 - totalBW/2, bY = panelTop+442;
                     int bx = bxBase;
                     for (int s : MSTEPS) {
@@ -8366,15 +9452,39 @@ static void DrawMiiStats() {
                         DrawTextC("-"+std::to_string(s),bx+bW/2,bY+bH/2,COL_RED,Font::Sm);
                         bx+=bW+bGap;
                     }
-                    bx+=20;
-                    for (int j=1;j>=0;j--) {
+                    bx+=16;
+                    for (int j=kSteps-1;j>=0;j--) {
                         int s=MSTEPS[j];
                         HitAdd(bx,bY,bW,bH,TRelMeterAdj,s);
                         FillRect(bx,bY,bW,bH,COL_PANEL); DrawRect(bx,bY,bW,bH,COL_GREEN);
                         DrawTextC("+"+std::to_string(s),bx+bW/2,bY+bH/2,COL_GREEN,Font::Sm);
                         bx+=bW+bGap;
                     }
+                    // Same select outline, now riding the step-button row when
+                    // the METER is the active target (gMiiRelFocus==1).
+                    if (gMiiRelFocus == 1) {
+                        rrX = bxBase - 6; rrY = bY - 4;
+                        rrW = totalBW + 12; rrH = bH + 8; rrOn = true;
+                    }
                     DrawTextC(Lang::T("rel.both.directions"), cx2, panelTop+514, COL_DIM, Font::Sm);
+                }
+                // Draw the ONE select outline (animated) at whichever row is
+                // focused. RequestHighlight interpolates from its previous
+                // position, so pressing X slides the ring down (type→meter) or
+                // up (meter→type) instead of popping a second box. Slot 2 is
+                // free now that the type's prev/next ring is gone; slot 0 stays
+                // the relation-list ring on the left.
+                if (rrOn) {
+                    if (gTheme.cornerRadius > 0) {
+                        RequestHighlight((int)Screen::OnSwitch, /*sub=mii rel focus*/123,
+                                         rrX, rrY, rrW, rrH, gDtSec, /*slot=*/2);
+                        DrawAnimatedHighlight(/*slot=*/2);
+                    } else {
+                        // Square themes don't render the rounded glide ring, so
+                        // the same select outline shows as a static gold border
+                        // that jumps to the focused row (matches the list rows).
+                        DrawRectSquare(rrX, rrY, rrW, rrH, COL_GOLD);
+                    }
                 }
                 // ── Since (TypeSetTime) ───────────────────────────────────
                 {
@@ -9499,7 +10609,24 @@ static void DrawMiiStats() {
             DrawTextC(MiiLabelT(fd.label), cx2, midY2-102 - (fd.isStr ? 30 : 0), COL_DIM, Font::Md);
             DrawTextC(MiiDescT(fd.label),  cx2, midY2-76 - (fd.isStr ? 30 : 0), COL_DIM, Font::Sm);
 
-            if (fd.isStr) {
+            if (fd.isAction && fd.actionId == 3) {
+                // Delete-Mii action row. Show the mii's name + a single
+                // red "A delete" button. The actual deletion is gated by
+                // the confirm modal (TOpenMiiDeleteConfirm); this is the
+                // first click in the two-click pattern.
+                std::string nm = SaveEditor::GetWStr32At(
+                    gMiiSav, SaveEditor::Hash("Mii.Name.Name"), miiSlotIdx);
+                if (nm.empty()) nm = "?";
+                DrawTextC(nm, cx2, midY2-40, COL_TEXT, Font::Lg);
+                const int bw = 280, bh = 56;
+                int bx = cx2 - bw/2;
+                int by = midY2 + 16;
+                FillRect(bx, by, bw, bh, COL_SEL);
+                DrawRect(bx, by, bw, bh, COL_RED);
+                DrawTextC("A  " + Lang::T("mii.delete.btn"),
+                          cx2, by + bh/2, COL_RED, Font::Md);
+                HitAdd(bx, by, bw, bh, TOpenMiiDeleteConfirm, 0);
+            } else if (fd.isStr) {
                 std::string val = SaveEditor::GetWStr32At(gMiiSav, SaveEditor::Hash(fd.fieldName), miiSlotIdx);
                 DrawTextC(val.empty()? Lang::T("empty") :val, cx2, midY2-70, COL_TEXT, Font::Lg);
                 int bw=220, bh=46, bx=cx2-bw/2, by=midY2-20;
@@ -9583,9 +10710,12 @@ static void DrawMiiStats() {
             // Import / Export .ltd section — only shown on Name field (str)
             if (fd.isStr && !gMiis.empty() && gMiiStatsMiiSel < (int)gMiis.size()) {
                 // Anchor to panel bottom so it stays fixed regardless of upper block position
-                int ibW=220,ibH=66,ibGap=14;
+                int ibW=180,ibH=66,ibGap=10;
                 int ibSqr=ibH; // square upload-icon button matches row height
-                // Layout: [import .ltd] [export .ltd] [upload-icon (download from share)]
+                // Layout: [import .ltd] [export .ltd] [upload-icon (share)]
+                // (+ blank Mii moved to a pinned row at the top of the left
+                // Mii list — matching the texture tab's "+ blank ugc" row.
+                // Delete lives at the end of the field list on the left.)
                 int totalW = ibW + ibGap + ibW + ibGap + ibSqr;
                 int ibxL=cx2 - totalW/2;
                 int ibxR=ibxL + ibW + ibGap;
@@ -9618,31 +10748,13 @@ static void DrawMiiStats() {
                 FillRect(ibxS,ibY,ibSqr,ibH,ltdShr?COL_SEL:COL_PANEL);
                 DrawRect(ibxS,ibY,ibSqr,ibH,C_SHARE);
                 {
+                    // Download icon (this button pulls a Mii DOWN from
+                    // TomodachiShare onto the selected slot) — reuses the same
+                    // glyph as the map tab's PNG-export button for a single,
+                    // consistent visual language across the app.
                     int gcx = ibxS + ibSqr/2;
                     int gcy = ibY + ibH/2;
-                    int gW  = ibSqr * 7 / 12;   // ~58% of the box
-                    int gH  = ibSqr * 7 / 12;
-                    // Bolder upload glyph: a thick chevron head + a solid shaft
-                    // dropping into an open tray. The old version used 2–3px
-                    // strokes, which read as skinny inside the 66px button.
-                    SDL_SetRenderDrawColor(gRen,C_SHARE.r,C_SHARE.g,C_SHARE.b,255);
-                    int topY = gcy - gH/2, botY = gcy + gH/2;
-                    int th   = std::max(4, gW / 7);   // stroke thickness (~5px)
-                    int wing = gW * 5 / 14;           // chevron half-width
-                    // Arrow head — thick chevron (a touch bolder than the shaft)
-                    for (int t = 0; t < th + 2; t++) {
-                        SDL_RenderDrawLine(gRen, gcx, topY+t, gcx-wing, topY+wing+t);
-                        SDL_RenderDrawLine(gRen, gcx, topY+t, gcx+wing, topY+wing+t);
-                    }
-                    // Shaft — solid vertical bar
-                    int trayTop = botY - gH/4;
-                    FillRectSquare(gcx - th/2, topY + th, th, trayTop - (topY + th), C_SHARE);
-                    // Tray — two side walls + a solid base (open top)
-                    for (int t = 0; t < th; t++) {
-                        SDL_RenderDrawLine(gRen, gcx-gW/2+t, trayTop, gcx-gW/2+t, botY);
-                        SDL_RenderDrawLine(gRen, gcx+gW/2-t, trayTop, gcx+gW/2-t, botY);
-                    }
-                    FillRectSquare(gcx-gW/2, botY-th+1, gW+1, th, C_SHARE);
+                    DrawDownloadIcon(gcx, gcy, ibSqr/6, C_SHARE);
                 }
                 if (ltdSawSel) {
                     RequestHighlight((int)Screen::OnSwitch, /*sub=mii ltd buttons*/41,
@@ -9657,8 +10769,71 @@ static void DrawMiiStats() {
         }
     }
 
+    // Delete-confirm modal: drawn last so it sits on top of everything,
+    // including any inline-edit panels or sub-tab content. Hit areas are
+    // re-cleared so taps outside the modal don't fall through to UI
+    // controls that look enabled behind the dimmer.
+    if (gMiiDeleteConfirmOpen) {
+        HitClear();
+        // Dim the rest of the screen.
+        SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(gRen, 0, 0, 0, 200);
+        SDL_Rect full = { 0, 0, SCREEN_W, SCREEN_H };
+        SDL_RenderFillRect(gRen, &full);
+        // Absorb any tap not on a button — closes the modal without
+        // deleting anything (added before the buttons so button hits win).
+        HitAdd(0, 0, SCREEN_W, SCREEN_H, TCancelMiiDelete, 0);
+
+        const int cardW = 720, cardH = 360;
+        int cardX = SCREEN_W/2 - cardW/2;
+        int cardY = SCREEN_H/2 - cardH/2;
+        FillRect(cardX, cardY, cardW, cardH, COL_PANEL);
+        DrawRect(cardX, cardY, cardW, cardH, COL_RED);
+
+        // Title — show the actual Mii's name so the user can't mistake
+        // which slot is about to be wiped.
+        std::string nm;
+        if (gMiiSav.loaded && gMiiDeleteConfirmSlot >= 0) {
+            nm = SaveEditor::GetWStr32At(
+                gMiiSav, SaveEditor::Hash("Mii.Name.Name"),
+                gMiiDeleteConfirmSlot);
+        }
+        if (nm.empty()) nm = "?";
+        std::string title = Lang::T("mii.delete.title") + " " + nm + " ?";
+        DrawTextC(title, SCREEN_W/2, cardY + 50, COL_RED, Font::Lg);
+
+        // Body — three-save warning. Mirrors the note the 2.13.0
+        // developer added to their changelog: deletion mutates Mii.sav,
+        // Player.sav, and Map.sav, so all three need to be re-applied
+        // for the game to read a consistent state.
+        DrawTextC(Lang::T("mii.delete.warn1"), SCREEN_W/2, cardY + 110,
+                  COL_TEXT, Font::Md);
+        DrawTextC(Lang::T("mii.delete.warn2"), SCREEN_W/2, cardY + 142,
+                  COL_GOLD, Font::Md);
+        DrawTextC(Lang::T("mii.delete.warn3"), SCREEN_W/2, cardY + 174,
+                  COL_DIM, Font::Sm);
+
+        // Confirm / cancel buttons.
+        int btnW = 280, btnH = 56, btnGap = 24;
+        int bxC = SCREEN_W/2 - btnW - btnGap/2;
+        int bxK = SCREEN_W/2 + btnGap/2;
+        int by  = cardY + cardH - btnH - 32;
+        HitAdd(bxC, by, btnW, btnH, TConfirmMiiDelete, 0);
+        FillRect(bxC, by, btnW, btnH, COL_PANEL);
+        DrawRect(bxC, by, btnW, btnH, COL_RED);
+        DrawTextC("[A] " + Lang::T("mii.delete.confirm"),
+                  bxC + btnW/2, by + btnH/2, COL_RED, Font::Md);
+        HitAdd(bxK, by, btnW, btnH, TCancelMiiDelete, 0);
+        FillRect(bxK, by, btnW, btnH, COL_PANEL);
+        DrawRect(bxK, by, btnW, btnH, COL_BORDER);
+        DrawTextC("[B] " + Lang::T("mii.delete.cancel"),
+                  bxK + btnW/2, by + btnH/2, COL_DIM, Font::Md);
+    }
+
     DrawFooter(
-        gMiiStatsSubTab==MiiStatsSubTab::Social
+        gMiiDeleteConfirmOpen
+            ? Lang::T("mii.delete.footer")
+        : gMiiStatsSubTab==MiiStatsSubTab::Social
             ? Lang::T(gSocialExpanded ? "mii.footer.social.global" : "mii.footer.social.focus")
         : gMiiStatsSubTab==MiiStatsSubTab::Words
             ? Lang::T("mii.footer.words")
@@ -9952,24 +11127,40 @@ static void DrawBackPrompt() {
     DrawRect(mx, my, mW, mH, COL_GOLD);
     DrawTextC(Lang::T("backprompt.title"), SCREEN_W/2, my+28, COL_GOLD, Font::Lg);
     DrawTextC(Lang::T("backprompt.body"), SCREEN_W/2, my+70, COL_DIM, Font::Sm);
-    const int bW=180, bH=48, gap=30, bOff=90;
-    std::string yesS = "A  " + Lang::T(gBackPromptToUserPick ? "backprompt.save.back" : "backprompt.save.exit");
-    std::string noS  = "B  " + Lang::T(gBackPromptToUserPick ? "backprompt.discard.back" : "backprompt.discard.exit");
+    // Three buttons: A save (green) · B discard (red) · X cancel (blue).
+    // X just dismisses the prompt and stays put — it always worked on the
+    // controller but had no on-screen button, which wasn't discoverable.
+    const int bW=150, bH=48, gap=16, bOff=90;
+    static const SDL_Color C_CANCEL = {90,140,200,255};
+    // Short labels so they fit the buttons — the title ("Save changes?") and
+    // footer already spell out whether this returns to the picker or exits.
+    std::string yesS    = "A  " + Lang::T("backprompt.save");
+    std::string noS     = "B  " + Lang::T("backprompt.discard");
+    std::string cancelS = "X  " + Lang::T("backprompt.cancel");
     std::string footerS = gBackPromptToUserPick
         ? Lang::T("backprompt.footer.back")
         : Lang::T("backprompt.footer.exit");
-    const char* yesLbl = yesS.c_str();
-    const char* noLbl  = noS.c_str();
-    const char* footer = footerS.c_str();
-    HitAdd(mx+mW/2-bW-gap/2, my+mH-bOff, bW, bH, TAckBackYes, 0);
-    FillRect(mx+mW/2-bW-gap/2, my+mH-bOff, bW, bH, COL_SEL);
-    DrawRect(mx+mW/2-bW-gap/2, my+mH-bOff, bW, bH, COL_GREEN);
-    DrawTextC(yesLbl, mx+mW/2-gap/2-bW/2, my+mH-bOff+bH/2, COL_GREEN, Font::Md);
-    HitAdd(mx+mW/2+gap/2, my+mH-bOff, bW, bH, TAckBackNo, 0);
-    FillRect(mx+mW/2+gap/2, my+mH-bOff, bW, bH, COL_SEL);
-    DrawRect(mx+mW/2+gap/2, my+mH-bOff, bW, bH, COL_RED);
-    DrawTextC(noLbl, mx+mW/2+gap/2+bW/2, my+mH-bOff+bH/2, COL_RED, Font::Md);
-    DrawFooter(footer);
+    int totalW = 3*bW + 2*gap;
+    int bx = mx + (mW - totalW)/2;
+    int by = my + mH - bOff;
+    // A — save
+    HitAdd(bx, by, bW, bH, TAckBackYes, 0);
+    FillRect(bx, by, bW, bH, COL_SEL);
+    DrawRect(bx, by, bW, bH, COL_GREEN);
+    DrawTextC(yesS, bx+bW/2, by+bH/2, COL_GREEN, Font::Md);
+    // B — discard
+    int bx1 = bx + bW + gap;
+    HitAdd(bx1, by, bW, bH, TAckBackNo, 0);
+    FillRect(bx1, by, bW, bH, COL_SEL);
+    DrawRect(bx1, by, bW, bH, COL_RED);
+    DrawTextC(noS, bx1+bW/2, by+bH/2, COL_RED, Font::Md);
+    // X — cancel (dismiss, stay on the current tab)
+    int bx2 = bx1 + bW + gap;
+    HitAdd(bx2, by, bW, bH, [](int){ gShowBackPrompt = false; }, 0);
+    FillRect(bx2, by, bW, bH, COL_SEL);
+    DrawRect(bx2, by, bW, bH, C_CANCEL);
+    DrawTextC(cancelS, bx2+bW/2, by+bH/2, C_CANCEL, Font::Md);
+    DrawFooter(footerS);
     Present();
 }
 static void TUndoPlayer(int) {
@@ -10653,7 +11844,11 @@ static void ApplyTouchScroll(float ddx, float ddy) {
         if (s_touch.startX >= SE_LIST_X && s_touch.startX < SE_LIST_X + MSE_LIST_W
             && s_touch.startY >= SE_TOP_Y && s_touch.startY < SCREEN_H - 32
             && !gMiis.empty()) {
-            int mseVis = (SCREEN_H - SE_TOP_Y - 32) / ITEM_H;
+            // Match the render's visible-row count (reserves the pinned
+            // "+ blank mii" row + divider), otherwise drag-scroll caps
+            // short of the last Miis.
+            int mseVis = (SCREEN_H - 32 - (SE_TOP_Y + LIST_PAD_TOP + (ITEM_H + 4) + 3)) / ITEM_H;
+            if (mseVis < 1) mseVis = 1;
             int prev = gMiiStatsScroll;
             s_touch.accumY += ddy;
             while (s_touch.accumY >=  ITEM_H) { s_touch.accumY -= ITEM_H; gMiiStatsScroll = std::max(0, gMiiStatsScroll - 1); }
@@ -10788,20 +11983,10 @@ static void ProcessTouch(int tx, int ty, u64& kDown) {
                 break;
             }
         }
-        // Import / Export buttons (coordinates must match the draw code)
-        if (!gEntries.empty()) {
-            const int kBtnH=46, kBtnGap=8, kBtnSlot=kBtnH+kBtnGap+4;
-            int imgY = PREVIEW_Y + 28;
-            int imgH = PREVIEW_H - 28 - kBtnSlot;
-            int cx   = PREVIEW_X + PREVIEW_W/2;
-            int btnY = imgY + imgH + kBtnGap;
-            const int btnW=155, btnGap=12, bgSep=36;
-            int bx0  = cx - (4*btnW + 3*btnGap + bgSep)/2;
-            int bxBg = bx0 + 3*(btnW+btnGap) + bgSep;
-            if (hit(bx0,             btnY, btnW, kBtnH)) kDown |= HidNpadButton_A;
-            if (hit(bx0+btnW+btnGap, btnY, btnW, kBtnH)) kDown |= HidNpadButton_Y;
-            if (hit(bxBg,            btnY, btnW, kBtnH)) kDown |= HidNpadButton_X;
-        }
+        // All six action-bar buttons (import / export pic / export .ltd /
+        // remove BG / delete / gear) now carry explicit HitAdd handlers
+        // (TUgcBtnTap) in the render code, so ProcessTouch no longer needs
+        // to synthesise A/Y presses from button coordinates.
     }
 }
 
@@ -10905,6 +12090,7 @@ int main(int,char**) {
         SDL_WINDOWPOS_UNDEFINED,SDL_WINDOWPOS_UNDEFINED,SCREEN_W,SCREEN_H,0);
     gRen=SDL_CreateRenderer(win,-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
     SDL_SetRenderDrawBlendMode(gRen,SDL_BLENDMODE_BLEND);
+    UiIcons::Init(gRen);
     FontInit();
     Audio::Init();
 
@@ -11045,8 +12231,11 @@ int main(int,char**) {
                     if (gShowColorPicker && gPickerDrag) {
                         gPickerDrag = 0;   // release the grab; don't tap-fire under the cursor
                     } else if (!s_touch.dragging) {
-                        HitFire((int)s_touch.startX, (int)s_touch.startY);
-                        ProcessTouch((int)s_touch.startX, (int)s_touch.startY, kDown);
+                        // Same single-dispatch rule as the virtual cursor: a
+                        // HitAdd region wins; only fall back to ProcessTouch
+                        // when the tap didn't land on one.
+                        if (!HitFire((int)s_touch.startX, (int)s_touch.startY))
+                            ProcessTouch((int)s_touch.startX, (int)s_touch.startY, kDown);
                     }
                     gMapCanvasDrag = false;
                     s_touch.active = false;
@@ -11061,6 +12250,87 @@ int main(int,char**) {
 
         kDown |= gSimKDown;
         gSimKDown = 0;
+
+        // ── Virtual-cursor mode ────────────────────────────────────────
+        // R-stick click toggles it. While on, the right stick moves an
+        // on-screen cursor and clicking the LEFT stick fires a synthetic
+        // tap at the cursor position (routed through the same HitFire /
+        // ProcessTouch path a real finger would use). A / D-pad / ZL /
+        // ZR still work normally so users can mix stick-cursor and
+        // controller-focus flow freely — the whole point of moving the
+        // "tap" off A is so pressing A on the controller doesn't
+        // accidentally fire whatever's under the cursor as well as the
+        // currently-focused UI action.
+        if (kDown & HidNpadButton_StickR) {
+            gVCursorOn = !gVCursorOn;
+            if (gVCursorOn) {
+                gVCursorX = SCREEN_W  / 2.f;
+                gVCursorY = SCREEN_H  / 2.f;
+            }
+        }
+        if (gVCursorOn) {
+            HidAnalogStickState rs = padGetStickPos(&gPad, 1);
+            float rx = rs.x / 32767.f;
+            float ry = rs.y / 32767.f;
+            // Radial deadzone so the cursor doesn't drift on stick rest.
+            if (rx*rx + ry*ry < 0.15f*0.15f) { rx = 0.f; ry = 0.f; }
+            // 900 px/s at full deflection lets you cross the 1280×720
+            // screen in ~1.4 s (faster than a mouse feels natural, but
+            // still controllable for fine targets).
+            const float SPEED = 900.f;
+            gVCursorX += rx * SPEED * gDtSec;
+            gVCursorY -= ry * SPEED * gDtSec;  // stick Y is inverted
+            if (gVCursorX < 0.f) gVCursorX = 0.f;
+            if (gVCursorY < 0.f) gVCursorY = 0.f;
+            if (gVCursorX > (float)SCREEN_W - 1) gVCursorX = (float)SCREEN_W - 1;
+            if (gVCursorY > (float)SCREEN_H - 1) gVCursorY = (float)SCREEN_H - 1;
+            // L-stick click behaves like a finger. A quick press-release is a
+            // TAP that fires the control under the cursor; pressing and MOVING
+            // the cursor is a DRAG that scrolls the content beneath it, exactly
+            // like dragging a finger. The tap only commits on release so the
+            // start of a scroll isn't mistaken for a click.
+            static bool  s_vcDrag   = false;  // a press is in progress
+            static bool  s_vcMoved  = false;  // moved far enough to be a scroll
+            static float s_vcStartX = 0.f, s_vcStartY = 0.f;
+            static float s_vcPrevX  = 0.f, s_vcPrevY  = 0.f;
+            bool stickLHeld = (kHeld & HidNpadButton_StickL) != 0;
+            if (kDown & HidNpadButton_StickL) {
+                s_vcDrag = true; s_vcMoved = false;
+                s_vcStartX = s_vcPrevX = gVCursorX;
+                s_vcStartY = s_vcPrevY = gVCursorY;
+                // Seed the touch-gesture state so ApplyTouchScroll targets the
+                // region under the cursor, just like a finger-down would.
+                s_touch.startX = gVCursorX; s_touch.startY = gVCursorY;
+                s_touch.accumX = 0.f; s_touch.accumY = 0.f;
+            } else if (s_vcDrag && stickLHeld) {
+                float ddx = gVCursorX - s_vcPrevX, ddy = gVCursorY - s_vcPrevY;
+                float tx  = gVCursorX - s_vcStartX, ty = gVCursorY - s_vcStartY;
+                if (tx*tx + ty*ty > 36.f) s_vcMoved = true;   // >6px from press = drag
+                if (s_vcMoved) ApplyTouchScroll(ddx, ddy);
+                s_vcPrevX = gVCursorX; s_vcPrevY = gVCursorY;
+            } else if (s_vcDrag && !stickLHeld) {
+                // Release — a tap only if it never turned into a scroll.
+                // Single-dispatch: a HitAdd region wins, else the ProcessTouch
+                // coordinate fallback (avoids the old double-fire).
+                if (!s_vcMoved) {
+                    if (!HitFire((int)gVCursorX, (int)gVCursorY))
+                        ProcessTouch((int)gVCursorX, (int)gVCursorY, kDown);
+                }
+                s_vcDrag = false;
+            }
+            // Suppress the right stick's digital nav events (StickR
+            // Up/Down/Left/Right) so tilting the stick to move the
+            // cursor doesn't ALSO drive tab-switching / list scrolling
+            // / whatever the tab has bound to right-stick nav. The
+            // stick's analog reading above still works — this only
+            // masks the button-style events derived from it.
+            constexpr u64 R_STICK_NAV =
+                HidNpadButton_StickRUp   | HidNpadButton_StickRDown
+              | HidNpadButton_StickRLeft | HidNpadButton_StickRRight;
+            kDown &= ~R_STICK_NAV;
+            kHeld &= ~R_STICK_NAV;
+        }
+
         gFrameKDown = kDown;   // expose to render code (prev/next click feedback)
         u64 kNav = NavRepeat(kDown, kHeld);
 
@@ -11607,18 +12877,29 @@ int main(int,char**) {
             // still need to render the UGC tab so the modal overlay shows;
             // DrawOnSwitch handles the overlay itself when the flag is set.
             if (gShowUgcKindPicker) {
-                const int ROWS = gUgcKindCount + 1;
+                // Row count depends on mode: filter mode has an "All"
+                // tile at index 0; create mode omits it.
+                const int ROWS = gUgcKindCount + (gUgcKindPickerForBlank ? 0 : 1);
                 if (kNav & (HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))
                     gUgcKindPickerSel = (gUgcKindPickerSel > 0) ? gUgcKindPickerSel - 1 : ROWS - 1;
                 if (kNav & (HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))
                     gUgcKindPickerSel = (gUgcKindPickerSel + 1 < ROWS) ? gUgcKindPickerSel + 1 : 0;
                 if (kDown & HidNpadButton_A) {
                     int i = gUgcKindPickerSel;
-                    TUgcApplyKind(i == 0 ? -1 : (i - 1));
-                    gShowUgcKindPicker = false;
+                    if (gUgcKindPickerForBlank) {
+                        // Create mode: i already maps 1:1 to kinds.
+                        gUgcKindPickerForBlank = false;
+                        gShowUgcKindPicker     = false;
+                        TDoCreateBlankUgc(i);
+                    } else {
+                        TUgcApplyKind(i == 0 ? -1 : (i - 1));
+                        gShowUgcKindPicker = false;
+                    }
                 }
-                if (kDown & (HidNpadButton_B | HidNpadButton_X))
-                    gShowUgcKindPicker = false;
+                if (kDown & (HidNpadButton_B | HidNpadButton_X)) {
+                    gShowUgcKindPicker     = false;
+                    gUgcKindPickerForBlank = false;  // cancel pending create
+                }
                 DrawOnSwitch();
                 break;
             }
@@ -11708,21 +12989,57 @@ int main(int,char**) {
                     gOnSwitchMode=OnSwitchMode::WebUI; gOnSwitchMsg=""; break;
                 }
                 // Filtered-list navigation helpers (gEntrySel is real index, gEntryScroll is filtered position)
+                // The pinned "+ blank UGC" row sits above the scrollable
+                // list and joins the Up/Down cycle: from the first entry
+                // Up lands on the blank row; Down from the blank row
+                // returns to the first entry. The blank row is also
+                // wrapped to from the last entry's Down and vice versa
+                // so the cycle is continuous.
                 auto navPrev = [&](){
-                    if (gFilteredEntries.empty()) return;
+                    if (gUgcBlankRowSel) {
+                        // Blank row → wrap to last entry.
+                        if (gFilteredEntries.empty()) return;
+                        gUgcBlankRowSel = false;
+                        int p = (int)gFilteredEntries.size() - 1;
+                        gEntrySel = gFilteredEntries[p];
+                        gEntryScroll = std::max(0, p - VISIBLE + 1);
+                        LoadPreview(gEntries[gEntrySel]);
+                        return;
+                    }
+                    if (gFilteredEntries.empty()) { gUgcBlankRowSel = true; return; }
                     int p = UgcFilterPos(gEntrySel);
                     if (p < 0) p = 0;
-                    p = (p > 0) ? p - 1 : (int)gFilteredEntries.size() - 1;
+                    if (p == 0) {
+                        // First entry → land on blank row instead of wrapping.
+                        gUgcBlankRowSel = true;
+                        gEntryScroll = 0;
+                        return;
+                    }
+                    p = p - 1;
                     gEntrySel = gFilteredEntries[p];
                     if (p < gEntryScroll) gEntryScroll = p;
                     if (p >= gEntryScroll + VISIBLE) gEntryScroll = p - VISIBLE + 1;
                     LoadPreview(gEntries[gEntrySel]);
                 };
                 auto navNext = [&](){
-                    if (gFilteredEntries.empty()) return;
+                    if (gUgcBlankRowSel) {
+                        // Blank row → first entry.
+                        gUgcBlankRowSel = false;
+                        if (gFilteredEntries.empty()) return;
+                        gEntrySel = gFilteredEntries[0];
+                        gEntryScroll = 0;
+                        LoadPreview(gEntries[gEntrySel]);
+                        return;
+                    }
+                    if (gFilteredEntries.empty()) { gUgcBlankRowSel = true; return; }
                     int p = UgcFilterPos(gEntrySel);
                     if (p < 0) p = 0;
-                    p = (p + 1 < (int)gFilteredEntries.size()) ? p + 1 : 0;
+                    if (p + 1 >= (int)gFilteredEntries.size()) {
+                        // Last entry → wrap up to blank row.
+                        gUgcBlankRowSel = true;
+                        return;
+                    }
+                    p = p + 1;
                     gEntrySel = gFilteredEntries[p];
                     if (p >= gEntryScroll + VISIBLE) gEntryScroll = p - VISIBLE + 1;
                     if (p < gEntryScroll) gEntryScroll = p;
@@ -11730,47 +13047,33 @@ int main(int,char**) {
                 };
                 if ((kNav&HidNpadButton_ZL) || (kNav&(HidNpadButton_Up|HidNpadButton_StickLUp|HidNpadButton_StickRUp))) navPrev();
                 if ((kNav&HidNpadButton_ZR) || (kNav&(HidNpadButton_Down|HidNpadButton_StickLDown|HidNpadButton_StickRDown))) navNext();
-                if (kDown&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft) && !gFilteredEntries.empty()){
-                    gEntrySel = gFilteredEntries.front(); gEntryScroll = 0; LoadPreview(gEntries[gEntrySel]);
-                }
-                if (kDown&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight) && !gFilteredEntries.empty()){
-                    gEntrySel = gFilteredEntries.back();
-                    gEntryScroll = std::max(0, (int)gFilteredEntries.size() - VISIBLE);
-                    LoadPreview(gEntries[gEntrySel]);
+                // Left/Right glide the action-bar focus (import / export pic /
+                // export .ltd / remove BG / delete / gear). Only when a real
+                // entry is selected — the pinned blank row has no action bar.
+                if (!gEntries.empty() && !gUgcBlankRowSel) {
+                    if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))
+                        gUgcBtnSel = (gUgcBtnSel - 1 + 6) % 6;
+                    if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight))
+                        gUgcBtnSel = (gUgcBtnSel + 1) % 6;
                 }
                 if (kDown&HidNpadButton_Minus){
                     TUgcOpenSearch(0);
                 }
                 if (kDown&HidNpadButton_A){
-                    gBrowseForMii=false; gBrowseForExportDir=false;
-                    BrowseRefresh(gBrowsePngPath);
-                    gShowFileBrowser=true;
-                }
-                if (kDown&HidNpadButton_Y && !gEntries.empty()){
-                    const auto& e=gEntries[gEntrySel];
-                    LogINF("Exporting "+e.stem+"...");
-                    RgbaImage img;
-                    std::string err=TextureProcessor::DecodeFile(e.ugctexPath,img,true);
-                    if (!err.empty()){gOnSwitchMsg=err;gOnSwitchMsgCol=COL_RED;LogERR("Export failed: "+err);}
-                    else {
-                        TextureProcessor::ConvertLinearToSrgb(img.pixels);
-                        std::string outPath=gExportPath+"/"+e.stem+".png";
-                        SDL_Surface* surf=SDL_CreateRGBSurfaceWithFormatFrom(
-                            img.pixels.data(),img.width,img.height,32,img.width*4,
-                            SDL_PIXELFORMAT_RGBA32);
-                        if(surf){IMG_SavePNG(surf,outPath.c_str());SDL_FreeSurface(surf);
-                            gOnSwitchMsg="Exported to: "+outPath;gOnSwitchMsgCol=COL_GREEN;
-                            LogOK("Exported to: "+outPath);}
-                    }
-                }
-                if (kDown&HidNpadButton_X && !gEntries.empty()) {
-                    FILE* mf = fopen(kBgModelPath, "rb");
-                    if (!mf) {
-                        gOnSwitchMsg = "u2netp.bin missing from romfs (corrupt install?)";
-                        gOnSwitchMsgCol = COL_RED;
+                    if (gUgcDeleteConfirmOpen) {
+                        // Delete modal owns input while open — A confirms
+                        // the wipe, B cancels (handled below).
+                        TConfirmUgcDelete(0);
+                    } else if (gUgcBlankRowSel) {
+                        // Blank-UGC row is the selection: A opens the
+                        // kind picker (or creates immediately if the
+                        // filter chip already targets a specific kind)
+                        // — matches the touch path via TSelUgcBlankRow.
+                        TPromptOrCreateBlankUgc(0);
                     } else {
-                        fclose(mf);
-                        gShowBgRemovePrompt = true;
+                        // Run whichever action-bar button is focused (import /
+                        // export pic / export .ltd / remove BG / delete / gear).
+                        TUgcActivateBtn(0);
                     }
                 }
                 if (gUgcRenameKbdReq) {
@@ -11795,18 +13098,24 @@ int main(int,char**) {
                     }
                 }
                 if (kDown&(HidNpadButton_B|HidNpadButton_Plus)){
-                    bool hasDirty = gPlayerSavDirty || gMiiSavDirty || gUgcDirty || gWebUiDirty;
-                    bool toUserPick = (kDown&HidNpadButton_Plus) == 0;
-                    if (hasDirty) {
-                        gShowBackPrompt=true;
-                        gBackPromptIsMii=gMiiSavDirty; gBackPromptToUserPick=toUserPick;
-                    } else if (toUserPick) {
-                        FreePreview(); HttpServer::Stop(); gLog.clear();
-                        gEntries.clear(); gMiis.clear();
-                        gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
-                        gPlayerSavDirty=false; gMiiSavDirty=false; gUgcDirty=false;
-                        SaveMount::Unmount(); gScreen=Screen::UserPick;
-                    } else { gQuitApp=true; }
+                    if (gUgcDeleteConfirmOpen && (kDown&HidNpadButton_B)) {
+                        // B while the delete modal is open cancels
+                        // without falling through to back-to-user-pick.
+                        TCancelUgcDelete(0);
+                    } else {
+                        bool hasDirty = gPlayerSavDirty || gMiiSavDirty || gUgcDirty || gWebUiDirty;
+                        bool toUserPick = (kDown&HidNpadButton_Plus) == 0;
+                        if (hasDirty) {
+                            gShowBackPrompt=true;
+                            gBackPromptIsMii=gMiiSavDirty; gBackPromptToUserPick=toUserPick;
+                        } else if (toUserPick) {
+                            FreePreview(); HttpServer::Stop(); gLog.clear();
+                            gEntries.clear(); gMiis.clear();
+                            gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
+                            gPlayerSavDirty=false; gMiiSavDirty=false; gUgcDirty=false;
+                            SaveMount::Unmount(); gScreen=Screen::UserPick;
+                        } else { gQuitApp=true; }
+                    }
                 }
             } else if (gOnSwitchMode == OnSwitchMode::Player) {
                 // Lazy-load
@@ -12074,7 +13383,16 @@ int main(int,char**) {
                 if (kDown&HidNpadButton_X && gMiiStatsSubTab==MiiStatsSubTab::Social) gSocialExpanded=!gSocialExpanded;
                 // ZL/ZR switch selected mii
                 if (!gMiis.empty()) {
-                    int mseVis2=(SCREEN_H-SE_TOP_Y-32)/ITEM_H;
+                    // Visible-row count must match the render side, which
+                    // reserves the top of the list for the pinned "+ blank
+                    // mii" row (height ITEM_H+4 + a 3px divider) plus
+                    // LIST_PAD_TOP. Using the old full-height count here
+                    // was the scroll bug — followScroll thought more rows
+                    // were on screen than actually were, so scrolling
+                    // down stopped ~one screen short and the last Miis
+                    // couldn't be reached.
+                    int mseVis2=(SCREEN_H - 32 - (SE_TOP_Y + LIST_PAD_TOP + (ITEM_H + 4) + 3))/ITEM_H;
+                    if (mseVis2 < 1) mseVis2 = 1;
                     // Both lambdas adjust the scroll window in BOTH directions —
                     // the wraparound (Up at top → last, Down at bottom → first)
                     // jumps the selection past the current window, so only the
@@ -12088,13 +13406,36 @@ int main(int,char**) {
                         else if (gMiiStatsMiiSel >= gMiiStatsScroll + mseVis2)
                             gMiiStatsScroll = std::max(0, gMiiStatsMiiSel - mseVis2 + 1);
                     };
+                    // ZL/ZR cycle includes the pinned "+ blank mii" row so
+                    // it's controller-reachable (and shows the focus ring)
+                    // just like the texture tab's "+ blank ugc" row. From
+                    // the first Mii, ZL lands on the blank row; from the
+                    // blank row, ZR returns to the first Mii; wrap-around
+                    // ties the two ends together.
                     auto prevMii = [&](){
-                        gMiiStatsMiiSel = (gMiiStatsMiiSel>0) ? gMiiStatsMiiSel-1 : std::max(0, (int)gMiis.size()-1);
+                        if (gMiiBlankRowSel) {
+                            gMiiBlankRowSel = false;
+                            gMiiStatsMiiSel = std::max(0, (int)gMiis.size()-1);
+                        } else if (gMiiStatsMiiSel == 0) {
+                            gMiiBlankRowSel = true;
+                            gMiiStatsScroll = 0;
+                        } else {
+                            gMiiStatsMiiSel--;
+                        }
                         followScroll();
                         gWordUndo.valid = false; gMiiRelSel=0; gMiiRelScroll=0; gBlPickerOpen=false;
                     };
                     auto nextMii = [&](){
-                        gMiiStatsMiiSel = (gMiiStatsMiiSel+1<(int)gMiis.size()) ? gMiiStatsMiiSel+1 : 0;
+                        if (gMiiBlankRowSel) {
+                            gMiiBlankRowSel = false;
+                            gMiiStatsMiiSel = 0;
+                            gMiiStatsScroll = 0;
+                        } else if (gMiiStatsMiiSel + 1 >= (int)gMiis.size()) {
+                            gMiiBlankRowSel = true;
+                            gMiiStatsScroll = 0;
+                        } else {
+                            gMiiStatsMiiSel++;
+                        }
                         followScroll();
                         gWordUndo.valid = false; gMiiRelSel=0; gMiiRelScroll=0; gBlPickerOpen=false;
                     };
@@ -12102,6 +13443,14 @@ int main(int,char**) {
                     if (!gBlPickerOpen && gMiiStatsSubTab != MiiStatsSubTab::Browse) {
                         if (kNav&HidNpadButton_ZL) prevMii();
                         if (kNav&HidNpadButton_ZR) nextMii();
+                    }
+                    // A while the blank row is focused creates the Mii.
+                    // Consume the A so the field-list editor below doesn't
+                    // also react to the same press.
+                    if (gMiiBlankRowSel && (kDown&HidNpadButton_A)
+                        && gMiiStatsSubTab != MiiStatsSubTab::Browse) {
+                        TDoCreateBlankMii(0);
+                        kDown &= ~HidNpadButton_A;
                     }
                 }
                 // D-pad Up/Down = field/slot nav depending on sub-tab
@@ -12401,8 +13750,25 @@ int main(int,char**) {
                             }
                             gMiiSavDirty = true;
                         };
-                        if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))   cycleType(-1);
-                        if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) cycleType(+1);
+                        // X toggles the edit focus between the rank TYPE (top)
+                        // and the METER (bottom); Left/Right then adjusts
+                        // whichever is focused, with a matching outline in the
+                        // panel. Fixed-meter types have no adjustable meter, so
+                        // focus is pinned to the type there.
+                        if (kDown&HidNpadButton_X)
+                            gMiiRelFocus = RelMeterFixed(curType) ? 0 : (gMiiRelFocus ^ 1);
+                        if (RelMeterFixed(curType)) gMiiRelFocus = 0;
+                        bool relLeft  = (kNav&(HidNpadButton_Left |HidNpadButton_StickLLeft |HidNpadButton_StickRLeft )) != 0;
+                        bool relRight = (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) != 0;
+                        if (gMiiRelFocus == 0) {
+                            if (relLeft)  cycleType(-1);
+                            if (relRight) cycleType(+1);
+                        } else {
+                            // Meter: ±10 per press (~one step within a tier);
+                            // the handler keeps both pair directions in sync.
+                            if (relLeft)  TRelMeterAdj(-10);
+                            if (relRight) TRelMeterAdj(+10);
+                        }
                     }
                     if (gRelDateKbdReq) {
                         gRelDateKbdReq = false;
@@ -12743,12 +14109,18 @@ int main(int,char**) {
                                 if (!gMiiUndoValid[gMiiStatsFieldSel]) { gMiiUndoVal[gMiiStatsFieldSel]=(int32_t)cur; gMiiUndoValid[gMiiStatsFieldSel]=true; }
                                 curIdx = (curIdx>0) ? curIdx-1 : FEELING_LABEL_COUNT-1;
                                 SaveEditor::SetEnumAt(gMiiSav, fh, miiIdx, FEELING_LABELS[curIdx].hash);
+                                // Push Feeling.EndGameTime forward + clear
+                                // pair IsFight flags so the new mood actually
+                                // sticks in-game. Was a no-op before — game
+                                // immediately re-evaluated and reverted.
+                                RelMoodPersistAndCalmFights(miiIdx);
                                 gMiiSavDirty=true;
                             }
                             if (kDown&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight)) {
                                 if (!gMiiUndoValid[gMiiStatsFieldSel]) { gMiiUndoVal[gMiiStatsFieldSel]=(int32_t)cur; gMiiUndoValid[gMiiStatsFieldSel]=true; }
                                 curIdx = (curIdx+1<FEELING_LABEL_COUNT) ? curIdx+1 : 0;
                                 SaveEditor::SetEnumAt(gMiiSav, fh, miiIdx, FEELING_LABELS[curIdx].hash);
+                                RelMoodPersistAndCalmFights(miiIdx);
                                 gMiiSavDirty=true;
                             }
                         } else {
@@ -12785,7 +14157,29 @@ int main(int,char**) {
                         if (nv != cur) { SaveEditor::SetWStr64At(gMiiSav, H_HOW_N, miiIdx, nv); gMiiSavDirty=true; }
                         gMiiStatsMsg=""; gMiiStatsMsgCol=COL_TEXT;
                     }
-                    if (fd.isStr && !gMiis.empty() && gMiiStatsMiiSel<(int)gMiis.size()) {
+                    if (gMiiDeleteConfirmOpen) {
+                        // While the destructive-action modal owns input,
+                        // A confirms and B cancels — bypassing the regular
+                        // action-row dispatch so a misfire on the row
+                        // can't slip through. Also strip the A/B bits
+                        // from kDown here so the later back-to-user-
+                        // pick B handler (and the tab's A/Y bindings)
+                        // don't ALSO fire on the same press — that was
+                        // the "B cancels delete AND asks to save"
+                        // double-fire the user hit.
+                        if (kDown&HidNpadButton_A) {
+                            TConfirmMiiDelete(0);
+                            kDown &= ~HidNpadButton_A;
+                        } else if (kDown&HidNpadButton_B) {
+                            TCancelMiiDelete(0);
+                            kDown &= ~HidNpadButton_B;
+                        }
+                    } else if (fd.isAction && fd.actionId == 3) {
+                        // Pressing A on the Delete-Mii field arms the
+                        // confirm modal; B is handled by the back-to-user
+                        // navigation below as usual.
+                        if (kDown&HidNpadButton_A) TOpenMiiDeleteConfirm(0);
+                    } else if (fd.isStr && !gMiis.empty() && gMiiStatsMiiSel<(int)gMiis.size()) {
                         // Left/Right cycles between [import .ltd] [export .ltd] [share]
                         if (kDown&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))
                             gMiiLtdBtnSel = (gMiiLtdBtnSel > 0) ? gMiiLtdBtnSel - 1 : 2;
@@ -12800,7 +14194,11 @@ int main(int,char**) {
                 }
                 // B = back to user pick, Plus = quit app (both prompt when dirty)
                 if (kDown&(HidNpadButton_B|HidNpadButton_Plus)) {
-                    if (gBlPickerOpen && (kDown&HidNpadButton_B)) {
+                    if (gMiiDeleteConfirmOpen && (kDown&HidNpadButton_B)) {
+                        // B inside the delete modal cancels — handled
+                        // above; this branch keeps the user-pick / quit
+                        // flow from also firing on the same press.
+                    } else if (gBlPickerOpen && (kDown&HidNpadButton_B)) {
                         gBlPickerOpen = false; // B closes picker, does not navigate back
                     } else if (gShareDetailOpen && (kDown&HidNpadButton_B)) {
                         // Already handled in the Browse edit block above, but be defensive.
@@ -12880,18 +14278,19 @@ int main(int,char**) {
                     if (left)  cur = (cur + 2) % 3;
                     if (right || left) TSetMatte(cur);
                 }
-                if (kDown&(HidNpadButton_B|HidNpadButton_Plus)) {
+                // B backs out of the settings drawer to the texture tab it was
+                // opened from (the gear that opens it lives there) — more
+                // intuitive than pressing L/R to some other tab to leave.
+                // Plus still runs the quit / back-to-user-pick flow.
+                if (kDown&HidNpadButton_B) {
+                    gOnSwitchMode = OnSwitchMode::UGC; gOnSwitchMsg = "";
+                    break;
+                }
+                if (kDown&HidNpadButton_Plus) {
                     bool hasDirty = gPlayerSavDirty || gMiiSavDirty || gUgcDirty || gWebUiDirty;
-                    bool toUserPick = (kDown&HidNpadButton_B) != 0;
                     if (hasDirty) {
                         gShowBackPrompt=true;
-                        gBackPromptIsMii=gMiiSavDirty; gBackPromptToUserPick=toUserPick;
-                    } else if (toUserPick) {
-                        FreePreview(); HttpServer::Stop(); gLog.clear();
-                        gEntries.clear(); gMiis.clear();
-                        gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{};
-                        gPlayerSavDirty=false; gMiiSavDirty=false; gUgcDirty=false;
-                        SaveMount::Unmount(); gScreen=Screen::UserPick;
+                        gBackPromptIsMii=gMiiSavDirty; gBackPromptToUserPick=false;
                     } else { gQuitApp=true; }
                 }
 
@@ -13629,6 +15028,7 @@ int main(int,char**) {
     for (auto tex : gAvatarTextures) if (tex) SDL_DestroyTexture(tex);
     gAvatarTextures.clear();
     Audio::Quit();
+    UiIcons::Quit();
     FontQuit();
     nifmExit();
     socketExit();

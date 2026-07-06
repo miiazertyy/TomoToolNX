@@ -64,6 +64,11 @@ player.field.IslandSize = 岛屿大小
 player.field.FountainLv = 喷泉等级
 player.field.Wishes = 愿望
 player.field.Region = 地区
+player.field.TTPenalty = 穿越惩罚
+player.lastpenalty.active = 启用中
+player.lastpenalty.cleared = 已清除
+player.lastpenalty.clear = 清除惩罚
+player.lastpenalty.already = 已清除
 
 # ── Player tab footer ────────────────────────────────────────────────────────
 player.footer = 上/下  选择    左/右  调整    A  编辑    X  撤销    B/+  返回
@@ -82,6 +87,7 @@ backup.footer.full = A  删除 + 备份    B  跳过    +  退出
 backup.tip = {cur} / {max} 个备份
 backup.progress.title = 正在备份存档数据...
 backup.progress.warn = 请勿关闭主机
+backup.progress.hint = 此备份将出现在用户选择页面该用户下方的磁盘按钮中
 mounting.title = 正在挂载存档...
 
 # ── Common labels ────────────────────────────────────────────────────────────
@@ -164,6 +170,8 @@ settings.footer.main = 上/下  导航    左/右  调整    A  操作    B  返
 # ── User pick ────────────────────────────────────────────────────────────────
 userpick.title = 选择用户
 userpick.footer = 左/右  导航    A  选择    X  恢复    -  设置    +  退出
+cursor.hint.off = R stick  光标
+cursor.hint.on = L stick  点击
 restore.toast.ok = 已恢复备份。
 restore.toast.fail = 恢复失败：
 restore.toast.mount_fail = 挂载失败：
@@ -172,6 +180,7 @@ ugc.rename.guide = 重命名 UGC
 ugc.rename.ok = 已重命名。
 ugc.rename.fail = 重命名失败：
 ugc.kind.picker.title = 按类别筛选
+ugc.kind.create.title = 要创建哪种类型？
 ugc.kind.all = 全部
 ugc.kind.food = 食物
 ugc.kind.cloth = 服装
@@ -282,7 +291,7 @@ ugc.import = 导入
 ugc.exportpic = 导出图片
 ugc.exportltd = 导出 .ltd
 ugc.removebg = 移除背景
-ugc.footer = ZL/ZR  滚动    上/下  选择    A  导入    Y  导出图片    导出 .ltd  (触摸)    X  移除背景    -  搜索    L/R  标签    B/+  返回
+ugc.footer = ZL/ZR  滚动    上/下  选择    左/右  操作    A  运行    -  搜索    L/R  标签    B/+  返回
 
 # ── Player tab ───────────────────────────────────────────────────────────────
 player.parse.fail.l1 = Player.sav 解析失败 — 请从备份恢复
@@ -319,6 +328,7 @@ player.desc.IslandSize = 岛屿尺寸预设。其他值会损坏存档！
 player.desc.FountainLv = 许愿喷泉的升级等级。
 player.desc.Wishes = 已许愿望的数量。
 player.desc.Region = 玩家地区（影响季节和天气）。
+player.desc.TTPenalty = 时间穿越惩罚时间戳。按 A 清除，商店会重新进货。
 
 # ── Map tab ──────────────────────────────────────────────────────────────────
 map.picker.title = 选择对象
@@ -366,6 +376,29 @@ mii.same.as.name = (与名字相同)
 mii.cycle.mood = 左/右  切换心情
 mii.file = Mii 文件
 mii.import.ltd = 导入 .ltd
+mii.vibe.label = 岛屿氛围
+mii.blank.btn = + 空白 Mii
+mii.blank.ok  = 已创建空白 Mii
+mii.blank.full = 没有可用的 Mii 槽位
+mii.delete.btn = × 删除
+mii.delete.title = 删除
+mii.delete.warn1 = 此操作会清空 Mii.sav 中的槽位。
+mii.delete.warn2 = 之后请把 Mii.sav 和 Player.sav 和 Map.sav 一起应用到 Switch。
+mii.delete.warn3 = 只应用 Mii.sav 时游戏可能因引用错误而崩溃。
+mii.delete.confirm = 确认删除
+mii.delete.cancel = 取消
+mii.delete.footer = [A] 确认删除  [B] 取消
+mii.delete.ok = Mii 已删除 — 请记得应用全部三个存档
+ugc.blank.btn = + 空白 UGC
+ugc.blank.ok  = 已创建空白 UGC 槽位
+ugc.blank.full = 此类别没有空 UGC 槽位
+ugc.delete.btn = × 删除
+ugc.delete.title = 删除
+ugc.delete.warn = 清空该槽位并删除其纹理文件。
+ugc.delete.confirm = 确认删除
+ugc.delete.cancel = 取消
+ugc.delete.footer = [A] 确认删除  [B] 取消
+ugc.delete.ok = UGC 槽位已删除
 mii.export.ltd = 导出 .ltd
 
 subtab.stats = 数据
@@ -388,6 +421,10 @@ rel.your.type = 你的类型
 rel.their.type = 对方类型  (自动)
 rel.type = 类型
 rel.batch.know = 全部认识
+rel.batch.boost = 全部 200
+rel.batch.zero = 全部 0
+rel.batch.boost.done = 低段关系已升至 200
+rel.batch.zero.done = 所有关系已重置为 0
 rel.meter = 数值
 rel.fixed = 固定
 rel.both.directions = 双向同时设置
@@ -462,6 +499,7 @@ mii.field.Sociability = 社交
 mii.field.BondMeter = 羁绊
 mii.field.Mood = 心情
 mii.field.Fullness = 饱腹度
+mii.field.DeleteMii = 删除此 Mii
 mii.desc.Name = Mii 在游戏中的显示名字。
 mii.desc.Level = 与玩家的友谊等级。
 mii.desc.LvMeter = 通往下一等级的进度条 (0-100)。
@@ -478,11 +516,12 @@ mii.desc.Sociability = Mii 的社交程度 (1-10)。
 mii.desc.BondMeter = 与玩家的羁绊强度 (0-100)。
 mii.desc.Mood = 当前情绪状态。
 mii.desc.Fullness = 饱腹程度。可超过 100。
+mii.desc.DeleteMii = 删除此 Mii。之后请应用全部三个存档。
 
 mii.footer.social.focus = ZL/ZR  mii    Y  子标签    X  全局视图    L/R  标签    B/+  返回
 mii.footer.social.global = ZL/ZR  mii    Y  子标签    X  聚焦视图    L/R  标签    B/+  返回
 mii.footer.words = ZL/ZR  mii    上/下  槽    左/右  类型    A  文本    X  发音    -  撤销    Y  子标签    L/R  标签    B/+  返回
-mii.footer.relations = ZL/ZR  mii    上/下  关系    左/右  类型    Y  子标签    L/R  标签    B/+  返回
+mii.footer.relations = ZL/ZR  mii    上/下  关系    X  类型/数值    左/右  调整    Y  子标签    L/R  标签    B/+  返回
 mii.footer.bl.picker = ZL/ZR  物品    上/下  物品    左/右  +12    A  确认    B  取消
 mii.footer.bl = ZL/ZR  mii    十字键  导航    A  选择    -  颜色    X  清除    Y  子标签    L/R  标签    B/+  返回
 mii.footer.housing.idle = 十字键  导航    A  拿起 / 放下    Y  子标签    L/R  标签    B/+  返回

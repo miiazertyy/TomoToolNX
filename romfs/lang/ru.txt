@@ -64,6 +64,11 @@ player.field.IslandSize = Размер острова
 player.field.FountainLv = Ур. фонтана
 player.field.Wishes = Желания
 player.field.Region = Регион
+player.field.TTPenalty = Штраф ПВ
+player.lastpenalty.active = активен
+player.lastpenalty.cleared = снят
+player.lastpenalty.clear = снять штраф
+player.lastpenalty.already = уже снят
 
 # ── Player tab footer ────────────────────────────────────────────────────────
 player.footer = Вверх/Вниз  выбор    Влево/Вправо  настройка    A  правка    X  отмена    B/+  назад
@@ -82,6 +87,7 @@ backup.footer.full = A  удалить + создать    B  пропустит
 backup.tip = {cur} / {max} копий
 backup.progress.title = создание резервной копии...
 backup.progress.warn = не выключайте консоль
+backup.progress.hint = эта резервная копия появится под кнопкой-дискетой этого пользователя на экране выбора
 mounting.title = загрузка сохранения...
 
 # ── Common labels ────────────────────────────────────────────────────────────
@@ -164,6 +170,8 @@ settings.footer.main = Вверх/Вниз  навигация    Влево/В�
 # ── User pick ────────────────────────────────────────────────────────────────
 userpick.title = выбор пользователя
 userpick.footer = Влево/Вправо  навигация    A  выбрать    X  восстановить    -  настройки    +  выход
+cursor.hint.off = R stick  курсор
+cursor.hint.on = L stick  клик
 restore.toast.ok = Сохранение восстановлено.
 restore.toast.fail = Ошибка восстановления:
 restore.toast.mount_fail = Ошибка монтирования:
@@ -172,6 +180,7 @@ ugc.rename.guide = Переименовать UGC
 ugc.rename.ok = Переименовано.
 ugc.rename.fail = Ошибка переименования:
 ugc.kind.picker.title = Фильтр по категории
+ugc.kind.create.title = Какой тип создать?
 ugc.kind.all = Все
 ugc.kind.food = Еда
 ugc.kind.cloth = Одежда
@@ -282,7 +291,7 @@ ugc.import = импорт
 ugc.exportpic = экспорт изобр.
 ugc.exportltd = экспорт .ltd
 ugc.removebg = убрать фон
-ugc.footer = ZL/ZR  прокрутка    Вверх/Вниз  выбор    A  импорт    Y  экспорт изобр.    экспорт .ltd  (касание)    X  убрать фон    -  поиск    L/R  вкладка    B/+  назад
+ugc.footer = ZL/ZR  прокрутка    Вверх/Вниз  выбор    Влево/Вправо  действие    A  выполнить    -  поиск    L/R  вкладка    B/+  назад
 
 # ── Player tab ───────────────────────────────────────────────────────────────
 player.parse.fail.l1 = Player.sav не удалось прочитать — восстановите из копии
@@ -319,6 +328,7 @@ player.desc.IslandSize = Пресет размера острова. Други�
 player.desc.FountainLv = Уровень фонтана желаний.
 player.desc.Wishes = Количество загаданных желаний.
 player.desc.Region = Регион игрока (влияет на сезоны и погоду).
+player.desc.TTPenalty = Метка времени штрафа за путешествие во времени. Нажмите A, чтобы снять — магазины снова пополнятся.
 
 # ── Map tab ──────────────────────────────────────────────────────────────────
 map.picker.title = выбрать объект
@@ -366,6 +376,29 @@ mii.same.as.name = (как имя)
 mii.cycle.mood = Влево/Вправо  сменить настроение
 mii.file = Файл Mii
 mii.import.ltd = импорт .ltd
+mii.vibe.label = настроение острова
+mii.blank.btn = + пустой мий
+mii.blank.ok  = пустой мий создан
+mii.blank.full = нет свободных слотов миев
+mii.delete.btn = × удалить
+mii.delete.title = Удалить
+mii.delete.warn1 = Это очистит слот в Mii.sav.
+mii.delete.warn2 = Затем примените Mii.sav И Player.sav И Map.sav на Switch.
+mii.delete.warn3 = Без всех трёх игра может зависнуть (битые ссылки).
+mii.delete.confirm = подтвердить
+mii.delete.cancel = отмена
+mii.delete.footer = [A] подтвердить  [B] отмена
+mii.delete.ok = мий удалён — не забудьте применить все три файла
+ugc.blank.btn = + пустой ugc
+ugc.blank.ok  = пустой слот ugc создан
+ugc.blank.full = нет свободных слотов ugc этой категории
+ugc.delete.btn = × удалить
+ugc.delete.title = Удалить
+ugc.delete.warn = Очищает слот и удаляет файлы текстур.
+ugc.delete.confirm = подтвердить
+ugc.delete.cancel = отмена
+ugc.delete.footer = [A] подтвердить  [B] отмена
+ugc.delete.ok = слот UGC удалён
 mii.export.ltd = экспорт .ltd
 
 subtab.stats = Статы
@@ -388,6 +421,10 @@ rel.your.type = Ваш тип
 rel.their.type = Их тип  (авто)
 rel.type = Тип
 rel.batch.know = Знакомы все
+rel.batch.boost = Все до 200
+rel.batch.zero = Все до 0
+rel.batch.boost.done = низкие отношения подняты до 200
+rel.batch.zero.done = отношения сброшены до 0
 rel.meter = Шкала
 rel.fixed = фикс.
 rel.both.directions = обе стороны вместе
@@ -462,6 +499,7 @@ mii.field.Sociability = Общительн.
 mii.field.BondMeter = Связь
 mii.field.Mood = Настроение
 mii.field.Fullness = Сытость
+mii.field.DeleteMii = Удалить этого мия
 mii.desc.Name = Отображаемое имя Mii в игре.
 mii.desc.Level = Уровень дружбы с игроком.
 mii.desc.LvMeter = Прогресс до следующего уровня (0-100).
@@ -478,11 +516,12 @@ mii.desc.Sociability = Общительность (1-10).
 mii.desc.BondMeter = Сила связи с игроком (0-100).
 mii.desc.Mood = Текущее эмоциональное состояние.
 mii.desc.Fullness = Уровень сытости. Может превышать 100.
+mii.desc.DeleteMii = Удалить этого мия. После применить все три файла.
 
 mii.footer.social.focus = ZL/ZR  mii    Y  подвкл.    X  общий граф    L/R  вкладка    B/+  назад
 mii.footer.social.global = ZL/ZR  mii    Y  подвкл.    X  фокус    L/R  вкладка    B/+  назад
 mii.footer.words = ZL/ZR  mii    Вверх/Вниз  слот    Влево/Вправо  тип    A  текст    X  произн.    -  отмена    Y  подвкл.    L/R  вкладка    B/+  назад
-mii.footer.relations = ZL/ZR  mii    Вверх/Вниз  отношение    Влево/Вправо  тип    Y  подвкл.    L/R  вкладка    B/+  назад
+mii.footer.relations = ZL/ZR  mii    Вверх/Вниз  отношение    X  тип/шкала    Влево/Вправо  изменить    Y  подвкл.    L/R  вкладка    B/+  назад
 mii.footer.bl.picker = ZL/ZR  предмет    Вверх/Вниз  предмет    Влево/Вправо  +12    A  подтвердить    B  отмена
 mii.footer.bl = ZL/ZR  mii    D-pad  навигация    A  выбрать    -  цвет    X  очистить    Y  подвкл.    L/R  вкладка    B/+  назад
 mii.footer.housing.idle = D-pad  навигация    A  поднять / разместить    Y  подвкл.    L/R  вкладка    B/+  назад

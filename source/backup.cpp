@@ -57,16 +57,32 @@ static std::string MakeTimestampedBackupPath(const std::string& uidTag) {
     time_t now = time(nullptr);
     struct tm* t = localtime(&now);
     char buf[96];
-    snprintf(buf, sizeof(buf), "%s/save_%02d-%02d-%04d_%02d-%02d",
+    // Seconds are part of the name: without them two backups made in the
+    // same minute (e.g. "erase oldest + backup" done shortly after a manual
+    // backup) collided on one folder — the delete removed the oldest but the
+    // "new" backup just overwrote the existing same-minute folder, so the
+    // count silently dropped by one. Second-granularity keeps them unique.
+    snprintf(buf, sizeof(buf), "%s/save_%02d-%02d-%04d_%02d-%02d-%02d",
              BackupRootFor(uidTag).c_str(),
              t->tm_mday, t->tm_mon + 1, t->tm_year + 1900,
-             t->tm_hour, t->tm_min);
+             t->tm_hour, t->tm_min, t->tm_sec);
     return buf;
 }
 
-// Returns all save_* backup folders inside the per-user root, sorted oldest-first by mtime.
+// Returns all save_* backup folders inside the per-user root, sorted
+// oldest-first. Sort key is the folder name's parsed timestamp (from
+// the "save_DD-MM-YYYY_HH-MM" pattern), packed into YYYYMMDDHHMM so
+// lexical order == chronological order. Previously we sorted by
+// st_mtime, which on the Switch's SD card / savedata mount was
+// unreliable enough that recent backups occasionally showed up
+// interleaved with older ones — the folder name is authoritative
+// (we set it ourselves at backup time) so we use that instead.
+// Folders whose name doesn't match the pattern fall to the end
+// with key 0, sorted by name, so anything hand-created still lists
+// deterministically.
 static std::vector<std::string> ListSaveBackups(const std::string& uidTag) {
-    std::vector<std::pair<time_t,std::string>> entries;
+    struct Entry { uint64_t key; std::string path; };
+    std::vector<Entry> entries;
     std::string root = BackupRootFor(uidTag);
     DIR* d = opendir(root.c_str());
     if (!d) return {};
@@ -75,13 +91,31 @@ static std::vector<std::string> ListSaveBackups(const std::string& uidTag) {
         if (strncmp(de->d_name, "save_", 5) != 0) continue;
         std::string full = root + "/" + de->d_name;
         struct stat st;
-        if (stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
-            entries.push_back({st.st_mtime, full});
+        if (stat(full.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) continue;
+        int dd, mo, yy, hh, mm, ss = 0;
+        uint64_t key = 0;
+        // Accept both the new "..._HH-MM-SS" names and legacy "..._HH-MM"
+        // ones (ss stays 0 → sorts as that minute at :00, still correct).
+        int n = sscanf(de->d_name + 5, "%d-%d-%d_%d-%d-%d",
+                       &dd, &mo, &yy, &hh, &mm, &ss);
+        if (n == 5 || n == 6) {
+            key = (uint64_t)yy * 10000000000ull
+                + (uint64_t)mo * 100000000ull
+                + (uint64_t)dd * 1000000ull
+                + (uint64_t)hh * 10000ull
+                + (uint64_t)mm * 100ull
+                + (uint64_t)ss;
+        }
+        entries.push_back({key, full});
     }
     closedir(d);
-    std::sort(entries.begin(), entries.end());
+    std::sort(entries.begin(), entries.end(),
+              [](const Entry& a, const Entry& b) {
+                  if (a.key != b.key) return a.key < b.key;
+                  return a.path < b.path;
+              });
     std::vector<std::string> result;
-    for (auto& e : entries) result.push_back(e.second);
+    for (auto& e : entries) result.push_back(e.path);
     return result;
 }
 

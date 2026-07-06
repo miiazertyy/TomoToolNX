@@ -61,6 +61,12 @@ void     SetInt  (SavFile& s, uint32_t h, int32_t  v);
 void     SetUInt (SavFile& s, uint32_t h, uint32_t v);
 void     SetEnum (SavFile& s, uint32_t h, uint32_t v);
 
+// Scalar UInt64 (DT_UInt64): 8-byte heap payload, no count prefix. Used for
+// fields like Player.LastPenaltyTime that store an absolute game-clock
+// timestamp rather than a per-Mii array element.
+uint64_t GetUInt64(const SavFile& s, uint32_t h, uint64_t def = 0);
+void     SetUInt64(SavFile& s, uint32_t h, uint64_t v);
+
 // ── Array element accessors (heap types) ─────────────────────────────────────
 int32_t  GetIntAt  (const SavFile& s, uint32_t h, int idx, int32_t  def = 0);
 uint32_t GetUIntAt  (const SavFile& s, uint32_t h, int idx, uint32_t def = 0);

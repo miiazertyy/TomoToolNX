@@ -50,6 +50,10 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .btn-cyan:hover:not(:disabled){border-color:var(--accent2);color:var(--accent2)}
 .btn-blue{border-color:#5a8cc8;color:#5a8cc8}
 .btn-blue:hover:not(:disabled){border-color:#7aaee8;color:#7aaee8}
+.btn-green{border-color:#3a8a4a;color:#7ad27a}
+.btn-green:hover:not(:disabled){border-color:#5acc6a;color:#9ce69c}
+.btn-red{border-color:#8a3a3a;color:#e07a7a}
+.btn-red:hover:not(:disabled){border-color:#c86a6a;color:#f09090}
 .btn-enc{padding:4px 10px;font-size:11px;border-color:var(--border)}
 .btn-enc.enc-on{border-color:var(--accent);color:var(--accent);background:rgba(200,169,110,.08)}
 .enc-row{display:none;padding:8px 14px 10px;border-top:1px solid var(--border);background:var(--surface);flex-direction:column;gap:8px}
@@ -181,7 +185,7 @@ header h1 span{color:var(--muted);font-size:11px;margin-left:6px}
 .nav-toggle-bar{display:flex;align-items:center;justify-content:center;height:16px;background:var(--surface);border-bottom:1px solid var(--border);cursor:pointer;flex-shrink:0;color:var(--muted);user-select:none}
 .nav-toggle-bar:hover{color:var(--text)}
 .nav-toggle-bar svg{transition:transform .2s}
-body.nav-collapsed header,body.nav-collapsed .tabs,body.nav-collapsed #save-warn,body.nav-collapsed #mii-subtab-bar-global,body.nav-collapsed #save-toolbar-player,body.nav-collapsed #save-toolbar-mii,body.nav-collapsed #mii-ltd-toolbar,body.nav-collapsed #map-toolbar{display:none!important}
+body.nav-collapsed header,body.nav-collapsed .tabs,body.nav-collapsed #save-warn,body.nav-collapsed #mii-subtab-bar-global,body.nav-collapsed #save-toolbar-player,body.nav-collapsed #save-toolbar-mii,body.nav-collapsed #mii-ltd-toolbar,body.nav-collapsed #map-toolbar,body.nav-collapsed #save-toolbar-ugc{display:none!important}
 body.nav-collapsed .nav-toggle-bar svg{transform:rotate(180deg)}
 .mii-content{flex:1;overflow-y:auto;min-height:0}.mii-content::-webkit-scrollbar{width:4px}.mii-content::-webkit-scrollbar-thumb{background:var(--border)}
 .mii-words-list{display:flex;flex-direction:column;gap:4px;padding:10px 12px}
@@ -543,21 +547,23 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
 
 <!-- UGC Panel -->
 <div class="panel active" id="panel-ugc">
+  <div class="toolbar" id="save-toolbar-ugc">
+    <button class="btn btn-cyan" id="btn-import" disabled onclick="doImport()">import</button>
+    <button class="btn btn-gold" id="btn-export" disabled onclick="doExport()">export pic</button>
+    <button class="btn btn-gold" id="btn-export-ltd" disabled onclick="doExportLtd()">export .ltd</button>
+    <button class="btn btn-blue" id="btn-removebg" disabled onclick="doRemoveBg()">remove BG</button>
+    <button class="btn btn-green" id="btn-ugc-blank" onclick="doUgcBlank()" title="Create a new blank UGC item — pick which type (Food / Cloth / Goods / …) when you click, same as the on-Switch &quot;Create blank&quot; kind picker">+ blank UGC</button>
+    <button class="btn btn-red" id="btn-ugc-delete" disabled onclick="doUgcDelete()" title="Delete the currently selected UGC slot (clears its name and removes the on-disk texture files)">× delete</button>
+    <button class="btn" onclick="loadList()">refresh</button>
+    <div class="status info" id="status"></div>
+    <button class="btn" id="btn-settings" onclick="openSettings()" title="Settings"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+  </div>
   <div class="nav-toggle-bar" onclick="document.body.classList.toggle('nav-collapsed')" title="toggle navigation"><svg width="12" height="7" viewBox="0 0 12 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6L6 1L11 6"/></svg></div>
   <div class="preview-area checker">
     <div class="preview-placeholder" id="placeholder">no selection</div>
     <img id="preview-img" style="display:none" alt="">
   </div>
   <div class="info-bar" id="info-bar"></div>
-  <div class="toolbar" style="border-top:none;padding-bottom:9px">
-    <button class="btn btn-cyan" id="btn-import" disabled onclick="doImport()">import</button>
-    <button class="btn btn-gold" id="btn-export" disabled onclick="doExport()">export pic</button>
-    <button class="btn btn-gold" id="btn-export-ltd" disabled onclick="doExportLtd()">export .ltd</button>
-    <button class="btn btn-blue" id="btn-removebg" disabled onclick="doRemoveBg()">remove BG</button>
-    <button class="btn" onclick="loadList()">refresh</button>
-    <div class="status info" id="status"></div>
-    <button class="btn" id="btn-settings" onclick="openSettings()" title="Settings"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
-  </div>
 <!-- Settings panel overlay -->
 <div id="settings-panel" onclick="if(event.target===this)closeSettings()">
   <div id="settings-drawer">
@@ -707,10 +713,13 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
   <div class="toolbar" id="mii-ltd-toolbar" style="margin-top:4px">
     <button class="btn btn-primary" id="btn-mii-import" disabled onclick="doMiiImport(savMiiSlot+1)">import .ltd</button>
     <button class="btn btn-gold" id="btn-mii-export" disabled onclick="doMiiExport(savMiiSlot+1)">export .ltd</button>
+    <button class="btn btn-green" id="btn-mii-blank" onclick="doMiiBlank()" title="Create a blank Mii in the first empty slot (mirrors the on-Switch &quot;Create blank Mii&quot; button)">+ blank Mii</button>
+    <button class="btn btn-red" id="btn-mii-delete" disabled onclick="doMiiDelete()" title="Delete the selected Mii — clears CharInfoEx, relations, housing and family refs. Player.sav + Map.sav still need to be re-applied to the Switch after.">× delete Mii</button>
     <button class="btn btn-share-icon" id="btn-mii-browse" title="Download a Mii from TomodachiShare and overwrite the selected slot" onclick="openBrowseTab()" aria-label="Download from TomodachiShare">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
     </button>
     <div class="status info" id="mii-io-status"></div>
+    <div id="island-vibe-chip" title="Island Vibe — aggregated personality across all residents (ltd-save-editor-2.13.0 algorithm)" style="display:none;margin-left:6px;padding:3px 9px;border-radius:11px;border:1px solid var(--border);font-size:.72rem;font-weight:600;background:var(--surface)"></div>
   </div>
   <div class="nav-toggle-bar" onclick="document.body.classList.toggle('nav-collapsed')" title="toggle navigation"><svg width="12" height="7" viewBox="0 0 12 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6L6 1L11 6"/></svg></div>
   <div class="save-mii-layout">
@@ -779,6 +788,17 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
     <div class="dialog-btns" id="dlg-btns">
       <button class="btn btn-primary" onclick="modalYes()">yes</button>
       <button class="btn" onclick="modalClose()">cancel</button>
+    </div>
+  </div>
+</div>
+<!-- Blank-UGC kind picker: choose which type to create without touching the
+     list filter (buttons injected by doUgcBlank). -->
+<div class="overlay" id="ugc-kind-overlay">
+  <div class="dialog">
+    <h2>Which type to create?</h2>
+    <div class="dialog-btns" id="ugc-kind-picker-btns" style="flex-wrap:wrap"></div>
+    <div class="dialog-btns" style="margin-top:14px">
+      <button class="btn" onclick="closeUgcKindPicker()">cancel</button>
     </div>
   </div>
 </div>
@@ -2355,6 +2375,7 @@ async function selectEntry(e){
   document.getElementById('btn-export').disabled=false;
   document.getElementById('btn-export-ltd').disabled=(ugcKindFromStem(e.stem)<0);
   document.getElementById('btn-removebg').disabled=false;
+  document.getElementById('btn-ugc-delete').disabled=false;
   document.getElementById('placeholder').style.display='none';
   document.getElementById('preview-img').style.display='none';
   document.getElementById('info-bar').textContent='';
@@ -2524,6 +2545,168 @@ async function uploadMiiFile(file){
   pendingMiiSlot=null;
 }
 function setMiiStatus(msg,cls){const el=document.getElementById('mii-io-status');if(!el)return;el.textContent=msg;el.className='status '+cls;}
+
+// Delete the currently-selected Mii — ports source/main.cpp DeleteMii
+// verbatim to JS so the operation runs entirely in-browser on the
+// loaded savMii buffer. Touches: name (WStr32Array), CharInfoEx
+// (BinArray, 156-byte record), FeelingEndGameTime, family refs
+// (BloodMiiIndex, Childcare.Pending/Reserve ParentMiiIndex),
+// housing (HouseMapId/RoomIndex), and every relation pair the Mii is
+// in (resets ids, meter, type=Invalid, IsFight=false, TypeSetTime=0).
+// User has to click "apply to Switch" afterwards + is warned that
+// Player.sav + Map.sav also need re-applying so the game doesn't
+// reference the deleted slot from ring buffers / house tables.
+async function doMiiDelete(){
+  if(!savMii){setMiiStatus('load Mii.sav first','err');return;}
+  const idx = savMiiSlot;
+  const nm  = getWStr32At(savMii.entries, H('Mii.Name.Name'), idx) || '?';
+  if(!confirm('Delete "' + nm + '" (slot ' + (idx+1) + ') ?\n\n' +
+              'This wipes the slot in Mii.sav.\n\n' +
+              'You MUST re-apply Mii.sav AND Player.sav AND Map.sav to the Switch after this — otherwise the game will still see this Mii referenced and may crash.')) return;
+  deleteMii(idx);
+  savMiiDirty = true;
+  // Re-render every subtab so the roster + relations + housing + vibe
+  // all reflect the empty slot without a full save reload.
+  renderMiiSlots();
+  renderMiiSubTab();
+  renderIslandVibeChip();
+  setMiiStatus('mii deleted — remember to apply all three saves', 'ok');
+}
+
+// Port of source/main.cpp DeleteMii(). Runs against the in-memory
+// savMii entries; caller re-renders + marks dirty.
+function deleteMii(miiIdx){
+  if(!savMii || miiIdx < 0) return;
+  const e = savMii.entries;
+  const H_IA = 0xf7420afb, H_IB = 0x4071f71c;
+  const H_BASE = 0x8b41897e, H_METER = 0x42c2fc2f;
+  const H_TST  = 0x1a892e50, H_INVALID = 0x7e3d1e46;
+  // 1. Reset every relation pair this Mii is in.
+  const pc = arrSize(e, H_IA);
+  for(let p = 0; p < pc; p++){
+    const a = getIntAt(e, H_IA, p), b = getIntAt(e, H_IB, p);
+    if(a !== miiIdx && b !== miiIdx) continue;
+    setIntAt(e, H_IA, p, -1);
+    setIntAt(e, H_IB, p, -1);
+    setEnumAt(e, H_BASE, p*2,     H_INVALID);
+    setEnumAt(e, H_BASE, p*2 + 1, H_INVALID);
+    setIntAt (e, H_METER, p*2,     0);
+    setIntAt (e, H_METER, p*2 + 1, 0);
+    setBoolAt(e, H('Mii.Relation.Info.IsFight'), p, false);
+    setUInt64At(e, H_TST, p, 0n);
+  }
+  // 2. Clear -1 sentinels in family / childcare arrays.
+  const clearRefs = (hash) => {
+    const n = arrSize(e, hash);
+    for(let i = 0; i < n; i++){
+      if(getIntAt(e, hash, i) === miiIdx) setIntAt(e, hash, i, -1);
+    }
+  };
+  clearRefs(H('Mii.MiiMisc.EntryInfo.BloodMiiIndex'));
+  clearRefs(H('Childcare.Pending.ParentMiiIndex'));
+  clearRefs(H('Childcare.Reserve.ParentMiiIndex'));
+  // 3. Evict from housing.
+  setIntAt(e, H('Mii.Location.HouseMapId'), miiIdx, -1);
+  setIntAt(e, H('Mii.Location.RoomIndex'),  miiIdx, -1);
+  // 4. Zero identity: 152-byte CharInfoEx (BinArray record stride = 156),
+  //    empty name, zero FeelingEndGameTime.
+  const binEnt = findE(e, H('Mii.CharInfoEx'));
+  if(binEnt && binEnt.payload){
+    // Payload = [count:4] then per-slot [size:4][data:152] = 156 bytes.
+    // Data window starts at 8 + idx*156; preserve the 4-byte size
+    // prefix (=152) since ListMiis / the game key on it.
+    const dataOff = 8 + miiIdx * 156;
+    if(binEnt.payload.length >= dataOff + 152){
+      for(let i = 0; i < 152; i++) binEnt.payload[dataOff + i] = 0;
+    }
+  }
+  setWStr32At(e, H('Mii.Name.Name'), miiIdx, '');
+  setUInt64At(e, H('Mii.Feeling.FeelingEndGameTime'), miiIdx, 0n);
+}
+
+// Mirrors the on-Switch "Create blank Mii" button: server lands a default
+// CharInfoEx (152-byte blob from ltd-save-editor-2.13.0) in the first
+// empty Mii slot. After the call we reload Mii.sav so the editor reflects
+// the new resident and jump the selection to that slot.
+async function doMiiBlank(){
+  setMiiStatus('creating blank mii...','info');
+  try{
+    const r=await fetch('/api/mii/blank',{method:'POST'});
+    const j=await r.json();
+    if(!j||!j.ok){setMiiStatus('failed: '+(j&&j.error||'unknown'),'err');return;}
+    setMiiStatus('blank mii in slot '+j.slot,'ok');
+    // Pull the fresh Mii.sav back so the new resident shows up in the slot
+    // list without forcing a full page reload.
+    try{
+      const sr=await fetch('/api/save/download?file=mii');
+      if(sr.ok){
+        const buf=await sr.arrayBuffer();
+        savMii=parseSav(buf);
+        savMiiSlot=Math.max(0,(j.slot|0)-1);
+        renderMiiSlots();
+        renderMiiSubTab();
+        renderIslandVibeChip();
+      }
+    }catch(_){}
+  }catch(e){setMiiStatus('failed: '+e.message,'err');}
+}
+
+// Mirrors the on-Switch "Create blank UGC" button. Uses the currently
+// selected kind in the filter (Food / Cloth / …). "All" / "Face Paint"
+// aren't valid here — the homebrew's CreateBlankUgc only handles the
+// seven base kinds, so we ask the user to pick one first.
+// Blank-UGC creation always asks which kind to make via a small green picker,
+// decoupled from the list filter — mirrors the on-Switch kind picker. The old
+// flow reused the filter value, forcing the user to change the filter first.
+const UGC_BLANK_KINDS=['Food','Cloth','Goods','Interior','Exterior','Objects','Landscaping'];
+function doUgcBlank(){
+  const box=document.getElementById('ugc-kind-picker-btns');
+  box.innerHTML='';
+  UGC_BLANK_KINDS.forEach((lbl,k)=>{
+    const b=document.createElement('button');
+    b.className='btn btn-green';
+    b.textContent=lbl;
+    b.onclick=()=>{closeUgcKindPicker();createBlankUgc(k);};
+    box.appendChild(b);
+  });
+  document.getElementById('ugc-kind-overlay').classList.add('open');
+}
+function closeUgcKindPicker(){document.getElementById('ugc-kind-overlay').classList.remove('open');}
+async function createBlankUgc(k){
+  setStatus('creating blank UGC...','info');
+  try{
+    const r=await fetch('/api/ugc/blank?kind='+k,{method:'POST'});
+    const j=await r.json();
+    if(!j||!j.ok){setStatus('failed: '+(j&&j.error||'unknown'),'err');return;}
+    setStatus('blank UGC '+j.stem+' in slot '+j.slot,'ok');
+    await loadList();
+  }catch(e){setStatus('failed: '+e.message,'err');}
+}
+
+// Delete the currently-selected UGC slot. Two-step confirm so the
+// user can't wipe a slot with a misfired click. Sends the item stem
+// to /api/ugc/delete; the server-side handler both clears the slot's
+// name in Player.sav and removes the .canvas.zs / .ugctex.zs /
+// _Thumb_ugctex.zs files off disk. On success the entry drops out
+// of the next loadList() render.
+async function doUgcDelete(){
+  if(!selected){setStatus('pick a UGC slot first','err');return;}
+  const stem = selected.stem;
+  const nm   = selected.name || stem;
+  if(!confirm('Delete "' + nm + '" (' + stem + ') ?\n\nThis clears its name in Player.sav and deletes the on-disk texture files. Cannot be undone.')) return;
+  setStatus('deleting ' + stem + '…','info');
+  try{
+    const r = await fetch('/api/ugc/delete?stem=' + encodeURIComponent(stem),
+                          {method:'POST'});
+    const j = await r.json();
+    if(!j || !j.ok){setStatus('failed: '+(j&&j.error||'unknown'),'err');return;}
+    setStatus(stem + ' deleted','ok');
+    selected = null;
+    document.getElementById('btn-ugc-delete').disabled = true;
+    await loadList();
+  }catch(e){setStatus('failed: '+e.message,'err');}
+}
+
 function restartServer(){alert('Press X on the console to restart the server.');}
 async function initSaveWarn(){try{const d=await(await fetch('/api/config')).json();if(d.saveWarnAcked){localStorage.setItem('saveWarnSeen','1');return;}}catch(e){}if(!localStorage.getItem('saveWarnSeen'))document.getElementById('save-warn').style.display='block';}
 function dismissSaveWarn(){document.getElementById('save-warn').style.display='none';localStorage.setItem('saveWarnSeen','1');}
@@ -2663,6 +2846,10 @@ function getUInt64At(entries,hash,idx){const e=findE(entries,hash);if(!e||e.type
 function getFloatAt(entries,hash,idx){const e=findE(entries,hash);if(!e||e.type!==5||!e.payload||e.payload.length<4)return 0;const dv=arrDV(e),c=dv.getUint32(0,true);return(idx>=0&&idx<c)?dv.getFloat32(4+idx*4,true):0;}
 function setFloatAt(entries,hash,idx,val){const e=findE(entries,hash);if(!e||e.type!==5||!e.payload||e.payload.length<4)return;const dv=arrDV(e),c=dv.getUint32(0,true);if(idx>=0&&idx<c)dv.setFloat32(4+idx*4,val,true);}
 function setUInt64At(entries,hash,idx,val){const e=findE(entries,hash);if(!e||e.type!==25||!e.payload||e.payload.length<4)return;const dv=arrDV(e),c=dv.getUint32(0,true);if(idx<0||idx>=c)return;const off=4+idx*8;if(off+8>e.payload.length)return;dv.setUint32(off,Number(val&0xFFFFFFFFn),true);dv.setUint32(off+4,Number((val>>32n)&0xFFFFFFFFn),true);}
+// Scalar DT_UInt64 (type 24): 8-byte payload, no count prefix. Used for
+// fields like Player.LastPenaltyTime (the time-travel cooldown stamp).
+function getUInt64S(entries,hash){const e=findE(entries,hash);if(!e||e.type!==24||!e.payload||e.payload.length<8)return 0n;const dv=new DataView(e.payload.buffer,e.payload.byteOffset,8);return BigInt(dv.getUint32(0,true))+BigInt(dv.getUint32(4,true))*0x100000000n;}
+function setUInt64S(entries,hash,val){const e=findE(entries,hash);if(!e||e.type!==24)return;if(!e.payload||e.payload.length<8)e.payload=new Uint8Array(8);const dv=new DataView(e.payload.buffer,e.payload.byteOffset,8);dv.setUint32(0,Number(val&0xFFFFFFFFn),true);dv.setUint32(4,Number((val>>32n)&0xFFFFFFFFn),true);}
 function u64ToDateLocal(secs){if(secs===null||secs<=0n)return'';const n=Number(secs);const d=new Date(n*1000);if(isNaN(d.getTime()))return'';const p=x=>x.toString().padStart(2,'0');return`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;}
 function dateLocalToU64(raw){const t=raw.trim();if(!t)return 0n;const d=new Date(t);if(isNaN(d.getTime()))return null;const s=Math.floor(d.getTime()/1000);if(!isFinite(s)||s<0)return null;return BigInt(s);}
 function getEnumAt(entries,hash,idx){const e=findE(entries,hash);if(!e||e.type!==7||!e.payload||e.payload.length<4)return 0;const dv=arrDV(e),c=dv.getUint32(0,true);return(idx>=0&&idx<c)?dv.getUint32(4+idx*4,true):0;}
@@ -2712,6 +2899,157 @@ const REL_COLOR_MAP={
 function relColor(v){return REL_COLOR_MAP[v>>>0]||'#555';}
 function relLabel(v){const o=REL_OPTS.find(r=>(r.v>>>0)===(v>>>0));return o?o.l:'?';}
 function isRelFixed(v){const t=v>>>0;return t===0x0784a8dc||t===0x7e3d1e46;}
+
+// Sub-relationship tier tables, copied verbatim from
+// include/rel_tier_labels.h (which itself was generated from
+// ltd-save-editor-2.13.0/static/mii-labels.json#subRelations). Tier index
+// 0..6 derived from the universal RANK_THRESHOLDS [11,41,81,120,160,190]:
+// meter < 11 -> 0, < 41 -> 1, < 81 -> 2, < 120 -> 3, < 160 -> 4, < 190 -> 5, else 6.
+// Sub-relationship tier labels — synced verbatim with
+// ltd-save-editor-2.13.0/static/mii-labels.json (subRelations → USen)
+// so what the WebUI shows matches the reference editor byte-for-byte.
+const REL_TIER={
+  COUPLE:['Not getting along','Making it work','Happy','In love','Very in love','Super in love','Soulmates'],
+  COUPLE_FIGHT:['Still trying?','Making it work?','Still happy?','Still in love?','Still very in love?','Still super in love?','Still soulmates?'],
+  FRIEND:['Not getting along','Kinda getting along','Friends','Good friends','Great friends','Best friends','Ultra friends'],
+  FRIEND_FIGHT:['Not getting along?','Kinda getting along?','Still friends?','Still good friends?','Still great friends?','Still best friends?','Still ultra friends?'],
+  KNOW:['Not interested','Indifferent','Some interest','Getting familiar','Seems like-minded','Vibes with','Wants to be friends'],
+  LOVER:['Not getting along','Kinda getting along','Really likes','Falling in love','In love','Super in love','Wants to marry!'],
+  LOVER_FIGHT:['Not getting along?','Kinda getting along?','Still really likes?','Still falling in love?','Still in love?','Still super in love?','Still wants to marry?'],
+  FAMILY:['Not getting along','Kinda getting along','Getting along well','Cares for','Cares a lot for','Cares deeply for','Cherishes'],
+  DIVORCE:['Enemies','Tries to avoid','Not speaking','No hard feelings','On good terms','Still great friends','Would try again'],
+  EXFRIEND:['Enemies','Tries to avoid','Not speaking','Strained',"It's complicated",'Thinks about often','Hopes to make up'],
+  EXLOVER:['Enemies','Tries to avoid','Not speaking','No hard feelings','On good terms','Still great friends','Would try again'],
+  ONESIDELOVE:['Giving up','Close to giving up','Has some hope','Likes a lot','Crushing','Head over heels','Ready to risk it all'],
+  ONESIDELOVE_FIGHT:['Giving up?','Close to giving up?','Still interested?','Still likes?','Still crushing?','Still head over heels?','Still ready to risk it all?'],
+};
+function relTierIndex(meter){const T=[11,41,81,120,160,190];for(let i=0;i<6;i++)if(meter<T[i])return i;return 6;}
+function relTierLabel(typeHash,meter,isFight){
+  const t=relTierIndex(meter|0),h=typeHash>>>0;
+  switch(h){
+    case 0xc2d067a7: return (isFight?REL_TIER.COUPLE_FIGHT:REL_TIER.COUPLE)[t];
+    case 0xba939a42: return (isFight?REL_TIER.FRIEND_FIGHT:REL_TIER.FRIEND)[t];
+    case 0xb7ce0c18: return (isFight?REL_TIER.LOVER_FIGHT :REL_TIER.LOVER )[t];
+    // OneSideLove has TWO in-game hashes — FriendOneSide… and KnowOneSide…
+    // Both share the same tier labels per 2.13.0's subRelationLabels map.
+    case 0x4cfcf0b9:
+    case 0x68ef8aab:
+      return (isFight?REL_TIER.ONESIDELOVE_FIGHT:REL_TIER.ONESIDELOVE)[t];
+    case 0x354a0515: return REL_TIER.KNOW[t];
+    case 0x535e93a8: return REL_TIER.EXFRIEND[t];
+    case 0x7783d4c3: return REL_TIER.EXLOVER[t];
+    case 0xfe59f825: return REL_TIER.DIVORCE[t];
+    case 0xdcfc7603: case 0xe193c5a2: case 0x1918f808: case 0x3b1d200a:
+    case 0x2fd9785b: case 0x7e3cd550: case 0x804172f3:
+      return REL_TIER.FAMILY[t];
+    default: return null;
+  }
+}
+
+// Thin wrappers around the existing BoolArray accessors so the relations
+// panel reads naturally. getBoolAt / setBoolAt already check `type===1`
+// (BoolArray tag) and handle the bit math, so we don't have to.
+function isFightAt(entries,pairIdx){
+  return getBoolAt(entries,H('Mii.Relation.Info.IsFight'),pairIdx);
+}
+function setFightAt(entries,pairIdx,v){
+  setBoolAt(entries,H('Mii.Relation.Info.IsFight'),pairIdx,v);
+}
+
+// Port of source/main.cpp ComputeIslandVibe (which itself ports 2.13.0's
+// island-vibe algorithm). Each Mii's Gaiety / Activeness / Audaciousness /
+// Sociability sliders (0..8 each) map through T1/T2 to (xv,yv), Q maps
+// the quartile to {-2,-1,1,2}, and the (sx,sy) sum's octant + magnitude
+// picks one of 17 labels (Normal + 8 Strong + 8 Weak). Returns null when
+// no Mii.sav is loaded.
+const ISLAND_VIBE_LABELS=[
+  ['Normal',     'Completely average island'],
+  ['Strong_00',  'Pushy island'],
+  ['Strong_01',  'Reckless island'],
+  ['Strong_02',  'Emotional island'],
+  ['Strong_03',  'Eccentric island'],
+  ['Strong_04',  'Considerate island'],
+  ['Strong_05',  'Intellectual island'],
+  ['Strong_06',  'Calm island'],
+  ['Strong_07',  'Survivalist island'],
+  ['Weak_00',    'Ambitious island'],
+  ['Weak_01',    'Enthusiastic island'],
+  ['Weak_02',    'Lively island'],
+  ['Weak_03',    'Caring island'],
+  ['Weak_04',    'Shy island'],
+  ['Weak_05',    'Quiet island'],
+  ['Weak_06',    'Cautious island'],
+  ['Weak_07',    'Artistic island'],
+];
+const ISLAND_VIBE_OCTANT_COLORS=[
+  'rgb(194, 92,180)','rgb(224, 71, 79)','rgb(228,104, 47)','rgb(224,144, 46)',
+  'rgb(148,164, 48)','rgb( 39,158,111)','rgb( 47,155,181)','rgb( 79,135,232)',
+];
+function computeIslandVibe(){
+  if(!savMii)return null;
+  const e=savMii.entries;
+  const H_G=H('Mii.CharacterParam.Gaiety');
+  const H_A=H('Mii.CharacterParam.Activeness');
+  const H_AU=H('Mii.CharacterParam.Audaciousness');
+  const H_S=H('Mii.CharacterParam.Sociability');
+  // Use the Mii.Identifier (or any per-Mii field) to count valid residents.
+  // Easiest: walk the name array and stop at the first empty slot, matching
+  // how the Switch builds gMiis from the in-game roster.
+  const H_NAME=H('Mii.Name.Name');
+  const nameE=findE(e,H_NAME);
+  if(!nameE||!nameE.payload)return null;
+  const nameCount=new DataView(nameE.payload.buffer,nameE.payload.byteOffset,4).getUint32(0,true);
+  const T1=[50,10,20,30,40,60,70,80,90];
+  const T2=[50, 5,15,25,35,65,75,85,95];
+  const Q=[-2,-1,1,2];
+  const quart=v=>(v<=50?0:v<=100?1:v<=150?2:3);
+  let sx=0,sy=0,residents=0;
+  for(let s=0;s<nameCount;s++){
+    const nm=getWStr32At(e,H_NAME,s);
+    if(!nm)continue;  // empty slot
+    let g =getIntAt(e,H_G ,s);if(g <0||g >8)g =0;
+    let a =getIntAt(e,H_A ,s);if(a <0||a >8)a =0;
+    let au=getIntAt(e,H_AU,s);if(au<0||au>8)au=0;
+    let so=getIntAt(e,H_S ,s);if(so<0||so>8)so=0;
+    sx+=Q[quart(T1[g] +T2[a ])];
+    sy+=Q[quart(T1[au]+T2[so])];
+    residents++;
+  }
+  if(residents===0)return null;
+  if(sx===0&&sy===0){
+    return {label:ISLAND_VIBE_LABELS[0][1],labelKey:'Normal',color:'rgb(138,143,152)',residents:residents,sx:0,sy:0};
+  }
+  const rad=Math.atan2(sy,sx);
+  const deg=rad*180/Math.PI;
+  const biased=((deg+22.5)%360+360)%360;
+  let octant=Math.floor(biased/45);
+  if(octant<0)octant=0;if(octant>7)octant=7;
+  const amax=Math.max(Math.abs(sx),Math.abs(sy));
+  const strong=residents<1.5*amax;
+  let labelIdx=1+(strong?0:8)+octant;
+  if(labelIdx>=17)labelIdx=0;
+  return {
+    labelKey:ISLAND_VIBE_LABELS[labelIdx][0],
+    label:ISLAND_VIBE_LABELS[labelIdx][1],
+    color:ISLAND_VIBE_OCTANT_COLORS[octant],
+    residents:residents,sx:sx,sy:sy,
+  };
+}
+function renderIslandVibeChip(){
+  const el=document.getElementById('island-vibe-chip');
+  if(!el)return;
+  // Mirror the on-Switch placement: the chip is an island-wide aggregate
+  // that belongs next to the social graph, not the per-Mii editors. So
+  // only render it while the Social subtab is active; hide on every
+  // other subtab so it doesn't compete with stats / words / relations.
+  if(miiSubTab!=='social'){el.style.display='none';return;}
+  const v=computeIslandVibe();
+  if(!v){el.style.display='none';return;}
+  el.style.display='';
+  el.style.color=v.color;
+  el.style.borderColor=v.color;
+  el.textContent='Island Vibe: '+v.label+' · '+v.residents+' resident'+(v.residents!==1?'s':'');
+}
 function getAnyEnumAt(entries,hash,idx){const e=findE(entries,hash);if(!e||!e.payload||e.payload.length<4)return 0;if(e.type!==7&&e.type!==21)return 0;const dv=arrDV(e),c=dv.getUint32(0,true);return(idx>=0&&idx<c)?dv.getUint32(4+idx*4,true):0;}
 function setAnyEnumAt(entries,hash,idx,val){const e=findE(entries,hash);if(!e||!e.payload||e.payload.length<4)return;if(e.type!==7&&e.type!==21)return;const dv=arrDV(e),c=dv.getUint32(0,true);if(idx>=0&&idx<c)dv.setUint32(4+idx*4,val>>>0,true);}
 function arrSize(entries,hash){const e=findE(entries,hash);if(!e||!e.payload||e.payload.length<4)return 0;return new DataView(e.payload.buffer,e.payload.byteOffset,4).getUint32(0,true);}
@@ -2729,6 +3067,8 @@ async function loadSave(which){
       savMii=sav;renderMiiSlots();renderMiiSubTab();
       document.getElementById('btn-mii-import').disabled=false;
       document.getElementById('btn-mii-export').disabled=false;
+      document.getElementById('btn-mii-delete').disabled=false;
+      renderIslandVibeChip();
       // Best-effort: pull Map.sav too so the housing tab can show house names.
       // Failures are silent — housing falls back to "House #N".
       fetch('/api/save/download?file=map').then(r=>r.ok?r.arrayBuffer():null).then(buf=>{
@@ -2843,8 +3183,44 @@ function renderPlayerFields(){
     <div class="ed-card-title">wishes</div>
     <div id="wishes-card-body" class="wsh-loading">loading...</div>
   </div>`;
-  document.getElementById('save-fields-player').innerHTML=identity+birthday+settings+island+economy+wishes;
+
+  // Advanced card: one-shot toggles that aren't worth a number-input
+  // affordance. Currently just the time-travel penalty clear (issue #32) —
+  // the field is a UInt64 game-clock timestamp; users only ever want to
+  // zero it so they can skip the 72-hour shop-restock cooldown after
+  // their Switch's clock drifted backwards.
+  const ttpActive=(getUInt64S(e,0x71e3ba15)!==0n);
+  const advanced=`<div class="ed-card">
+    <div class="ed-card-title">advanced</div>
+    <div class="ed-field">
+      <span class="ed-label">Time-travel penalty</span>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="color:${ttpActive?'var(--err)':'var(--ok)'};font-weight:600;font-size:.85rem">
+          ${ttpActive?'active':'cleared'}
+        </span>
+        <button class="btn ${ttpActive?'btn-gold':''}" ${ttpActive?'':'disabled'}
+                onclick="clearTTPenalty()"
+                title="Set Player.LastPenaltyTime to 0 so shops restock immediately after a time-travel jump.">
+          clear penalty
+        </button>
+      </div>
+      <div style="color:var(--muted);font-size:.75rem;margin-top:4px">
+        When the Switch clock jumps backwards the game stamps this field and blocks
+        shop restocks for ~72h. Zeroing it skips the cooldown.
+      </div>
+    </div>
+  </div>`;
+
+  document.getElementById('save-fields-player').innerHTML=identity+birthday+settings+island+economy+wishes+advanced;
   renderWishesCard();
+}
+function clearTTPenalty(){
+  if(!savPlayer)return;
+  setUInt64S(savPlayer.entries,0x71e3ba15,0n);
+  // Re-render the panel so the chip flips to "cleared" and the button
+  // disables itself without a manual refresh.
+  renderPlayerFields();
+  setSaveStatus('player','time-travel penalty cleared','ok');
 }
 
 // ── Player sub-tabs (edit / dashboard) ────────────────────────────────────────
@@ -3388,7 +3764,43 @@ function onMiiChange(ev){
   if(k==='wstr32a')setWStr32At(savMii.entries,h,idx,i.value);
   else if(k==='int')setIntAt(savMii.entries,h,idx,(parseInt(i.value)||0)-do_);
   else if(k==='uint')setUIntAt(savMii.entries,h,idx,parseInt(i.value)>>>0);
-  else if(k==='enuma')setEnumAt(savMii.entries,h,idx,parseInt(i.value)>>>0);
+  else if(k==='enuma'){
+    setEnumAt(savMii.entries,h,idx,parseInt(i.value)>>>0);
+    // Mirrors the on-Switch RelMoodPersistAndCalmFights fix: when the
+    // user changes a Mii's Feeling.Type the game would normally snap it
+    // straight back to the default on the next tick (because
+    // FeelingEndGameTime is <= the in-game now). Bump EndGameTime far
+    // into the future and clear IsFight on every pair this Mii is part
+    // of so two-angry-Miis don't stay locked in a fight after the user
+    // calms them down from the editor.
+    if((h>>>0)===(H('Mii.Feeling.Type')>>>0)){
+      relMoodPersistAndCalmFights(idx);
+      // Re-render the relations panel if it's visible so the "fighting"
+      // chip + tier labels reflect the calmed state without a tab swap.
+      if(miiSubTab==='rel')renderMiiRelations();
+    }
+  }
+  // Vibe is derived from personality fields; refresh after any edit so the
+  // chip stays in sync (compute is O(70 miis) so it's negligible).
+  renderIslandVibeChip();
+}
+
+// Port of source/main.cpp RelMoodPersistAndCalmFights for the WebUI.
+// kFarFuture is ~50 game-years of seconds: well past any normal play
+// session, safely below UINT64 wraparound, and identical to what the
+// on-Switch path writes so the two editors agree byte-for-byte.
+function relMoodPersistAndCalmFights(miiIdx){
+  if(!savMii)return;
+  const e=savMii.entries;
+  const kFarFuture=BigInt(50)*BigInt(365)*BigInt(24)*BigInt(3600);
+  setUInt64At(e,H('Mii.Feeling.FeelingEndGameTime'),miiIdx,kFarFuture);
+  // Walk pair table, clear IsFight on any pair involving this Mii.
+  const H_IA=0xf7420afb,H_IB=0x4071f71c;
+  const pc=arrSize(e,H_IA);
+  for(let p=0;p<pc;p++){
+    const a=getIntAt(e,H_IA,p),b=getIntAt(e,H_IB,p);
+    if(a===miiIdx||b===miiIdx) setFightAt(e,p,false);
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -6462,6 +6874,10 @@ function renderMiiSubTab(){
   else if(miiSubTab==='belongings')renderMiiBelongings();
   else if(miiSubTab==='habits')renderMiiHabits();
   else if(miiSubTab==='housing')renderMiiHousing();
+  // Refresh the island-vibe chip on every subtab switch so it appears /
+  // disappears as the Social tab is entered / left (Social-only per parity
+  // with the on-Switch placement).
+  renderIslandVibeChip();
 }
 function openBrowseTab(){
   // Triggered by the upload-icon button next to "export .ltd". The Browse view
@@ -6923,25 +7339,35 @@ function renderMiiRelations(){
     const outCol=relColor(outT),inCol=relColor(inT);
     const tst=getUInt64At(e,H_TST,i),tstVal=u64ToDateLocal(tst);
     const isOutUnknown=(outT>>>0)===0x0784a8dc;
+    // Range was -100..100 in the original WebUI but the underlying save
+    // field is 0..200 (per ltd-save-editor-2.13.0 RANK_THRESHOLDS); the
+    // on-Switch UI was already bumped to 200, this brings the WebUI in
+    // line so meters past 100 don't get clipped on save. Bar fill is now
+    // value/200 directly.
+    const isFightHere=isFightAt(e,i);
+    const outTier=relTierLabel(outT,outM,isFightHere);
+    const inTier =relTierLabel(inT, inM, isFightHere);
     rows+=`<div class="rel-row" style="border-left-color:${outCol}">
       <div class="rel-row-head">
         <span class="rel-row-name">${esc(oName)}</span>
-        <span style="font-size:.72rem;color:var(--muted)">pair #${i+1} &middot; slot ${other+1}</span>
+        <span style="font-size:.72rem;color:var(--muted)">pair #${i+1} &middot; slot ${other+1}${isFightHere?' &middot; <span style="color:#e07a7a">fighting</span>':''}</span>
         ${isOutUnknown?'<button class="bl-btn-sm rel-batch-know" onclick="relBatchKnow()" title="Convert every Unknown relation for this Mii to Know with natural game values" style="margin-left:auto;border-color:var(--ok);color:var(--ok)">Batch Know</button>':''}
       </div>
       <div class="rel-row-fields">
         <div class="rel-row-col">
           <div class="rel-row-col-lbl" style="color:${outCol}">your view</div>
           ${mkSel(outT,i,'out')}
-          <input class="ed-input" type="number" style="margin-top:4px" data-pi="${i}" data-side="out" value="${outM}" min="-100" max="100"${outFixed?' disabled':''} onchange="onRelChange(event)" oninput="this.nextElementSibling.firstChild.style.width=Math.min(100,Math.max(0,(+this.value+100)/2))+'%'">
-          <div class="ed-bar"><div class="ed-bar-fill" style="width:${Math.min(100,Math.max(0,(outM+100)/2))}%;background:${outCol}"></div></div>
+          <input class="ed-input" type="number" style="margin-top:4px" data-pi="${i}" data-side="out" value="${outM}" min="0" max="200"${outFixed?' disabled':''} onchange="onRelChange(event)" oninput="this.nextElementSibling.firstChild.style.width=Math.min(100,Math.max(0,+this.value/2))+'%';const lbl=this.parentNode.querySelector('.rel-tier-lbl');if(lbl){const t=relTierLabel(${outT>>>0},+this.value||0,${isFightHere?'true':'false'});lbl.textContent=t||'';lbl.style.display=t?'':'none';}">
+          <div class="ed-bar"><div class="ed-bar-fill" style="width:${Math.min(100,Math.max(0,outM/2))}%;background:${outCol}"></div></div>
+          <span class="rel-tier-lbl" style="font-size:.72rem;color:${outCol};margin-top:2px;display:${outTier?'':'none'}">${outTier?esc(outTier):''}</span>
           ${outFixed?'<span class="rel-fixed-note">meter locked for this type</span>':''}
         </div>
         <div class="rel-row-col">
           <div class="rel-row-col-lbl" style="color:${inCol}">their view</div>
           ${mkSel(inT,i,'in')}
-          <input class="ed-input" type="number" style="margin-top:4px" data-pi="${i}" data-side="in" value="${inM}" min="-100" max="100"${inFixed?' disabled':''} onchange="onRelChange(event)" oninput="this.nextElementSibling.firstChild.style.width=Math.min(100,Math.max(0,(+this.value+100)/2))+'%'">
-          <div class="ed-bar"><div class="ed-bar-fill" style="width:${Math.min(100,Math.max(0,(inM+100)/2))}%;background:${inCol}"></div></div>
+          <input class="ed-input" type="number" style="margin-top:4px" data-pi="${i}" data-side="in" value="${inM}" min="0" max="200"${inFixed?' disabled':''} onchange="onRelChange(event)" oninput="this.nextElementSibling.firstChild.style.width=Math.min(100,Math.max(0,+this.value/2))+'%';const lbl=this.parentNode.querySelector('.rel-tier-lbl');if(lbl){const t=relTierLabel(${inT>>>0},+this.value||0,${isFightHere?'true':'false'});lbl.textContent=t||'';lbl.style.display=t?'':'none';}">
+          <div class="ed-bar"><div class="ed-bar-fill" style="width:${Math.min(100,Math.max(0,inM/2))}%;background:${inCol}"></div></div>
+          <span class="rel-tier-lbl" style="font-size:.72rem;color:${inCol};margin-top:2px;display:${inTier?'':'none'}">${inTier?esc(inTier):''}</span>
           ${inFixed?'<span class="rel-fixed-note">meter locked for this type</span>':''}
         </div>
       </div>
@@ -6949,9 +7375,69 @@ function renderMiiRelations(){
     </div>`;
   }
   const empty='<div style="padding:24px;color:var(--muted);text-align:center;font-size:.85rem">no relationships for this mii</div>';
+  // Bulk action toolbar mirrors the on-Switch "Bulk 200" / "Bulk 0"
+  // pills — see source/main.cpp TRelBatchBoost / TRelBatchZero. Sit
+  // above the relation list so they're always in reach, and only
+  // shown when the Mii actually has relations to mutate.
+  const bulk = count ? `<div style="display:flex;gap:8px;padding:8px 12px 0 12px;flex-wrap:wrap">
+    <button class="btn btn-green" onclick="relBulkBoost()" title="Set every meter below 41 (bottom two tiers) to 200 for this Mii, both directions">Bulk 200</button>
+    <button class="btn btn-red"   onclick="relBulkZero()"  title="Set every relationship meter this Mii is in to 0, both directions">Bulk 0</button>
+  </div>` : '';
   document.getElementById('mii-rel-panel').innerHTML=
     (count?`<div class="mii-tab-summary">${count} relation${count!==1?'s':''}</div>`:'') +
+    bulk +
     `<div class="rel-list">${count?rows:empty}</div>`;
+}
+
+// Port of source/main.cpp TRelBatchBoost — sets any meter < 41 (the
+// bottom two tiers per 2.13.0 RANK_THRESHOLDS) to 200 in both
+// directions for every non-fixed-type pair this Mii is in.
+function relBulkBoost(){
+  if(!savMii)return;
+  const e=savMii.entries,slot=savMiiSlot;
+  const H_IA=0xf7420afb,H_IB=0x4071f71c,H_BASE=0x8b41897e,H_METER=0x42c2fc2f;
+  const pc=arrSize(e,H_IA);
+  let changed=0;
+  for(let i=0;i<pc;i++){
+    const a=getIntAt(e,H_IA,i),b=getIntAt(e,H_IB,i);
+    if(a<0||b<0)continue;
+    if(a!==slot&&b!==slot)continue;
+    const selfA=(a===slot);
+    const myDir=selfA?i*2:i*2+1,otDir=selfA?i*2+1:i*2;
+    const myT=getAnyEnumAt(e,H_BASE,myDir);
+    if(isRelFixed(myT))continue;
+    const myM=getIntAt(e,H_METER,myDir);
+    if(myM>=41)continue;
+    setIntAt(e,H_METER,myDir,200);
+    setIntAt(e,H_METER,otDir,200);
+    changed++;
+  }
+  if(changed>0)savMiiDirty=true;
+  renderMiiRelations();
+}
+// Port of source/main.cpp TRelBatchZero — clears every non-fixed
+// meter this Mii is in on both directions.
+function relBulkZero(){
+  if(!savMii)return;
+  const e=savMii.entries,slot=savMiiSlot;
+  const H_IA=0xf7420afb,H_IB=0x4071f71c,H_BASE=0x8b41897e,H_METER=0x42c2fc2f;
+  const pc=arrSize(e,H_IA);
+  let changed=0;
+  for(let i=0;i<pc;i++){
+    const a=getIntAt(e,H_IA,i),b=getIntAt(e,H_IB,i);
+    if(a<0||b<0)continue;
+    if(a!==slot&&b!==slot)continue;
+    const selfA=(a===slot);
+    const myDir=selfA?i*2:i*2+1,otDir=selfA?i*2+1:i*2;
+    const myT=getAnyEnumAt(e,H_BASE,myDir);
+    if(isRelFixed(myT))continue;
+    if(getIntAt(e,H_METER,myDir)===0 && getIntAt(e,H_METER,otDir)===0)continue;
+    setIntAt(e,H_METER,myDir,0);
+    setIntAt(e,H_METER,otDir,0);
+    changed++;
+  }
+  if(changed>0)savMiiDirty=true;
+  renderMiiRelations();
 }
 function onRelChange(ev){
   if(!savMii)return;

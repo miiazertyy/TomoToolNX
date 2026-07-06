@@ -328,6 +328,23 @@ void SetFloatAt(SavFile& s, uint32_t h, int idx, float v) {
     ArrayWrite(FindMut(s,h), DT_FloatArray, idx, raw);
 }
 
+// Scalar UInt64 — DT_UInt64 stores 8 raw bytes in payload (no count
+// prefix). Used by Player.sav fields like LastPenaltyTime.
+uint64_t GetUInt64(const SavFile& s, uint32_t h, uint64_t def) {
+    const Entry* e = Find(s, h);
+    if (!e || e->type != DT_UInt64 || e->payload.size() < 8) return def;
+    uint32_t lo = R32(e->payload.data());
+    uint32_t hi = R32(e->payload.data() + 4);
+    return (uint64_t)lo | ((uint64_t)hi << 32);
+}
+void SetUInt64(SavFile& s, uint32_t h, uint64_t v) {
+    Entry* e = FindMut(s, h);
+    if (!e || e->type != DT_UInt64) return;
+    if (e->payload.size() < 8) e->payload.resize(8);
+    W32(e->payload.data(),     (uint32_t)(v & 0xFFFFFFFFu));
+    W32(e->payload.data() + 4, (uint32_t)(v >> 32));
+}
+
 uint64_t GetUInt64At(const SavFile& s, uint32_t h, int idx, uint64_t def) {
     const Entry* e = Find(s, h);
     if (!e || e->type != DT_UInt64Array || e->payload.size() < 4) return def;

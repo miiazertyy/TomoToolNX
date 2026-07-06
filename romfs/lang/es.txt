@@ -64,6 +64,11 @@ player.field.IslandSize = Tamaño isla
 player.field.FountainLv = Nv. fuente
 player.field.Wishes = Deseos
 player.field.Region = Región
+player.field.TTPenalty = Penalización VT
+player.lastpenalty.active = activa
+player.lastpenalty.cleared = borrada
+player.lastpenalty.clear = borrar penalización
+player.lastpenalty.already = ya borrada
 
 # ── Player tab footer ────────────────────────────────────────────────────────
 player.footer = Arriba/Abajo  seleccionar    Izq/Der  ajustar    A  editar    X  deshacer    B/+  atrás
@@ -82,6 +87,7 @@ backup.footer.full = A  borrar + copiar    B  omitir    +  salir
 backup.tip = {cur} / {max} copias
 backup.progress.title = haciendo copia de seguridad...
 backup.progress.warn = no apagues la consola
+backup.progress.hint = esta copia aparecerá bajo el botón de disquete de este usuario en la pantalla de selección
 mounting.title = montando la partida...
 
 # ── Common labels ────────────────────────────────────────────────────────────
@@ -164,6 +170,8 @@ settings.footer.main = Arriba/Abajo  navegar    Izq/Der  ajustar    A  acción  
 # ── User pick ────────────────────────────────────────────────────────────────
 userpick.title = selecciona usuario
 userpick.footer = Izq/Der  navegar    A  elegir    X  restaurar    -  ajustes    +  salir
+cursor.hint.off = R stick  cursor
+cursor.hint.on = L stick  clic
 restore.toast.ok = Copia restaurada.
 restore.toast.fail = Error al restaurar:
 restore.toast.mount_fail = Error al montar:
@@ -172,6 +180,7 @@ ugc.rename.guide = Renombrar UGC
 ugc.rename.ok = Renombrado.
 ugc.rename.fail = Error al renombrar:
 ugc.kind.picker.title = Filtrar por categoría
+ugc.kind.create.title = ¿Qué tipo crear?
 ugc.kind.all = Todo
 ugc.kind.food = Comida
 ugc.kind.cloth = Ropa
@@ -282,7 +291,7 @@ ugc.import = importar
 ugc.exportpic = exportar img
 ugc.exportltd = exportar .ltd
 ugc.removebg = quitar fondo
-ugc.footer = ZL/ZR  desplazar    Arriba/Abajo  elegir    A  importar    Y  exportar img    exportar .ltd  (toque)    X  quitar fondo    -  buscar    L/R  pestaña    B/+  atrás
+ugc.footer = ZL/ZR  desplazar    Arriba/Abajo  elegir    Izq/Der  acción    A  ejecutar    -  buscar    L/R  pestaña    B/+  atrás
 
 # ── Player tab ───────────────────────────────────────────────────────────────
 player.parse.fail.l1 = Player.sav no se pudo leer — restaura desde una copia
@@ -319,6 +328,7 @@ player.desc.IslandSize = Preajuste de tamaño de isla. ¡Otros valores corrompen
 player.desc.FountainLv = Nivel de la fuente de los deseos.
 player.desc.Wishes = Número de deseos pedidos.
 player.desc.Region = Región del jugador (afecta estaciones y clima).
+player.desc.TTPenalty = Marca de tiempo de penalización por viaje temporal. Pulsa A para borrar y que las tiendas se reabastezcan.
 
 # ── Map tab ──────────────────────────────────────────────────────────────────
 map.picker.title = elegir actor
@@ -366,6 +376,29 @@ mii.same.as.name = (igual al nombre)
 mii.cycle.mood = Izq/Der  cambiar humor
 mii.file = Archivo Mii
 mii.import.ltd = importar .ltd
+mii.vibe.label = ambiente de la isla
+mii.blank.btn = + mii vacío
+mii.blank.ok  = mii vacío creado
+mii.blank.full = no hay ranuras de mii libres
+mii.delete.btn = × eliminar
+mii.delete.title = Eliminar
+mii.delete.warn1 = Vacía la ranura en Mii.sav.
+mii.delete.warn2 = Aplica Mii.sav Y Player.sav Y Map.sav a la Switch después.
+mii.delete.warn3 = Si solo aplicas Mii.sav el juego puede colgarse (referencias huérfanas).
+mii.delete.confirm = confirmar
+mii.delete.cancel = cancelar
+mii.delete.footer = [A] confirmar  [B] cancelar
+mii.delete.ok = Mii eliminado — recuerda aplicar las tres saves
+ugc.blank.btn = + ugc vacío
+ugc.blank.ok  = ranura ugc vacía creada
+ugc.blank.full = no hay ranuras ugc libres de esta categoría
+ugc.delete.btn = × eliminar
+ugc.delete.title = Eliminar
+ugc.delete.warn = Vacía la ranura y borra los archivos de textura.
+ugc.delete.confirm = confirmar
+ugc.delete.cancel = cancelar
+ugc.delete.footer = [A] confirmar  [B] cancelar
+ugc.delete.ok = ranura UGC eliminada
 mii.export.ltd = exportar .ltd
 
 subtab.stats = Stats
@@ -388,6 +421,10 @@ rel.your.type = Tu tipo
 rel.their.type = Su tipo  (auto)
 rel.type = Tipo
 rel.batch.know = Conocer todos
+rel.batch.boost = Todo a 200
+rel.batch.zero = Todo a 0
+rel.batch.boost.done = relaciones bajas subidas a 200
+rel.batch.zero.done = relaciones puestas a 0
 rel.meter = Medidor
 rel.fixed = fijo
 rel.both.directions = ambas direcciones a la vez
@@ -462,6 +499,7 @@ mii.field.Sociability = Sociabilidad
 mii.field.BondMeter = Vínculo
 mii.field.Mood = Humor
 mii.field.Fullness = Saciedad
+mii.field.DeleteMii = Eliminar este Mii
 mii.desc.Name = Nombre del Mii en el juego.
 mii.desc.Level = Nivel de amistad con el jugador.
 mii.desc.LvMeter = Barra de progreso hasta el siguiente nivel (0-100).
@@ -478,11 +516,12 @@ mii.desc.Sociability = Sociabilidad del Mii (1-10).
 mii.desc.BondMeter = Fuerza del vínculo con el jugador (0-100).
 mii.desc.Mood = Estado emocional actual.
 mii.desc.Fullness = Nivel de saciedad. Puede superar 100.
+mii.desc.DeleteMii = Borrar este Mii. Aplica las tres saves después.
 
 mii.footer.social.focus = ZL/ZR  mii    Y  sub-pestaña    X  vista global    L/R  pestaña    B/+  atrás
 mii.footer.social.global = ZL/ZR  mii    Y  sub-pestaña    X  vista enfocada    L/R  pestaña    B/+  atrás
 mii.footer.words = ZL/ZR  mii    Arriba/Abajo  espacio    Izq/Der  tipo    A  texto    X  pronunciación    -  deshacer    Y  sub-pestaña    L/R  pestaña    B/+  atrás
-mii.footer.relations = ZL/ZR  mii    Arriba/Abajo  relación    Izq/Der  tipo    Y  sub-pestaña    L/R  pestaña    B/+  atrás
+mii.footer.relations = ZL/ZR  mii    Arriba/Abajo  relación    X  tipo/medidor    Izq/Der  ajustar    Y  sub-pestaña    L/R  pestaña    B/+  atrás
 mii.footer.bl.picker = ZL/ZR  objeto    Arriba/Abajo  objeto    Izq/Der  saltar 12    A  confirmar    B  cancelar
 mii.footer.bl = ZL/ZR  mii    D-pad  navegar    A  elegir    -  color    X  borrar    Y  sub-pestaña    L/R  pestaña    B/+  atrás
 mii.footer.housing.idle = D-pad  navegar    A  elegir / soltar    Y  sub-pestaña    L/R  pestaña    B/+  atrás

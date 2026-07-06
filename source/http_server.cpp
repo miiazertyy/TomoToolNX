@@ -425,6 +425,88 @@ static void HandleUgcItemExport(int fd,const std::string& query){
     SrvLog("UGC item export: "+stem+" OK");
 }
 
+// POST /api/mii/blank?slot=N (slot 1-based; omit to land in first empty slot)
+// Mirrors the on-Switch "Create blank Mii" button so the WebUI's Mii Stats
+// tab has the same affordance. Returns the slot the blank Mii landed in.
+static void HandleMiiBlank(int fd,const std::string& query){
+    std::string slotStr=GetQueryParam(query,"slot");
+    int slot;
+    if(slotStr.empty()){slot=MiiManager::FirstEmptyMiiSlot();
+        if(slot<=0){Send500(fd,"No empty Mii slot available");return;}
+    } else {slot=atoi(slotStr.c_str());
+        if(slot<1||slot>70){Send500(fd,"slot must be 1..70");return;}
+    }
+    SrvLog("WebUI: create blank mii in slot "+std::to_string(slot));
+    std::string err=MiiManager::CreateBlankMii(slot);
+    if(!err.empty()){SrvLog("Create blank mii failed: "+err,true);Send500(fd,err);return;}
+    mutexLock(&s_mutex);s_pendingCommit=true;s_pendingMiiRefresh=true;s_pendingMiiSavReload=true;mutexUnlock(&s_mutex);
+    Send200(fd,"application/json","{\"ok\":true,\"slot\":"+std::to_string(slot)+"}");
+}
+
+// POST /api/ugc/blank?kind=K (&slot=N optional; kind 0..6 = Food..MapFloor)
+// Mirrors the on-Switch "Create blank UGC" button. Returns the slot + the
+// item stem (e.g. "UgcFood005") the WebUI can use to refresh its list.
+static void HandleUgcBlank(int fd,const std::string& query){
+    std::string kindStr=GetQueryParam(query,"kind");
+    if(kindStr.empty()){Send500(fd,"Missing kind");return;}
+    int kind=atoi(kindStr.c_str());
+    if(kind<0||kind>6){Send500(fd,"kind out of range");return;}
+    std::string slotStr=GetQueryParam(query,"slot");
+    int slot;
+    if(slotStr.empty()){slot=MiiManager::FirstEmptyUgcSlot(kind);
+        if(slot<=0){Send500(fd,"No empty UGC slot for this kind");return;}
+    } else {slot=atoi(slotStr.c_str());
+        if(slot<1){Send500(fd,"slot must be >= 1");return;}
+    }
+    SrvLog("WebUI: create blank ugc kind="+std::to_string(kind)+" slot="+std::to_string(slot));
+    std::string err=MiiManager::CreateBlankUgc(kind,slot);
+    if(!err.empty()){SrvLog("Create blank ugc failed: "+err,true);Send500(fd,err);return;}
+    static const char* kPfx[]={"Food","Cloth","Goods","Interior","Exterior","MapObject","MapFloor"};
+    char buf[64];snprintf(buf,sizeof buf,"Ugc%s%03d",kPfx[kind],slot-1);
+    mutexLock(&s_mutex);s_pendingCommit=true;mutexUnlock(&s_mutex);
+    Send200(fd,"application/json",std::string("{\"ok\":true,\"slot\":")+std::to_string(slot)+",\"stem\":\""+buf+"\"}");
+}
+
+// POST /api/ugc/delete — clears the slot's name in Player.sav and
+// removes its .canvas.zs / .ugctex.zs / _Thumb_ugctex.zs files.
+// Accepts either ?stem=UgcFood005 (parsed back into kind + slot) or
+// ?kind=N&slot=M directly. Mirrors MiiManager::DeleteUgc.
+static void HandleUgcDelete(int fd,const std::string& query){
+    static const char* kPfx[]={"Food","Cloth","Goods","Interior","Exterior","MapObject","MapFloor"};
+    int kind=-1, slot=0;
+    std::string stemStr=GetQueryParam(query,"stem");
+    if(!stemStr.empty()){
+        if(stemStr.size()>3 && stemStr.substr(0,3)=="Ugc"){
+            std::string rest=stemStr.substr(3);
+            for(int k=0;k<7;k++){
+                size_t pl=strlen(kPfx[k]);
+                if(rest.size()>pl && rest.substr(0,pl)==kPfx[k]){
+                    kind=k;
+                    // Stem slot suffix is 0-based; DeleteUgc wants 1-based.
+                    slot=atoi(rest.substr(pl).c_str())+1;
+                    break;
+                }
+            }
+        }
+        if(kind<0){Send500(fd,"Cannot parse UGC stem: "+stemStr);return;}
+    } else {
+        std::string kindStr=GetQueryParam(query,"kind");
+        std::string slotStr=GetQueryParam(query,"slot");
+        if(kindStr.empty()||slotStr.empty()){
+            Send500(fd,"Missing stem or (kind,slot)");return;
+        }
+        kind=atoi(kindStr.c_str());
+        slot=atoi(slotStr.c_str());
+    }
+    if(kind<0||kind>6){Send500(fd,"kind out of range");return;}
+    if(slot<1){Send500(fd,"slot must be >= 1");return;}
+    SrvLog("WebUI: delete ugc kind="+std::to_string(kind)+" slot="+std::to_string(slot));
+    std::string err=MiiManager::DeleteUgc(kind,slot);
+    if(!err.empty()){SrvLog("Delete ugc failed: "+err,true);Send500(fd,err);return;}
+    mutexLock(&s_mutex);s_pendingCommit=true;mutexUnlock(&s_mutex);
+    Send200(fd,"application/json","{\"ok\":true}");
+}
+
 // POST /api/ugc/itemimport — multipart: stem + file [+ isAdding]
 static void HandleUgcItemImport(int fd,const Request& req){
     auto fields=ParseMultipart(req.body,req.contentType);
@@ -954,9 +1036,12 @@ static void HandleConnection(int fd){
     else if(req.method=="GET"  &&req.path=="/api/mii/list")         HandleMiiList(fd);
     else if(req.method=="GET"  &&req.path=="/api/mii/export")       HandleMiiExport(fd,req.query);
     else if(req.method=="POST" &&req.path=="/api/mii/import")       HandleMiiImport(fd,req);
+    else if(req.method=="POST" &&req.path=="/api/mii/blank")        HandleMiiBlank(fd,req.query);
     else if(req.method=="GET"  &&req.path=="/api/mii/social")       HandleMiiSocial(fd,req.query);
     else if(req.method=="GET"  &&req.path=="/api/ugc/itemexport")   HandleUgcItemExport(fd,req.query);
     else if(req.method=="POST" &&req.path=="/api/ugc/itemimport")   HandleUgcItemImport(fd,req);
+    else if(req.method=="POST" &&req.path=="/api/ugc/blank")        HandleUgcBlank(fd,req.query);
+    else if(req.method=="POST" &&req.path=="/api/ugc/delete")       HandleUgcDelete(fd,req.query);
     else if(req.method=="GET"  &&req.path=="/api/save/download")   HandleSaveDownload(fd,req.query);
     else if(req.method=="POST" &&req.path=="/api/save/upload")     HandleSaveUpload(fd,req);
     else if(req.method=="GET"  &&req.path=="/api/share/list")      HandleShareList(fd,req.query);

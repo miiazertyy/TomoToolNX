@@ -64,6 +64,11 @@ player.field.IslandSize = Inselgröße
 player.field.FountainLv = Brunnen-Lv
 player.field.Wishes = Wünsche
 player.field.Region = Region
+player.field.TTPenalty = ZR-Strafe
+player.lastpenalty.active = aktiv
+player.lastpenalty.cleared = aufgehoben
+player.lastpenalty.clear = Strafe aufheben
+player.lastpenalty.already = bereits aufgehoben
 
 # ── Player tab footer ────────────────────────────────────────────────────────
 player.footer = Hoch/Runter  wählen    Links/Rechts  anpassen    A  bearbeiten    X  rückgängig    B/+  zurück
@@ -82,6 +87,7 @@ backup.footer.full = A  löschen + sichern    B  überspringen    +  beenden
 backup.tip = {cur} / {max} Backups
 backup.progress.title = Spielstand wird gesichert...
 backup.progress.warn = Konsole nicht ausschalten
+backup.progress.hint = dieses Backup erscheint unter der Diskette unter diesem Nutzer auf der Auswahlseite
 mounting.title = Spielstand wird geladen...
 
 # ── Common labels ────────────────────────────────────────────────────────────
@@ -164,6 +170,8 @@ settings.footer.main = Hoch/Runter  navigieren    Links/Rechts  anpassen    A  A
 # ── User pick ────────────────────────────────────────────────────────────────
 userpick.title = Benutzer wählen
 userpick.footer = Links/Rechts  navigieren    A  wählen    X  wiederherstellen    -  Einstellungen    +  beenden
+cursor.hint.off = R stick  Cursor
+cursor.hint.on = L stick  Klick
 restore.toast.ok = Wiederhergestellt.
 restore.toast.fail = Wiederherstellung fehlgeschlagen:
 restore.toast.mount_fail = Mounten fehlgeschlagen:
@@ -172,6 +180,7 @@ ugc.rename.guide = UGC umbenennen
 ugc.rename.ok = Umbenannt.
 ugc.rename.fail = Umbenennen fehlgeschlagen:
 ugc.kind.picker.title = Nach Kategorie filtern
+ugc.kind.create.title = Welchen Typ erstellen?
 ugc.kind.all = Alle
 ugc.kind.food = Essen
 ugc.kind.cloth = Kleidung
@@ -282,7 +291,7 @@ ugc.import = importieren
 ugc.exportpic = Bild exportieren
 ugc.exportltd = .ltd exportieren
 ugc.removebg = Hintergrund weg
-ugc.footer = ZL/ZR  scrollen    Hoch/Runter  wählen    A  importieren    Y  Bild exportieren    .ltd exportieren  (Touch)    X  Hintergrund weg    -  Suche    L/R  Tab    B/+  zurück
+ugc.footer = ZL/ZR  scrollen    Hoch/Runter  wählen    Links/Rechts  Aktion    A  ausführen    -  Suche    L/R  Tab    B/+  zurück
 
 # ── Player tab ───────────────────────────────────────────────────────────────
 player.parse.fail.l1 = Player.sav konnte nicht gelesen werden — stelle ein Backup wieder her
@@ -319,6 +328,7 @@ player.desc.IslandSize = Inselgrößen-Vorgabe. Andere Werte beschädigen den Sp
 player.desc.FountainLv = Stufe des Wunschbrunnens.
 player.desc.Wishes = Anzahl der erfüllten Wünsche.
 player.desc.Region = Region des Spielers (beeinflusst Jahreszeiten und Wetter).
+player.desc.TTPenalty = Zeitreise-Strafzeitstempel. A drücken, um aufzuheben (Läden füllen wieder auf).
 
 # ── Map tab ──────────────────────────────────────────────────────────────────
 map.picker.title = Objekt wählen
@@ -366,6 +376,29 @@ mii.same.as.name = (wie der Name)
 mii.cycle.mood = Links/Rechts  Stimmung wechseln
 mii.file = Mii-Datei
 mii.import.ltd = .ltd importieren
+mii.vibe.label = Inselstimmung
+mii.blank.btn = + leerer mii
+mii.blank.ok  = leerer mii erstellt
+mii.blank.full = kein leerer mii-slot verfügbar
+mii.delete.btn = × löschen
+mii.delete.title = Löschen
+mii.delete.warn1 = Leert den Slot in Mii.sav.
+mii.delete.warn2 = Wende Mii.sav UND Player.sav UND Map.sav auf die Switch an.
+mii.delete.warn3 = Bei nur Mii.sav kann das Spiel wegen verwaister Referenzen abstürzen.
+mii.delete.confirm = bestätigen
+mii.delete.cancel = abbrechen
+mii.delete.footer = [A] bestätigen  [B] abbrechen
+mii.delete.ok = Mii gelöscht — bitte alle drei Saves anwenden
+ugc.blank.btn = + leeres ugc
+ugc.blank.ok  = leerer ugc-slot erstellt
+ugc.blank.full = kein leerer ugc-slot dieser kategorie
+ugc.delete.btn = × löschen
+ugc.delete.title = Löschen
+ugc.delete.warn = Leert den Slot und entfernt die Texturdateien.
+ugc.delete.confirm = bestätigen
+ugc.delete.cancel = abbrechen
+ugc.delete.footer = [A] bestätigen  [B] abbrechen
+ugc.delete.ok = UGC-Slot gelöscht
 mii.export.ltd = .ltd exportieren
 
 subtab.stats = Stats
@@ -388,6 +421,10 @@ rel.your.type = Dein Typ
 rel.their.type = Ihr Typ  (auto)
 rel.type = Typ
 rel.batch.know = Alle kennen
+rel.batch.boost = Alle 200
+rel.batch.zero = Alle 0
+rel.batch.boost.done = niedrige Beziehungen auf 200 gesetzt
+rel.batch.zero.done = alle Beziehungen auf 0 gesetzt
 rel.meter = Anzeige
 rel.fixed = fest
 rel.both.directions = beide Richtungen zugleich
@@ -462,6 +499,7 @@ mii.field.Sociability = Geselligkeit
 mii.field.BondMeter = Bindung
 mii.field.Mood = Stimmung
 mii.field.Fullness = Sättigung
+mii.field.DeleteMii = Mii löschen
 mii.desc.Name = Anzeigename des Miis im Spiel.
 mii.desc.Level = Freundschaftsstufe mit dem Spieler.
 mii.desc.LvMeter = Fortschrittsbalken zur nächsten Stufe (0-100).
@@ -478,11 +516,12 @@ mii.desc.Sociability = Geselligkeit (1-10).
 mii.desc.BondMeter = Bindung zum Spieler (0-100).
 mii.desc.Mood = Aktueller Gefühlszustand.
 mii.desc.Fullness = Sättigung. Kann 100 überschreiten.
+mii.desc.DeleteMii = Diesen Mii löschen. Alle drei Saves danach anwenden.
 
 mii.footer.social.focus = ZL/ZR  Mii    Y  Untertab    X  globale Sicht    L/R  Tab    B/+  zurück
 mii.footer.social.global = ZL/ZR  Mii    Y  Untertab    X  Fokus-Sicht    L/R  Tab    B/+  zurück
 mii.footer.words = ZL/ZR  Mii    Hoch/Runter  Platz    Links/Rechts  Art    A  Text    X  Aussprache    -  rückgängig    Y  Untertab    L/R  Tab    B/+  zurück
-mii.footer.relations = ZL/ZR  Mii    Hoch/Runter  Beziehung    Links/Rechts  Typ    Y  Untertab    L/R  Tab    B/+  zurück
+mii.footer.relations = ZL/ZR  Mii    Hoch/Runter  Beziehung    X  Typ/Meter    Links/Rechts  ändern    Y  Untertab    L/R  Tab    B/+  zurück
 mii.footer.bl.picker = ZL/ZR  Objekt    Hoch/Runter  Objekt    Links/Rechts  +12    A  bestätigen    B  abbrechen
 mii.footer.bl = ZL/ZR  Mii    D-Pad  navigieren    A  wählen    -  Farbe    X  leeren    Y  Untertab    L/R  Tab    B/+  zurück
 mii.footer.housing.idle = D-Pad  navigieren    A  aufnehmen / absetzen    Y  Untertab    L/R  Tab    B/+  zurück

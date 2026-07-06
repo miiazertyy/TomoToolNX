@@ -64,6 +64,11 @@ player.field.IslandSize = Taille île
 player.field.FountainLv = Niv. fontaine
 player.field.Wishes = Vœux
 player.field.Region = Région
+player.field.TTPenalty = Pénalité VT
+player.lastpenalty.active = active
+player.lastpenalty.cleared = effacée
+player.lastpenalty.clear = effacer la pénalité
+player.lastpenalty.already = déjà effacée
 
 # ── Player tab footer ────────────────────────────────────────────────────────
 player.footer = Haut/Bas  sélectionner    Gauche/Droite  ajuster    A  modifier    X  annuler    B/+  retour
@@ -82,6 +87,7 @@ backup.footer.full = A  effacer + sauvegarder    B  ignorer    +  quitter
 backup.tip = {cur} / {max} sauvegardes
 backup.progress.title = sauvegarde des données en cours...
 backup.progress.warn = n'éteignez pas la console
+backup.progress.hint = cette sauvegarde apparaîtra sous le bouton disquette de cet utilisateur sur l'écran de sélection
 mounting.title = montage de la sauvegarde...
 
 # ── Common labels ────────────────────────────────────────────────────────────
@@ -164,6 +170,8 @@ settings.footer.main = Haut/Bas  naviguer    Gauche/Droite  ajuster    A  action
 # ── User pick ────────────────────────────────────────────────────────────────
 userpick.title = sélectionner un utilisateur
 userpick.footer = Gauche/Droite  naviguer    A  choisir    X  restaurer    -  paramètres    +  quitter
+cursor.hint.off = R stick  curseur
+cursor.hint.on = L stick  clic
 restore.toast.ok = Sauvegarde restaurée.
 restore.toast.fail = Échec de la restauration :
 restore.toast.mount_fail = Échec du montage :
@@ -172,6 +180,7 @@ ugc.rename.guide = Renommer cet UGC
 ugc.rename.ok = Renommé.
 ugc.rename.fail = Échec du renommage :
 ugc.kind.picker.title = Filtrer par catégorie
+ugc.kind.create.title = Quel type créer ?
 ugc.kind.all = Tout
 ugc.kind.food = Aliments
 ugc.kind.cloth = Vêtements
@@ -330,7 +339,7 @@ ugc.import = importer
 ugc.exportpic = exporter img
 ugc.exportltd = exporter .ltd
 ugc.removebg = supprimer fond
-ugc.footer = ZL/ZR  défiler    Haut/Bas  choisir    A  importer    Y  exporter img    exporter .ltd  (tactile)    X  supprimer fond    -  rechercher    L/R  onglet    B/+  retour
+ugc.footer = ZL/ZR  défiler    Haut/Bas  choisir    Gauche/Droite  action    A  exécuter    -  rechercher    L/R  onglet    B/+  retour
 
 # ── Player tab ───────────────────────────────────────────────────────────────
 player.parse.fail.l1 = Player.sav n'a pas pu être lu — restaurez depuis une sauvegarde
@@ -367,6 +376,7 @@ player.desc.IslandSize = Préréglage de taille d'île. Toute autre valeur corro
 player.desc.FountainLv = Niveau de la fontaine aux vœux.
 player.desc.Wishes = Nombre de vœux faits.
 player.desc.Region = Région du joueur (affecte saisons et météo).
+player.desc.TTPenalty = Horodatage de la pénalité de voyage temporel. Appuyez sur A pour effacer (réapprovisionne les magasins).
 
 # ── Map tab ──────────────────────────────────────────────────────────────────
 map.picker.title = choisir un objet
@@ -414,6 +424,29 @@ mii.same.as.name = (identique au nom)
 mii.cycle.mood = Gauche/Droite  changer d'humeur
 mii.file = Fichier Mii
 mii.import.ltd = importer .ltd
+mii.vibe.label = ambiance de l'île
+mii.blank.btn = + mii vierge
+mii.blank.ok  = mii vierge créé
+mii.blank.full = aucun emplacement de mii vide
+mii.delete.btn = × supprimer
+mii.delete.title = Supprimer
+mii.delete.warn1 = Cela vide l'emplacement dans Mii.sav.
+mii.delete.warn2 = Appliquez Mii.sav ET Player.sav ET Map.sav à la Switch après.
+mii.delete.warn3 = Si vous n'appliquez que Mii.sav, le jeu peut planter (références orphelines).
+mii.delete.confirm = confirmer
+mii.delete.cancel = annuler
+mii.delete.footer = [A] confirmer  [B] annuler
+mii.delete.ok = mii supprimé — pensez à appliquer les trois saves
+ugc.blank.btn = + ugc vierge
+ugc.blank.ok  = emplacement ugc vierge créé
+ugc.blank.full = aucun emplacement ugc vide pour cette catégorie
+ugc.delete.btn = × supprimer
+ugc.delete.title = Supprimer
+ugc.delete.warn = Vide l'emplacement et supprime ses fichiers de texture.
+ugc.delete.confirm = confirmer
+ugc.delete.cancel = annuler
+ugc.delete.footer = [A] confirmer  [B] annuler
+ugc.delete.ok = emplacement ugc supprimé
 mii.export.ltd = exporter .ltd
 
 subtab.stats = Stats
@@ -436,6 +469,10 @@ rel.your.type = Votre type
 rel.their.type = Leur type  (auto)
 rel.type = Type
 rel.batch.know = Connaître tout
+rel.batch.boost = Tout à 200
+rel.batch.zero = Tout à 0
+rel.batch.boost.done = relations basses boostées à 200
+rel.batch.zero.done = relations remises à 0
 rel.meter = Jauge
 rel.fixed = fixe
 rel.both.directions = appliqué aux deux sens
@@ -510,6 +547,7 @@ mii.field.Sociability = Sociabilité
 mii.field.BondMeter = Lien
 mii.field.Mood = Humeur
 mii.field.Fullness = Satiété
+mii.field.DeleteMii = Supprimer ce mii
 mii.desc.Name = Nom d'affichage du Mii en jeu.
 mii.desc.Level = Niveau d'amitié avec le joueur.
 mii.desc.LvMeter = Progression vers le niveau suivant (0-100).
@@ -526,11 +564,12 @@ mii.desc.Sociability = Sociabilité du Mii (1-10).
 mii.desc.BondMeter = Force du lien avec le joueur (0-100).
 mii.desc.Mood = Humeur actuelle.
 mii.desc.Fullness = Niveau de satiété. Peut dépasser 100.
+mii.desc.DeleteMii = Effacer ce Mii. Réappliquer les trois saves ensuite.
 
 mii.footer.social.focus = ZL/ZR  mii    Y  sous-onglet    X  vue globale    L/R  onglet    B/+  retour
 mii.footer.social.global = ZL/ZR  mii    Y  sous-onglet    X  vue focus    L/R  onglet    B/+  retour
 mii.footer.words = ZL/ZR  mii    Haut/Bas  slot    Gauche/Droite  type    A  texte    X  prononciation    -  annuler    Y  sous-onglet    L/R  onglet    B/+  retour
-mii.footer.relations = ZL/ZR  mii    Haut/Bas  relation    Gauche/Droite  type    Y  sous-onglet    L/R  onglet    B/+  retour
+mii.footer.relations = ZL/ZR  mii    Haut/Bas  relation    X  type/jauge    Gauche/Droite  régler    Y  sous-onglet    L/R  onglet    B/+  retour
 mii.footer.bl.picker = ZL/ZR  objet    Haut/Bas  objet    Gauche/Droite  saut 12    A  confirmer    B  annuler
 mii.footer.bl = ZL/ZR  mii    D-pad  naviguer    A  choisir    -  couleur    X  effacer    Y  sous-onglet    L/R  onglet    B/+  retour
 mii.footer.housing.idle = D-pad  naviguer    A  prendre / déposer    Y  sous-onglet    L/R  onglet    B/+  retour

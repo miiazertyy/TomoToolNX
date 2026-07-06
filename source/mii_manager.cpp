@@ -2,9 +2,11 @@
 // Binary I/O only, no SDL, safe on any thread.
 
 #include "mii_manager.h"
+#include "save_editor.h"
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <cerrno>
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -56,6 +58,23 @@ static int OffsetLocator(const std::vector<uint8_t>& data, const char* hashHex) 
     }
     uint8_t le[4] = {hash[3], hash[2], hash[1], hash[0]};
 
+    for (size_t i = 0; i + 8 <= data.size(); i++) {
+        if (memcmp(data.data() + i, le, 4) == 0) {
+            uint32_t offset = 0;
+            memcpy(&offset, data.data() + i + 4, 4);
+            return (int)offset;
+        }
+    }
+    return -1;
+}
+
+// Same as OffsetLocator but takes the hash as a uint32 directly (avoids
+// formatting to a hex string). Used by clearBelongings which iterates a
+// generated table of belongings-leaf hashes.
+static int OffsetLocatorU32(const std::vector<uint8_t>& data, uint32_t hash) {
+    if (data.size() < 8) return -1;
+    uint8_t le[4] = { (uint8_t)(hash & 0xff), (uint8_t)((hash >> 8) & 0xff),
+                      (uint8_t)((hash >> 16) & 0xff), (uint8_t)((hash >> 24) & 0xff) };
     for (size_t i = 0; i + 8 <= data.size(); i++) {
         if (memcmp(data.data() + i, le, 4) == 0) {
             uint32_t offset = 0;
@@ -301,6 +320,12 @@ std::vector<MiiSlot> ListMiis() {
         if (!s.isEmpty) {
             const uint8_t* namePtr = miisav.data() + miinames + x * 64;
             size_t nameLen = Utf16leLen(namePtr, 64);
+            // Empty name → treat as an empty slot. The sum-based check
+            // above misses freshly-deleted slots because it strides 156
+            // bytes (4 of which belong to the next field and stay
+            // non-zero across a delete). Empty name is the reliable
+            // signal: in-game roster lookups also gate on it.
+            if (nameLen == 0) continue;
             s.name = Utf16leToUtf8(namePtr, nameLen);
             s.hasFacepaint = (miiOffset2 >= 0 &&
                               miiOffset2 + 4*x < (int)miisav.size() &&
@@ -678,16 +703,44 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
 
 // ─── UGC name cache ───────────────────────────────────────────────────────────
 
-static const struct { const char* prefix; const char* hashHex; int maxSlots; } UGC_KIND_DATA[] = {
-    {"Food",      "408494F5", 99},
-    {"Cloth",     "40710642", 299},
-    {"Goods",     "2F793EB1", 99},
-    {"Interior",  "3DE2C5DD", 99},
-    {"Exterior",  "27C875D6", 99},
-    {"MapObject", "56F99338", 99},
-    {"MapFloor",  "918875A9", 99},
+// Fields per UGC kind:
+//   prefix    — stem prefix (Ugc{prefix}NNN)
+//   hashHex   — name array hash (WStr64Array)
+//   maxSlots  — capacity
+//   enableHex — enum array hash for the "slot enabled" flag; must be
+//               set to ENABLE_USED (0x1d7fadf4) so the game shows the item.
+//   textureHex— enum array hash for the texture-source identifier.
+//   hashIdHex — UInt array hash for the per-slot content-id, packed as
+//               (slotIdx & 0xff) | ((kindTag & 0xff) << 16).
+//   textureValue — value written into the texture-source array for
+//               newly-created blank slots (from 2.13.0's UGC_TEX_DATA).
+//   kindTag   — high byte of the hashId (from 2.13.0's UGC_HASH_INDICES).
+// Values ported from ltd-save-editor-2.13.0/packages/ltd-sharemii/
+// src/ugcKinds.ts — without setting all three of enable/texture/hashId
+// the game ignores the new slot entirely (name-only writes get treated
+// as leftover garbage and don't render in the shop / catalog UI).
+static const struct {
+    const char* prefix;
+    const char* hashHex;
+    int         maxSlots;
+    const char* enableHex;
+    const char* textureHex;
+    const char* hashIdHex;
+    uint32_t    textureValue;
+    uint32_t    kindTag;
+} UGC_KIND_DATA[] = {
+    {"Food",      "408494F5", 99,  "F4A39965", "3558B77F", "6D48F8E2", 0x56934941u, 1u},
+    {"Cloth",     "40710642", 299, "AF129C33", "59BFA9D3", "89F25CAC", 0xb42fc2e3u, 3u},
+    {"Goods",     "2F793EB1", 99,  "1A9C00FE", "70D10A48", "56202100", 0x56934941u, 2u},
+    {"Interior",  "3DE2C5DD", 99,  "A39744E9", "E7F9D439", "7FEF7F7D", 0xb42fc2e3u, 6u},
+    {"Exterior",  "27C875D6", 99,  "F4BEADC2", "16227C50", "38D72795", 0xb42fc2e3u, 7u},
+    {"MapObject", "56F99338", 99,  "5951050B", "A9C5CFB8", "1B28B170", 0xb42fc2e3u, 4u},
+    {"MapFloor",  "918875A9", 99,  "A1126D32", "06A7A14C", "816D50A3", 0xb42fc2e3u, 5u},
 };
 static const int UGC_KIND_COUNT = 7;
+// Enum value the game writes to the "slot enabled" field for an active
+// UGC slot. Blank creation sets it to make the slot visible.
+static const uint32_t UGC_ENABLE_USED = 0x1d7fadf4u;
 
 static std::map<std::string, std::string> s_ugcNames; // "UgcFood003" → UTF-8 name
 
@@ -1079,6 +1132,532 @@ std::string ImportUgc(int ugcKind, int slot, const std::string& ltdxPath, bool i
     }
 
     if (!WriteFile(SAVE_PLAYER_SAV, psav)) return "Failed to write Player.sav";
+    return "";
+}
+
+// ─── Blank Mii / blank UGC (ported from ltd-save-editor-2.13.0) ──────────────
+
+} // namespace MiiManager
+
+#include "default_char_info_ex.h"
+#include "belongings_leaves.h"
+#include "per_mii_arrays.h"
+
+namespace MiiManager {
+
+int FirstEmptyMiiSlot() {
+    std::vector<uint8_t> miisav;
+    if (!ReadFile(SAVE_MII_SAV, miisav)) return -1;
+    int names_hash = OffsetLocator(miisav, "2499BFDA");
+    int data_hash  = OffsetLocator(miisav, "881CA27A");
+    if (names_hash < 0 || data_hash < 0) return -1;
+    int miinames = names_hash + 4;
+    int miidata  = data_hash  + 4;
+    for (int x = 0; x < MII_MAX_SLOTS; x++) {
+        int miiindex = miidata + 156 * x;
+        if (miiindex + 156 > (int)miisav.size()) break;
+        // Empty-slot signature used everywhere else in this file:
+        // "uninitialized CharInfoEx" has 152 bytes summing to 152
+        // (a specific stride of single 0x01s).
+        int sum = 0;
+        for (int i = 0; i < 156; i++) sum += miisav[miiindex + i];
+        if (sum != 152) continue;
+        // Also confirm name slot is empty so we don't trample a half-deleted
+        // resident whose CharInfoEx happens to match.
+        const uint8_t* namePtr = miisav.data() + miinames + x * 64;
+        uint16_t firstWchar = (uint16_t)(namePtr[0] | (namePtr[1] << 8));
+        if (firstWchar != 0) continue;
+        return x + 1;
+    }
+    return -1;
+}
+
+std::string CreateBlankMii(int slot) {
+    if (slot < 1 || slot > MII_MAX_SLOTS)
+        return "Invalid slot (1-" + std::to_string(MII_MAX_SLOTS) + ")";
+    int s = slot - 1;
+
+    // Pure raw in-place byte edits — the SAME mechanism ImportMii uses
+    // (OffsetLocator + memcpy, no SaveEditor re-serialization). Import
+    // is the proven-working Mii-writing path, so create now mirrors it
+    // exactly. Earlier versions round-tripped through SaveEditor::Save,
+    // which is what corrupted the save. Raw edits never touch the file
+    // structure — they only overwrite existing field values in place —
+    // so they can't produce a structurally-invalid save.
+    std::vector<uint8_t> miisav;
+    if (!ReadFile(SAVE_MII_SAV, miisav)) return "Cannot read Mii.sav";
+
+    int names_hash  = OffsetLocator(miisav, "2499BFDA"); // Mii.Name.Name
+    int data_hash   = OffsetLocator(miisav, "881CA27A"); // Mii.CharInfoEx
+    int prefer_hash = OffsetLocator(miisav, "3A5EDA05"); // HowToCallName
+    if (names_hash < 0 || data_hash < 0)
+        return "Could not locate Mii offsets in Mii.sav";
+    int miinames  = names_hash  + 4;
+    int miidata   = data_hash   + 4;
+    int miiprefer = prefer_hash >= 0 ? prefer_hash + 4 : -1;
+
+    // BinArray record layout per slot: [size:4][data:152] = 156 bytes.
+    int miiindex = miidata + 156 * s;
+    if (miiindex + 156 > (int)miisav.size()) return "Slot out of bounds";
+
+    // Refuse to clobber a populated slot. Empty slot sums to 152 (size
+    // prefix 152 + all-zero data).
+    int sum = 0;
+    for (int i = 0; i < 156; i++) sum += miisav[miiindex + i];
+    if (sum != 152)
+        return "Slot " + std::to_string(slot) + " is not empty";
+
+    const int fileSize = (int)miisav.size();
+
+    // ── Raw field writers ───────────────────────────────────────────
+    // fieldBase returns the payload-data offset for a hash's array
+    // (heap offset + 4, skipping the count prefix), or -1 if missing.
+    auto fieldBase = [&](const char* hex) -> int {
+        int o = OffsetLocator(miisav, hex);
+        return o < 0 ? -1 : o + 4;
+    };
+    auto wU32 = [&](const char* hex, int idx, uint32_t v) {
+        int b = fieldBase(hex); if (b < 0) return;
+        int off = b + idx * 4; if (off + 4 > fileSize) return;
+        miisav[off+0] = (uint8_t)(v & 0xff);
+        miisav[off+1] = (uint8_t)((v >> 8) & 0xff);
+        miisav[off+2] = (uint8_t)((v >> 16) & 0xff);
+        miisav[off+3] = (uint8_t)((v >> 24) & 0xff);
+    };
+    auto wI32 = [&](const char* hex, int idx, int32_t v) {
+        wU32(hex, idx, (uint32_t)v);
+    };
+    auto wU64 = [&](const char* hex, int idx, uint64_t v) {
+        int b = fieldBase(hex); if (b < 0) return;
+        int off = b + idx * 8; if (off + 8 > fileSize) return;
+        for (int k = 0; k < 8; k++) miisav[off+k] = (uint8_t)((v >> (k*8)) & 0xff);
+    };
+    auto wBool = [&](const char* hex, int bitIdx, bool v) {
+        int b = fieldBase(hex); if (b < 0) return;
+        int byteOff = b + (bitIdx / 8); if (byteOff >= fileSize) return;
+        uint8_t mask = (uint8_t)(1u << (bitIdx & 7));
+        if (v) miisav[byteOff] |= mask; else miisav[byteOff] &= (uint8_t)~mask;
+    };
+
+    // Capacity = name-array element count (== Mii slot count, 70).
+    int capacity = 0;
+    if (names_hash >= 0 && names_hash + 4 <= fileSize) {
+        uint32_t c = 0; memcpy(&c, miisav.data() + names_hash, 4);
+        capacity = (int)c;
+    }
+    if (capacity <= 0) return "Bad Mii.sav (zero capacity)";
+
+    // Find a SOURCE slot to clone: the first populated Mii (non-empty
+    // name) that isn't the target.
+    int srcSlot = -1;
+    for (int i = 0; i < capacity; i++) {
+        int nOff = miinames + i * 64;
+        if (nOff + 2 > fileSize) break;
+        uint16_t firstWchar = (uint16_t)(miisav[nOff] | (miisav[nOff+1] << 8));
+        if (firstWchar == 0) continue;      // empty slot
+        if (i != s) { srcSlot = i; break; }
+    }
+    if (srcSlot < 0)
+        return "Need at least one existing Mii to base a blank one on";
+
+    // ── CLONE per-Mii data from the source slot ─────────────────────
+    // This is the key fix. A valid Mii has ~130 per-slot fields set to
+    // specific "empty" game defaults (habit ownership states, word
+    // kinds, region languages, feeling history, etc.) that addMii()
+    // never writes — because addMii assumes a slot the *game* already
+    // initialised. Our deleted/empty slots don't have those defaults,
+    // so a from-scratch build left dozens of fields at 0/garbage and
+    // the game rejected the save. Cloning a real Mii's full per-slot
+    // byte-range guarantees every field is a valid game value; the
+    // identity fields (name, appearance, personality, housing,
+    // SortIndex) are then overwritten below. Relation.* arrays are
+    // deliberately NOT in PER_MII_ARRAYS (they're per-pair, cleared
+    // separately) so the clone never copies relationships.
+    for (int ai = 0; ai < BlankDefaults::PER_MII_ARRAY_COUNT; ai++) {
+        const auto& a = BlankDefaults::PER_MII_ARRAYS[ai];
+        int lo = OffsetLocatorU32(miisav, a.hash);
+        if (lo < 0 || lo + 4 > fileSize) continue;
+        uint32_t count = 0; memcpy(&count, miisav.data() + lo, 4);
+        if (count == 0 || (int)(count % (uint32_t)capacity) != 0) continue;
+        int stride = (int)(count / (uint32_t)capacity);
+        int base = lo + 4;
+        if (a.type == 1) {
+            // BoolArray: stride bits per Mii. Copy bit-by-bit.
+            for (int bit = 0; bit < stride; bit++) {
+                int sbit = srcSlot * stride + bit;
+                int tbit = s       * stride + bit;
+                int sByte = base + (sbit / 8), tByte = base + (tbit / 8);
+                if (sByte >= fileSize || tByte >= fileSize) break;
+                bool v = (miisav[sByte] >> (sbit & 7)) & 1;
+                uint8_t m = (uint8_t)(1u << (tbit & 7));
+                if (v) miisav[tByte] |= m; else miisav[tByte] &= (uint8_t)~m;
+            }
+        } else {
+            // Fixed-size element arrays. Byte sizes are the per-element
+            // heap sizes from the reference parser (forclaude parse.ts /
+            // GamedataLib.NET): note W-strings are 2 bytes/code-unit, so
+            // e.g. WStr16Array is 32 (16 UTF-16 units), not 16.
+            int esz;
+            switch (a.type) {
+                case 3: case 5: case 7: case 21: esz = 4;   break; // Int/Float/Enum/UInt
+                case 9: case 23: case 25:        esz = 8;   break; // Vec2/Int64/UInt64
+                case 11:                         esz = 12;  break; // Vec3
+                case 13:                         esz = 16;  break; // Str16Array
+                case 15: case 27:                esz = 32;  break; // Str32Array / WStr16Array
+                case 17: case 29:                esz = 64;  break; // Str64Array / WStr32Array
+                case 31:                         esz = 128; break; // WStr64Array
+                default:                         esz = 0;   break;
+            }
+            if (esz == 0) continue;
+            int bytes = stride * esz;
+            int sOff = base + (srcSlot * stride) * esz;
+            int tOff = base + (s       * stride) * esz;
+            if (sOff + bytes > fileSize || tOff + bytes > fileSize) continue;
+            memmove(miisav.data() + tOff, miisav.data() + sOff, bytes);
+        }
+    }
+
+    // ── Link the new Mii to every existing Mii (THE fix) ────────────
+    // Relations are stored per unordered pair (a<b): 2415 pair slots for
+    // a 70-Mii roster, each with two directional records. A VALID save
+    // has a complete record for EVERY pair of populated Miis — canonical
+    // Id_a/Id_b plus valid directional enum fields (verified against a
+    // real save: 0 pairs ever hold Id -1). Our old code CLEARED the
+    // reused slot's pairs (Id_a/Id_b = -1, meter 0, type Invalid). But
+    // the slot is now populated, so the game saw 70 Miis while the
+    // relation matrix claimed one of them didn't exist → contradiction →
+    // the game rejected the save. THAT (not the CharInfoEx, SortIndex, or
+    // housing) is what was corrupting every blank Mii. The reference
+    // addMii LINKS instead; we mirror it exactly, filling each pair and
+    // both directions with the same defaults a fresh in-game Mii uses.
+    //
+    // Pair index for a<b: slot = a*(2*cap-a-1)/2 + (b-a-1). Directional
+    // entries live at 2*slot and 2*slot+1.
+    {
+        // Resolve every field's payload base once (fieldBase = heap
+        // offset + 4), so we don't rescan the 2.9 MB file per link.
+        int B_IDA  = fieldBase("F7420AFB"); // RelationId.Id_a   Int  (per pair)
+        int B_IDB  = fieldBase("4071F71C"); // RelationId.Id_b   Int  (per pair)
+        int B_TST  = fieldBase("1A892E50"); // TypeSetTime       U64  (per pair)
+        int B_FGT  = fieldBase("C2DB3A72"); // IsFight           Bool (per pair)
+        int B_NOT  = fieldBase("6E00CE64"); // IsNotifiedBloodTypeCouple Bool
+        int B_MTR  = fieldBase("42C2FC2F"); // Meter             Int  (per dir)
+        int B_BAS  = fieldBase("8B41897E"); // BaseRelationType  Enum (per dir)
+        int B_BLD  = fieldBase("77D6AFCE"); // BloodType         Enum (per dir)
+        int B_BIT  = fieldBase("24433FBE"); // BitFlag           UInt (per dir)
+        int B_NCK  = fieldBase("A0058500"); // NickNameToOtherType Enum
+        int B_SEC  = fieldBase("96AA92D5"); // SecondPersonRegionLanguageID
+        int B_THR  = fieldBase("2B87527F"); // ThirdPersonRegionLanguageID
+        int B_UTR  = fieldBase("5B9181EB"); // UpdateTimeRanking U64  (per dir)
+        int B_UNK  = fieldBase("FA21F70E"); // Unknown           Bool (per dir)
+        const uint32_t OTHER = 0x0784a8dcu;        // enum "Other"
+        const uint32_t SECONDP = 0xa31978ddu;      // enum "SecondPerson"
+        const uint32_t JPJA = 0xf618046eu;         // enum "JPja"
+        auto w32 = [&](int base, int idx, uint32_t v) {
+            if (base < 0) return; int o = base + idx*4;
+            if (o + 4 > fileSize) return; memcpy(miisav.data() + o, &v, 4);
+        };
+        auto w64 = [&](int base, int idx, uint64_t v) {
+            if (base < 0) return; int o = base + idx*8;
+            if (o + 8 > fileSize) return; memcpy(miisav.data() + o, &v, 8);
+        };
+        auto wbit = [&](int base, int bitIdx, bool v) {
+            if (base < 0) return; int o = base + bitIdx/8;
+            if (o >= fileSize) return; uint8_t m = (uint8_t)(1u << (bitIdx & 7));
+            if (v) miisav[o] |= m; else miisav[o] &= (uint8_t)~m;
+        };
+        for (int j = 0; j < capacity; j++) {
+            if (j == s) continue;
+            int nOff = miinames + j * 64;
+            if (nOff + 2 > fileSize) break;
+            uint16_t fw = (uint16_t)(miisav[nOff] | (miisav[nOff+1] << 8));
+            if (fw == 0) continue;                       // only populated Miis
+            int a  = j < s ? j : s;
+            int bb = j < s ? s : j;
+            int slot = a * (2*capacity - a - 1) / 2 + (bb - a - 1);
+            // Pair-level record.
+            w32(B_IDA, slot, (uint32_t)a);
+            w32(B_IDB, slot, (uint32_t)bb);
+            w64(B_TST, slot, 0);                          // game-local time; 0 = fresh
+            wbit(B_FGT, slot, false);
+            wbit(B_NOT, slot, false);
+            // Both directional records.
+            for (int d = 0; d < 2; d++) {
+                int dir = slot*2 + d;
+                w32(B_MTR, dir, 100);                     // meter (same as a real save)
+                w32(B_BAS, dir, OTHER);
+                w32(B_BLD, dir, OTHER);
+                w32(B_BIT, dir, 0);
+                w32(B_NCK, dir, SECONDP);
+                w32(B_SEC, dir, JPJA);
+                w32(B_THR, dir, JPJA);
+                w64(B_UTR, dir, 0);
+                wbit(B_UNK, dir, false);
+            }
+        }
+    }
+
+    // 1) CharInfoEx — write 152-byte default at data offset (keep the
+    //    size prefix, already 152 for an empty slot).
+    memcpy(miisav.data() + miiindex + 4,
+           BlankDefaults::DEFAULT_CHAR_INFO_EX, 152);
+
+    // 2) Name (WStr32, 64 bytes) + clear HowToCallName (128 bytes).
+    {
+        char nameBuf[16];
+        snprintf(nameBuf, sizeof(nameBuf), "Mii %d", slot);
+        uint8_t* nameDst = miisav.data() + miinames + s * 64;
+        memset(nameDst, 0, 64);
+        for (size_t i = 0; nameBuf[i] != 0 && i < 31; i++) {
+            nameDst[i*2 + 0] = (uint8_t)nameBuf[i];
+            nameDst[i*2 + 1] = 0;
+        }
+    }
+    if (miiprefer >= 0 && miiprefer + s*128 + 128 <= fileSize)
+        memset(miisav.data() + miiprefer + s * 128, 0, 128);
+
+    // Enum member value hashes (murmur3 x86 32 of the member name).
+    const uint32_t HASH_MALE = SaveEditor::Hash("Male");
+    const uint32_t HASH_HE   = SaveEditor::Hash("He");
+    const uint32_t HASH_BOY  = SaveEditor::Hash("Boy");
+    const uint32_t HASH_USEN = SaveEditor::Hash("USen");
+    const uint32_t HASH_JPJA = SaveEditor::Hash("JPja");
+
+    (void)HASH_HE; (void)HASH_BOY; (void)HASH_USEN; (void)HASH_JPJA; (void)HASH_MALE;
+    // ── Blank-identity overrides ONLY ───────────────────────────────
+    // The clone already gave every field a VALID game value (copied from
+    // a real Mii). We only overwrite the small set that defines a fresh
+    // blank male Mii. Everything else (eat food-item IDs, region
+    // languages, birthday, feeling, timers, satisfaction) is left as the
+    // cloned value — overwriting those with hard-coded numbers was the
+    // corruption: e.g. addMii's eat BestId/UltraBestId are region-
+    // specific and simply don't exist in this save's food catalogue, so
+    // writing them created a dangling reference the game rejects.
+    //
+    // Personality — 5 sliders, mid-value 4.
+    wI32("25B48224", s, 4); // Activeness
+    wI32("CD8DBAF8", s, 4); // Audaciousness
+    wI32("607BA160", s, 4); // Commonsense
+    wI32("68E1134E", s, 4); // Gaiety
+    wI32("43CD364F", s, 4); // Sociability
+    // Voice — "Boy" preset.
+    wI32("4913AE1A", s, 28); // Formant
+    wI32("81CF470A", s, 28); // Pitch
+    wI32("141EE086", s, 25); // Speed
+    wI32("4D78E262", s,  5); // Tension
+    wU32("FBC3FFB0", s, HASH_BOY); // PresetType
+    // Face + cloth — consistent with the neutral male DEFAULT appearance.
+    wU32("236E2D73", s, HASH_MALE); // FaceInfo.Gender
+    wI32("AFED53D6", s, 0);         // HairChangeOrdered
+    wU32("660C5247", s, HASH_MALE); // ClothInfo.ClothStyle
+    wU32("F3C3DE59", s, HASH_HE);   // PronounType
+    // IsLoveGender BoolArray: middle of the 3-slot group = true.
+    wBool("DFC82223", s * 3 + 1, true);
+    // Bond meter.
+    wI32("D0882636", s, 30);
+    // Housing — unhoused, mirroring the reference addMii. A new Mii is
+    // left with no house (HouseMapId / CacheMapId = -1); on next launch
+    // the game shows the "place the house" prompt once per added Mii
+    // (confirmed by the tool author). RoomIndex -1 keeps it out of any
+    // room. Note: this is NOT what was corrupting the save — leaving the
+    // deleted Mii's house behind is tolerated (a delete-only save loads
+    // fine). The real bug was the relation matrix; see the link step above.
+    wI32("B8AB3CAC", s, -1); // HouseMapId
+    wI32("FC296601", s, -1); // RoomIndex
+    wI32("3CBD9978", s, -1); // HomeLiveTime.CacheMapId
+    wI32("D7070113", s, 0);  // HomeLiveTime.CacheOwnerNum
+    wU64("34190CDF", s, 0);  // StartLiveTogetherTime
+    // Starter clothing / coordinate ownership. The clone copied the
+    // SOURCE Mii's owned items into this slot; reset the ownership
+    // strides to zero, then flag only the four starter cloth subindices
+    // + the starter coordinate, matching addMii(). ClothOwnInfo /
+    // CoordinateOwnInfo are UIntArrays where 0 = "not owned", so zeroing
+    // is the correct empty value.
+    {
+        static const int CLOTH_OWN_STRIDE = 1200;
+        static const int COORD_OWN_STRIDE = 400;
+        static const int CLOTH_SUBS[] = { 77, 246, 339, 382 };
+        int clothBase = fieldBase("84824827");
+        if (clothBase >= 0)
+            for (int i = 0; i < CLOTH_OWN_STRIDE; i++) {
+                int off = clothBase + (s * CLOTH_OWN_STRIDE + i) * 4;
+                if (off + 4 <= fileSize) memset(miisav.data() + off, 0, 4);
+            }
+        int coordBase = fieldBase("89CE9150");
+        if (coordBase >= 0)
+            for (int i = 0; i < COORD_OWN_STRIDE; i++) {
+                int off = coordBase + (s * COORD_OWN_STRIDE + i) * 4;
+                if (off + 4 <= fileSize) memset(miisav.data() + off, 0, 4);
+            }
+        for (int sub : CLOTH_SUBS)
+            wU32("84824827", s * CLOTH_OWN_STRIDE + sub, 1);
+        wU32("89CE9150", s * COORD_OWN_STRIDE, 1);
+    }
+
+    // ── Renumber SortIndex to a dense 0..N-1 permutation ────────────
+    // The game requires SortIndex to be exactly a permutation of
+    // 0..(populatedCount-1) — a gap or an out-of-range value (the clone
+    // left the target sharing the source's index; a naive max+1 would
+    // write 70 which is out of range) corrupts the roster. Collect all
+    // populated slots, sort by their current SortIndex to preserve the
+    // existing display order, then assign dense ranks. The new Mii,
+    // carrying the source's index, slots in adjacent to the source and
+    // gets a unique rank like everyone else.
+    {
+        int siBase = fieldBase("9CCF22B7");
+        if (siBase >= 0) {
+            std::vector<std::pair<int32_t,int>> pop; // (currentSortIndex, slot)
+            for (int i = 0; i < capacity; i++) {
+                int nOff = miinames + i * 64;
+                if (nOff + 2 > fileSize) break;
+                uint16_t fw = (uint16_t)(miisav[nOff] | (miisav[nOff+1] << 8));
+                if (fw == 0) continue;
+                if (siBase + (i+1)*4 > fileSize) continue;
+                int32_t si; memcpy(&si, miisav.data() + siBase + i*4, 4);
+                pop.push_back({si, i});
+            }
+            std::stable_sort(pop.begin(), pop.end(),
+                [](const std::pair<int32_t,int>& a, const std::pair<int32_t,int>& b){
+                    return a.first < b.first;
+                });
+            for (size_t r = 0; r < pop.size(); r++) {
+                int32_t v = (int32_t)r;
+                memcpy(miisav.data() + siBase + pop[r].second*4, &v, 4);
+            }
+        }
+    }
+
+    if (!WriteFile(SAVE_MII_SAV, miisav)) return "Failed to write Mii.sav";
+    return "";
+}
+
+int FirstEmptyUgcSlot(int ugcKind) {
+    if (ugcKind < 0 || ugcKind >= UGC_KIND_COUNT) return -1;
+    std::vector<uint8_t> psav;
+    if (!ReadFile(SAVE_PLAYER_SAV, psav)) return -1;
+    int offset = OffsetLocator(psav, UGC_KIND_DATA[ugcKind].hashHex);
+    if (offset < 0) return -1;
+    int maxSlots = UGC_KIND_DATA[ugcKind].maxSlots;
+    // Layout matches LoadUgcNames (line ~706): payload starts at offset+4,
+    // then maxSlots * 128 UTF-16LE bytes. The earlier `+4+4` skip walked
+    // 4 bytes past every name slot and read garbage.
+    int base = offset + 4;
+    for (int x = 0; x < maxSlots; x++) {
+        int nameOff = base + x * 128;
+        if (nameOff + 128 > (int)psav.size()) break;
+        uint16_t firstWchar = (uint16_t)(psav[nameOff] | (psav[nameOff+1] << 8));
+        if (firstWchar == 0) return x + 1;
+    }
+    return -1;
+}
+
+// Empty out a UGC slot. Two-step:
+//   1. clear the slot's name via RenameUgc(stem, "") — that also removes
+//      the s_ugcNames cache entry, so the WebUI + on-Switch name lookups
+//      immediately see the blank.
+//   2. remove the on-disk texture files (.canvas.zs, .ugctex.zs and the
+//      _Thumb_ugctex.zs) — this is what the UGC scanner uses to build
+//      the list, so without this step the "deleted" slot would still
+//      show up with a placeholder white square.
+// Missing files are tolerated: a partial slot (e.g. one where only the
+// canvas is on disk) still gets what remains removed.
+std::string DeleteUgc(int ugcKind, int slot) {
+    if (ugcKind < 0 || ugcKind >= UGC_KIND_COUNT)
+        return "Invalid UGC kind";
+    int maxSlots = UGC_KIND_DATA[ugcKind].maxSlots;
+    if (slot < 1 || slot > maxSlots)
+        return "Invalid slot (1-" + std::to_string(maxSlots) + ")";
+    const auto& ki = UGC_KIND_DATA[ugcKind];
+    int slotIdx = slot - 1;
+    char stem[32];
+    snprintf(stem, sizeof(stem), "Ugc%s%03d", ki.prefix, slotIdx);
+    // Blank the name; ignore errors so a stale/missing name table
+    // doesn't block us from at least deleting the files below.
+    RenameUgc(stem, "");
+    // Also zero the enable/texture/hashId metadata written by
+    // CreateBlankUgc — otherwise the game keeps the slot flagged as
+    // active with stale texture-source and content-id values and can
+    // render a broken item entry after the files are gone.
+    {
+        std::vector<uint8_t> psav;
+        if (ReadFile(SAVE_PLAYER_SAV, psav)) {
+            auto zeroU32Arr = [&](const char* hashHex) {
+                int offset = OffsetLocator(psav, hashHex);
+                if (offset < 0) return;
+                int off = offset + 4 + slotIdx * 4;
+                if (off + 4 > (int)psav.size()) return;
+                psav[off + 0] = 0; psav[off + 1] = 0;
+                psav[off + 2] = 0; psav[off + 3] = 0;
+            };
+            zeroU32Arr(ki.enableHex);
+            zeroU32Arr(ki.textureHex);
+            zeroU32Arr(ki.hashIdHex);
+            WriteFile(SAVE_PLAYER_SAV, psav);
+        }
+    }
+    LoadUgcNames();
+    // Sweep the on-disk texture files. remove() returns non-zero on
+    // failure; missing is fine, permission issues surface as an error
+    // string once we've tried all three.
+    std::string base = std::string(SAVE_UGC_DIR) + "/" + stem;
+    const char* suffixes[] = { ".canvas.zs", ".ugctex.zs", "_Thumb_ugctex.zs" };
+    std::string err;
+    for (const char* suf : suffixes) {
+        std::string path = base + suf;
+        if (remove(path.c_str()) != 0 && errno != ENOENT) {
+            if (!err.empty()) err += "; ";
+            err += "failed to delete " + std::string(suf);
+        }
+    }
+    return err;
+}
+
+std::string CreateBlankUgc(int ugcKind, int slot) {
+    if (ugcKind < 0 || ugcKind >= UGC_KIND_COUNT)
+        return "Invalid UGC kind";
+    int maxSlots = UGC_KIND_DATA[ugcKind].maxSlots;
+    if (slot < 1 || slot > maxSlots)
+        return "Invalid slot (1-" + std::to_string(maxSlots) + ")";
+    const auto& ki = UGC_KIND_DATA[ugcKind];
+    int slotIdx = slot - 1;
+    char stem[32];
+    snprintf(stem, sizeof(stem), "Ugc%s%03d", ki.prefix, slotIdx);
+    char defaultName[32];
+    snprintf(defaultName, sizeof(defaultName), "Blank %s %d",
+             ki.prefix, slot);
+    // 1) Name (via existing helper — reads/writes Player.sav on its own).
+    std::string err = RenameUgc(stem, defaultName);
+    if (!err.empty()) return err;
+    // 2) Enable + texture + hashId metadata. Without these three the
+    //    game treats the slot as garbage even when the name and the
+    //    on-disk .canvas.zs / .ugctex.zs / thumb files exist. Mirrors
+    //    initAddedSlotMeta() from 2.13.0's applyUgc.ts.
+    std::vector<uint8_t> psav;
+    if (!ReadFile(SAVE_PLAYER_SAV, psav)) return "Cannot read Player.sav";
+    auto writeU32Arr = [&](const char* hashHex, int idx, uint32_t val,
+                           const char* label) -> std::string {
+        int offset = OffsetLocator(psav, hashHex);
+        if (offset < 0) return std::string(label) + " field not found";
+        // Array payload: [count:4][element:4]*count
+        int off = offset + 4 + idx * 4;
+        if (off + 4 > (int)psav.size())
+            return std::string(label) + " slot out of bounds";
+        psav[off + 0] = (uint8_t)( val        & 0xff);
+        psav[off + 1] = (uint8_t)((val >>  8) & 0xff);
+        psav[off + 2] = (uint8_t)((val >> 16) & 0xff);
+        psav[off + 3] = (uint8_t)((val >> 24) & 0xff);
+        return "";
+    };
+    err = writeU32Arr(ki.enableHex,  slotIdx, UGC_ENABLE_USED, "enable");
+    if (!err.empty()) return err;
+    err = writeU32Arr(ki.textureHex, slotIdx, ki.textureValue,  "texture");
+    if (!err.empty()) return err;
+    uint32_t hashIdVal = ((uint32_t)slotIdx & 0xffu)
+                       | ((ki.kindTag & 0xffu) << 16);
+    err = writeU32Arr(ki.hashIdHex,  slotIdx, hashIdVal,        "hashId");
+    if (!err.empty()) return err;
+    if (!WriteFile(SAVE_PLAYER_SAV, psav)) return "Failed to write Player.sav";
+    LoadUgcNames(); // refresh the in-memory name cache
     return "";
 }
 
