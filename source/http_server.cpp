@@ -374,24 +374,57 @@ static void HandleMiiExport(int fd,const std::string& query){
 // POST /api/mii/import — multipart: file + slot
 static void HandleMiiImport(int fd,const Request& req){
     auto fields=ParseMultipart(req.body,req.contentType);
-    std::string slotStr;std::vector<uint8_t> fileData;
+    std::string slotStr;std::vector<uint8_t> fileData,canvasData,ugctexData;
+    auto endsWith=[](const std::string& s,const char* suf){
+        size_t n=strlen(suf);
+        std::string low=s;for(auto& c:low)c=(char)tolower((unsigned char)c);
+        return low.size()>n&&low.compare(low.size()-n,n,suf)==0;
+    };
     for(auto& f:fields){
         if(f.name=="slot")slotStr=f.data;
         else if(f.name=="file")fileData.assign(f.data.begin(),f.data.end());
+        // Facepaint sidecars. ltd-save-editor exports them as separate
+        // UgcFacePaintNNN.canvas.zs / .ugctex.zs files rather than embedding
+        // them in the .ltd; without these the import found no facepaint and
+        // cleared whatever the target slot already had.
+        else if(endsWith(f.filename,".canvas.zs"))canvasData.assign(f.data.begin(),f.data.end());
+        else if(endsWith(f.filename,".ugctex.zs"))ugctexData.assign(f.data.begin(),f.data.end());
     }
     if(slotStr.empty()||fileData.empty()){Send500(fd,"Missing slot or file");return;}
     int slot=atoi(slotStr.c_str());
-    SrvLog("Mii import: slot "+std::to_string(slot)+" ("+std::to_string(fileData.size())+" bytes)");
+    SrvLog("Mii import: slot "+std::to_string(slot)+" ("+std::to_string(fileData.size())+" bytes"
+           +((!canvasData.empty()&&!ugctexData.empty())?", + facepaint":"")+")");
 
-    // Write temp file
+    // Write temp file. ImportMii looks for sidecars next to the .ltd by stem,
+    // so drop them alongside under the same temp stem.
     MkdirP("/switch/TomoToolNX");
-    std::string tmpPath="/switch/TomoToolNX/.mii_import_tmp.ltd";
-    {FILE* f=fopen(tmpPath.c_str(),"wb");
-    if(!f){Send500(fd,"Cannot write temp file");return;}
-    fwrite(fileData.data(),1,fileData.size(),f);fclose(f);}
+    std::string tmpStem="/switch/TomoToolNX/.mii_import_tmp";
+    std::string tmpPath=tmpStem+".ltd";
+    auto writeTmp=[&](const std::string& path,const std::vector<uint8_t>& d)->bool{
+        FILE* f=fopen(path.c_str(),"wb");
+        if(!f)return false;
+        bool ok=d.empty()||fwrite(d.data(),1,d.size(),f)==d.size();
+        fclose(f);
+        return ok;
+    };
+    auto cleanupTmp=[&](){
+        remove(tmpPath.c_str());
+        remove((tmpStem+".canvas.zs").c_str());
+        remove((tmpStem+".ugctex.zs").c_str());
+    };
+    // Clear any leftovers from an earlier import first — a stale sidecar pair
+    // would otherwise be applied to this Mii.
+    cleanupTmp();
+    if(!writeTmp(tmpPath,fileData)){cleanupTmp();Send500(fd,"Cannot write temp file");return;}
+    if(!canvasData.empty()&&!ugctexData.empty()){
+        if(!writeTmp(tmpStem+".canvas.zs",canvasData)||
+           !writeTmp(tmpStem+".ugctex.zs",ugctexData)){
+            cleanupTmp();Send500(fd,"Cannot write temp facepaint files");return;
+        }
+    }
 
     std::string err=MiiManager::ImportMii(slot,tmpPath);
-    remove(tmpPath.c_str());
+    cleanupTmp();
 
     if(!err.empty()){SrvLog("Mii import failed: "+err,true);Send500(fd,err);return;}
 

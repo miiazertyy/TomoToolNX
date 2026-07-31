@@ -10,7 +10,9 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <utility>
 #include <map>
+#include <dirent.h>
 #include <sys/stat.h>
 
 // ─── File I/O helpers ─────────────────────────────────────────────────────────
@@ -187,17 +189,174 @@ static const uint8_t MAGIC_A3[4] = {0xA3,0xA3,0xA3,0xA3};
 static const uint8_t MAGIC_A4[4] = {0xA4,0xA4,0xA4,0xA4};
 static const uint8_t MAGIC_A5[4] = {0xA5,0xA5,0xA5,0xA5};
 
-// Find first occurrence of 4-byte pattern
+// Find first occurrence of 4-byte pattern at or after `from`
 static int FindMagic(const std::vector<uint8_t>& data, const uint8_t* magic, int from=0) {
-    for (size_t i = from; i + 4 <= data.size(); i++)
-        if (memcmp(data.data()+i, magic, 4) == 0) return (int)i;
+    if (from < 0) from = 0;
+    for (int i = from; i + 4 <= (int)data.size(); i++)
+        if (memcmp(data.data()+i, magic, 4) == 0) return i;
     return -1;
 }
-static int FindMagicLast(const std::vector<uint8_t>& data, const uint8_t* magic) {
-    int last = -1;
-    for (size_t i = 0; i + 4 <= data.size(); i++)
-        if (memcmp(data.data()+i, magic, 4) == 0) last = (int)i;
-    return last;
+// Same, for markers narrower than 4 bytes (the v1/v2 .ltd layouts used 3).
+static int FindMagicN(const std::vector<uint8_t>& data, const uint8_t* magic,
+                      int len, int from=0) {
+    if (from < 0) from = 0;
+    for (int i = from; i + len <= (int)data.size(); i++)
+        if (memcmp(data.data()+i, magic, len) == 0) return i;
+    return -1;
+}
+static int FindMagicLastN(const std::vector<uint8_t>& data, const uint8_t* magic, int len) {
+    for (int i = (int)data.size() - len; i >= 0; i--)
+        if (memcmp(data.data()+i, magic, len) == 0) return i;
+    return -1;
+}
+
+// ─── .ltd Mii share-file parser ───────────────────────────────────────────────
+// Port of ltd-save-editor packages/ltd-sharemii/src/codec.ts (decodeLtdMii /
+// upgradeToV3).
+//
+// The previous inline parser scanned the entire file for the section markers —
+// the FIRST A3A3A3A3 anywhere and the LAST A4A4A4A4 anywhere. Both payloads are
+// compressed blobs, so a marker-shaped byte run inside one of them split the
+// canvas/ugctex sections in the wrong place and wrote two corrupt .zs files into
+// the save. The searches are now bounded exactly like the reference: the canvas
+// marker at or after the end of the fixed-size header, and the ugctex marker at
+// or after the canvas marker (first match, never last).
+//
+// Requiring the full 428-byte header up front also fixes the unchecked reads
+// that followed: the old code copied 156 bytes from offset 4 (and personality /
+// name / pronunciation from their fixed offsets) after validating nothing but
+// mii[0], so a truncated upload copied heap garbage straight into Mii.sav.
+
+static const int LTD_MII_BLOCK_LEN   = 156;
+static const int LTD_PERSONALITY_LEN = 18 * 4;
+static const int LTD_NAME_LEN        = 64;
+static const int LTD_PRONOUNCE_LEN   = 128;
+static const int LTD_SEXUALITY_LEN   = 4;
+
+static const int LTD_OFF_MII_BLOCK   = 4;
+static const int LTD_OFF_PERSONALITY = LTD_OFF_MII_BLOCK   + LTD_MII_BLOCK_LEN;   // 160
+static const int LTD_OFF_NAME        = LTD_OFF_PERSONALITY + LTD_PERSONALITY_LEN; // 232
+static const int LTD_OFF_PRONOUNCE   = LTD_OFF_NAME        + LTD_NAME_LEN;        // 296
+static const int LTD_OFF_SEXUALITY   = LTD_OFF_PRONOUNCE   + LTD_PRONOUNCE_LEN;   // 424
+static const int LTD_HEADER_LEN      = LTD_OFF_SEXUALITY   + LTD_SEXUALITY_LEN;   // 428
+
+struct LtdMii {
+    int  originalVersion;             // pre-upgrade version; v1 carries no personality
+    bool hasCanvas;
+    bool hasUgcTex;
+    std::vector<uint8_t> buf;         // whole file, normalised to the v3 layout
+    std::vector<uint8_t> canvasTex;
+    std::vector<uint8_t> ugcTex;
+    LtdMii() : originalVersion(0), hasCanvas(false), hasUgcTex(false) {}
+};
+
+// Rewrite a v1/v2 payload in place into the v3 layout.
+static std::string UpgradeLtdToV3(std::vector<uint8_t>& mii) {
+    int origVer = mii[0];
+    if (mii.size() < 5) return "Invalid .ltd file (truncated header)";
+    mii.erase(mii.begin() + 4);
+    if (origVer == 2) {
+        static const uint8_t M3[3] = {0xA3, 0xA3, 0xA3};
+        if ((int)mii.size() < 427) return "Invalid .ltd file (truncated v2 payload)";
+        mii.insert(mii.begin() + 427, 0);
+        // v2 used 3-byte section markers; widen both to the 4-byte v3 form.
+        int cm = FindMagicN(mii, M3, 3, 0);
+        if (cm < 0) return "Invalid .ltd file (missing v2 canvas marker)";
+        int um = FindMagicLastN(mii, M3, 3);
+        if (um <= cm) return "Invalid .ltd file (missing v2 ugctex marker)";
+        mii.insert(mii.begin() + cm + 3, 0xA3);
+        // The insert above shifted everything from cm+3 on by one byte, so the
+        // trailing marker now occupies um+1 .. um+3.
+        if (um + 4 > (int)mii.size()) return "Invalid .ltd file (truncated v2 payload)";
+        mii[um + 1] = 0xA4; mii[um + 2] = 0xA4; mii[um + 3] = 0xA4;
+        mii.insert(mii.begin() + um + 3, 0xA4);
+    }
+    mii[0] = 3;
+    return "";
+}
+
+static std::string DecodeLtdMii(std::vector<uint8_t> raw, LtdMii& out) {
+    if (raw.size() < 4) return "Invalid .ltd file (too small)";
+    int origVer = raw[0];
+    if (origVer < 1 || origVer > 3)
+        return "Unsupported .ltd version: " + std::to_string(origVer);
+    if (origVer < 3) {
+        std::string err = UpgradeLtdToV3(raw);
+        if (!err.empty()) return err;
+    }
+    if ((int)raw.size() < LTD_HEADER_LEN)
+        return "Invalid .ltd file (truncated: " + std::to_string(raw.size())
+             + " bytes, expected at least " + std::to_string(LTD_HEADER_LEN) + ")";
+
+    int canvasMagic = FindMagic(raw, MAGIC_A3, LTD_HEADER_LEN);
+    if (canvasMagic < 0) return "Invalid .ltd file (missing canvas section marker)";
+    int ugcMagic = FindMagic(raw, MAGIC_A4, canvasMagic + 4);
+    if (ugcMagic < 0) return "Invalid .ltd file (missing ugctex section marker)";
+
+    out.originalVersion = origVer;
+    out.hasCanvas = raw[1] != 0;
+    out.hasUgcTex = raw[2] != 0;
+    out.canvasTex.assign(raw.begin() + canvasMagic + 4, raw.begin() + ugcMagic);
+    out.ugcTex.assign(raw.begin() + ugcMagic + 4, raw.end());
+    out.buf.swap(raw);
+    return "";
+}
+
+// Load facepaint textures that ship next to a .ltd instead of inside it.
+// Two naming conventions are accepted:
+//   1. "<stem>.canvas.zs" / "<stem>.ugctex.zs" matching the .ltd's own stem —
+//      what TomoToolNX's own exporter and the WebUI upload path produce.
+//   2. "UgcFacePaintNNN.canvas.zs" / "UgcFacePaintNNN.ugctex.zs" — what
+//      ltd-save-editor's ShareMii export writes, named after the *source*
+//      save's facepaint id, which the .ltd itself never records. Those can only
+//      be paired positionally, so this is accepted only when the directory
+//      holds exactly one such pair and exactly one .ltd — otherwise we would be
+//      guessing which Mii the textures belong to.
+// Before this, convention 2 was not recognised at all: importing a Mii exported
+// from the web editor found no facepaint and *cleared* the target slot's
+// existing one.
+static bool EndsWithLower(const std::string& low, const char* suffix) {
+    size_t n = strlen(suffix);
+    return low.size() > n && low.compare(low.size() - n, n, suffix) == 0;
+}
+
+static bool LoadFacepaintSidecar(const std::string& ltdPath,
+                                 std::vector<uint8_t>& canvas,
+                                 std::vector<uint8_t>& ugctex) {
+    auto tryPair = [&](const std::string& stem) -> bool {
+        canvas.clear(); ugctex.clear();
+        if (!ReadFile(stem + ".canvas.zs", canvas)) return false;
+        if (!ReadFile(stem + ".ugctex.zs", ugctex)) { canvas.clear(); return false; }
+        if (canvas.empty() || ugctex.empty()) { canvas.clear(); ugctex.clear(); return false; }
+        return true;
+    };
+
+    std::string base = ltdPath;
+    if (base.size() >= 4 && base.compare(base.size() - 4, 4, ".ltd") == 0)
+        base = base.substr(0, base.size() - 4);
+    if (tryPair(base)) return true;
+
+    size_t slash = ltdPath.find_last_of("/\\");
+    std::string dir = (slash == std::string::npos) ? std::string(".")
+                                                   : ltdPath.substr(0, slash);
+    DIR* d = opendir(dir.c_str());
+    if (!d) return false;
+    std::string fpStem;
+    int fpPairs = 0, ltdFiles = 0;
+    for (struct dirent* e = readdir(d); e != nullptr; e = readdir(d)) {
+        std::string name = e->d_name;
+        std::string low  = name;
+        for (auto& c : low) c = (char)tolower((unsigned char)c);
+        if (EndsWithLower(low, ".ltd")) { ltdFiles++; continue; }
+        if (EndsWithLower(low, ".canvas.zs") &&
+            low.size() > 12 && low.compare(0, 12, "ugcfacepaint") == 0) {
+            fpPairs++;
+            fpStem = name.substr(0, name.size() - 10); // strip ".canvas.zs"
+        }
+    }
+    closedir(d);
+    if (fpPairs != 1 || ltdFiles != 1) return false;
+    return tryPair(dir + "/" + fpStem);
 }
 
 // ─── UGC kind tables (mirrors ShareUGCTemplate.py) ───────────────────────────
@@ -412,8 +571,18 @@ std::string ExportMii(int slot, const std::string& destPath) {
         snprintf(fpFile, sizeof(fpFile), "%03d", facepaintID);
         std::string canvasPath = std::string(SAVE_UGC_DIR) + "/UgcFacePaint" + fpFile + ".canvas.zs";
         std::string ugctexPath = std::string(SAVE_UGC_DIR) + "/UgcFacePaint" + fpFile + ".ugctex.zs";
-        if (ReadFile(canvasPath, canvastex)) ltdData[0] = 1;
-        if (ReadFile(ugctexPath,  ugctex))  ltdData[1] = 1;
+        // Both blobs must actually have content. ReadFile() succeeds on a
+        // zero-byte file, and flagging an empty payload as present made the
+        // importer commit facepaint state with no texture to back it.
+        if (!ReadFile(canvasPath, canvastex)) canvastex.clear();
+        if (!ReadFile(ugctexPath, ugctex))    ugctex.clear();
+        if (canvastex.empty() || ugctex.empty()) {
+            canvastex.clear();
+            ugctex.clear();
+        } else {
+            ltdData[0] = 1;
+            ltdData[1] = 1;
+        }
     }
 
     // Build .ltd file
@@ -447,26 +616,18 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
     if (slot < 1 || slot > MII_MAX_SLOTS)
         return "Invalid slot (must be 1-" + std::to_string(MII_MAX_SLOTS) + ")";
 
-    // Read .ltd
-    std::vector<uint8_t> mii;
-    if (!ReadFile(ltdPath, mii)) return "Cannot read .ltd file";
-    if (mii.empty())             return "Empty .ltd file";
-    if (mii[0] < 1 || mii[0] > 3) return "Unsupported .ltd version: " + std::to_string(mii[0]);
+    // Read + fully validate the .ltd before anything else. DecodeLtdMii
+    // guarantees a v3 layout with at least LTD_HEADER_LEN bytes, so every
+    // fixed-offset read below is in bounds.
+    std::vector<uint8_t> rawLtd;
+    if (!ReadFile(ltdPath, rawLtd)) return "Cannot read .ltd file";
 
-    // Convert older versions to v3
-    if (mii[0] < 3) {
-        mii.erase(mii.begin() + 4);
-        if (mii[0] == 2) {
-            mii.insert(mii.begin() + 427, 0);
-            int cs = FindMagic(mii, MAGIC_A3);
-            int us = FindMagicLast(mii, MAGIC_A3);
-            if (cs >= 0 && us >= 0 && cs != us) {
-                mii.insert(mii.begin() + cs + 3, 0xA3);
-                mii[us+1] = 0xA4; mii[us+2] = 0xA4; mii[us+3] = 0xA4;
-                mii.insert(mii.begin() + us + 3, 0xA4);
-            }
-        }
+    LtdMii ltd;
+    {
+        std::string err = DecodeLtdMii(std::move(rawLtd), ltd);
+        if (!err.empty()) return err;
     }
+    const std::vector<uint8_t>& mii = ltd.buf;
 
     // Read save files
     std::vector<uint8_t> miisav, playersav;
@@ -506,50 +667,45 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
     for (int i = 0; i < 156; i++) sum += miisav[miiindex + i];
     if (sum == 152) return "Mii slot not initialized — create a Mii there first";
 
-    // Find sections in .ltd
-    int canvasStart = FindMagic(mii, MAGIC_A3);
-    int ugctexStart = FindMagicLast(mii, MAGIC_A4);
-    if (canvasStart < 0 || ugctexStart < 0)
-        return "Invalid .ltd file structure";
-    canvasStart += 4;
-    ugctexStart += 4;
-
-    // Detect facepaint — embedded in .ltd (ltdData[0]==1 && ltdData[1]==1)
-    int facepaint = 0;
-    if (mii[1] == 1 && mii[2] == 1) {
-        facepaint = 1;
-        if (mii.size() > 47) mii[47] = 1;
+    // ── Resolve the facepaint payload BEFORE touching any save state ─────────
+    // Both blobs must exist and be non-empty. The old code committed the
+    // Mii.sav facepaint index and the Player.sav slot state first and wrote the
+    // .zs files afterwards under separate conditions, so an empty payload or a
+    // failed write left the resident pointing at a facepaint id whose textures
+    // still belonged to a *previous* resident — one Mii wearing another Mii's
+    // makeup. Nothing below mutates the saves until both blobs are in hand.
+    std::vector<uint8_t> fpCanvas, fpUgcTex;
+    bool haveFacepaint = false;
+    if (ltd.hasCanvas && ltd.hasUgcTex &&
+        !ltd.canvasTex.empty() && !ltd.ugcTex.empty()) {
+        fpCanvas = ltd.canvasTex;
+        fpUgcTex = ltd.ugcTex;
+        haveFacepaint = true;
     }
-    // External .canvas.zs / .ugctex.zs alongside the .ltd file (facepaint == 2)
-    std::string ltdBase = ltdPath;
-    if (ltdBase.size() >= 4 && ltdBase.substr(ltdBase.size()-4) == ".ltd")
-        ltdBase = ltdBase.substr(0, ltdBase.size()-4);
-    std::string extCanvasPath = ltdBase + ".canvas.zs";
-    std::string extUgcPath    = ltdBase + ".ugctex.zs";
-    if (FileExists(extCanvasPath) && FileExists(extUgcPath)) {
-        facepaint = 2;
-        if (mii.size() > 47) mii[47] = 1;
-    }
+    if (!haveFacepaint)
+        haveFacepaint = LoadFacepaintSidecar(ltdPath, fpCanvas, fpUgcTex);
 
-    // Write raw Mii data to Mii.sav
-    if (miiindex + 156 <= (int)miisav.size())
-        memcpy(miisav.data() + miiindex, mii.data() + 4, 156);
+    // Write raw Mii data to Mii.sav. NOTE: the .ltd block is copied verbatim.
+    // A previous version poked mii[47] = 1 here whenever the Mii carried a
+    // facepaint; that byte is CharInfoEx offset 39 — the Mii's *gender* — so
+    // every facepainted Mii was silently turned female on import. The game
+    // learns about facepaint from Mii.FacePaintIndex, which is set below.
+    memcpy(miisav.data() + miiindex, mii.data() + LTD_OFF_MII_BLOCK, LTD_MII_BLOCK_LEN);
 
-    // Personality (18 × 4 bytes starting at offset 160 in .ltd)
-    if (mii[0] >= 2 && (int)mii.size() >= 160 + 18*4) {
+    // Personality / name / pronunciation / sexuality (v2+ only)
+    if (ltd.originalVersion >= 2) {
         for (int i = 0; i < 18; i++) {
             int off = OffsetLocator(miisav, PERS_HASHES_MII[i]);
             if (off < 0) continue;
             off += 4 + s * 4;
             if (off + 4 <= (int)miisav.size())
-                memcpy(miisav.data() + off, mii.data() + 160 + i*4, 4);
+                memcpy(miisav.data() + off, mii.data() + LTD_OFF_PERSONALITY + i*4, 4);
         }
-        // Name (64 bytes at 232) + Pronunciation (128 bytes at 296)
-        if ((int)mii.size() >= 232 + 64)
-            memcpy(miisav.data() + miinames + s*64, mii.data() + 232, 64);
-        if ((int)mii.size() >= 296 + 128)
-            memcpy(miisav.data() + miiprefer + s*128, mii.data() + 296, 128);
-        // Sexuality (3 bytes at 424) — only if Mii is level < 2
+        if (miinames + s*64 + LTD_NAME_LEN <= (int)miisav.size())
+            memcpy(miisav.data() + miinames + s*64, mii.data() + LTD_OFF_NAME, LTD_NAME_LEN);
+        if (miiprefer + s*128 + LTD_PRONOUNCE_LEN <= (int)miisav.size())
+            memcpy(miisav.data() + miiprefer + s*128, mii.data() + LTD_OFF_PRONOUNCE, LTD_PRONOUNCE_LEN);
+        // Sexuality — only if Mii is level < 2
         int levelHash = OffsetLocator(miisav, "9999B7D9");
         bool canSetSexuality = true;
         if (levelHash >= 0) {
@@ -560,10 +716,11 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
                 canSetSexuality = (level < 2);
             }
         }
-        if (canSetSexuality && persOffsetSX >= 0 && (int)mii.size() >= 427 && persOffsetSX + 27 <= (int)miisav.size()) {
+        if (canSetSexuality && persOffsetSX >= 0 && persOffsetSX + 27 <= (int)miisav.size()) {
             auto bits = DecodeSexuality(miisav.data() + persOffsetSX, 27);
             for (int b = 0; b < 3; b++)
-                if (s*3+b < (int)bits.size()) bits[s*3+b] = mii[424+b];
+                if (s*3+b < (int)bits.size())
+                    bits[s*3+b] = mii[LTD_OFF_SEXUALITY + b] & 1;
             auto encoded = EncodeSexuality(bits);
             memcpy(miisav.data() + persOffsetSX, encoded.data(), std::min(encoded.size(), (size_t)27));
         }
@@ -572,12 +729,15 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
     // Read existing facepaint ID for this slot (0xFF = none)
     int facepaintID = -1;
     if (miiOffset2 >= 0 && miiOffset2 + 4*s < (int)miisav.size()) {
-        uint8_t raw = miisav[miiOffset2 + 4*s];
-        if (raw != 0xFF) facepaintID = raw;
+        uint8_t rawId = miisav[miiOffset2 + 4*s];
+        if (rawId != 0xFF) facepaintID = rawId;
     }
 
-    // Facepaint handling
-    if (facepaint) {
+    // Facepaint handling. `staleFpStem` records textures to delete once the
+    // saves have actually been committed — removing them earlier would strand
+    // a still-referenced facepaint if a .sav write then failed.
+    std::string staleFpStem;
+    if (haveFacepaint) {
         // Assign next available ID if this slot had no facepaint
         if (facepaintID < 0) {
             std::vector<bool> used(MII_MAX_SLOTS, false);
@@ -592,6 +752,17 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
             }
         }
         if (facepaintID < 0) return "No free facepaint slots";
+
+        // Write the textures FIRST. If either write fails we return before
+        // Mii.sav / Player.sav are modified at all, so the save on disk stays
+        // exactly as it was rather than referencing a facepaint that isn't there.
+        char fpFile[8];
+        snprintf(fpFile, sizeof(fpFile), "%03d", facepaintID);
+        MkdirP(SAVE_UGC_DIR);
+        std::string canvasPath = std::string(SAVE_UGC_DIR) + "/UgcFacePaint" + fpFile + ".canvas.zs";
+        std::string ugctexPath = std::string(SAVE_UGC_DIR) + "/UgcFacePaint" + fpFile + ".ugctex.zs";
+        if (!WriteFile(canvasPath, fpCanvas)) return "Failed to write " + canvasPath;
+        if (!WriteFile(ugctexPath, fpUgcTex)) return "Failed to write " + ugctexPath;
 
         // Update Mii.sav facepaint index
         if (miiOffset2 >= 0 && miiOffset2 + 4*s + 4 <= (int)miisav.size()) {
@@ -617,30 +788,6 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
         uint8_t fp5val[4] = {(uint8_t)facepaintID, 0, 8, 0};
         if (fpOff[4] + facepaintID*4 + 4 <= (int)playersav.size())
             memcpy(playersav.data() + fpOff[4] + facepaintID*4, fp5val, 4);
-
-        // Write facepaint texture files
-        char fpFile[8];
-        snprintf(fpFile, sizeof(fpFile), "%03d", facepaintID);
-        MkdirP(SAVE_UGC_DIR);
-        std::string canvasPath = std::string(SAVE_UGC_DIR) + "/UgcFacePaint" + fpFile + ".canvas.zs";
-        std::string ugctexPath = std::string(SAVE_UGC_DIR) + "/UgcFacePaint" + fpFile + ".ugctex.zs";
-
-        if (facepaint == 2) {
-            // External files alongside the .ltd — copy them directly
-            std::vector<uint8_t> extCanvas, extUgcTex;
-            if (ReadFile(extCanvasPath, extCanvas)) WriteFile(canvasPath, extCanvas);
-            if (ReadFile(extUgcPath,    extUgcTex))  WriteFile(ugctexPath,  extUgcTex);
-        } else {
-            // Embedded in .ltd — extract from between the magic markers
-            if (canvasStart < ugctexStart - 4) {
-                std::vector<uint8_t> canvas(mii.begin()+canvasStart, mii.begin()+ugctexStart-4);
-                WriteFile(canvasPath, canvas);
-            }
-            if (ugctexStart < (int)mii.size()) {
-                std::vector<uint8_t> ugctexData(mii.begin()+ugctexStart, mii.end());
-                WriteFile(ugctexPath, ugctexData);
-            }
-        }
     } else {
         // New Mii has no facepaint — clear old facepaint data if slot previously had one
         if (facepaintID >= 0) {
@@ -665,6 +812,13 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
                 memcpy(playersav.data() + fpOff[3] + facepaintID*4, CLR4, 4);
             if (fpOff[4] + facepaintID*4 + 4 <= (int)playersav.size())
                 memcpy(playersav.data() + fpOff[4] + facepaintID*4, CLR5, 4);
+
+            // Drop the textures too. Leaving them behind meant the next Mii to
+            // be allocated this now-"free" id inherited the old resident's
+            // artwork whenever its own texture write didn't land.
+            char fpFile[8];
+            snprintf(fpFile, sizeof(fpFile), "%03d", facepaintID);
+            staleFpStem = std::string(SAVE_UGC_DIR) + "/UgcFacePaint" + fpFile;
         }
     }
 
@@ -697,6 +851,11 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
     // Write save files
     if (!WriteFile(SAVE_MII_SAV,    miisav))    return "Failed to write Mii.sav";
     if (!WriteFile(SAVE_PLAYER_SAV, playersav)) return "Failed to write Player.sav";
+
+    if (!staleFpStem.empty()) {
+        remove((staleFpStem + ".canvas.zs").c_str());
+        remove((staleFpStem + ".ugctex.zs").c_str());
+    }
 
     return ""; // success
 }
@@ -930,13 +1089,16 @@ std::string ExportUgc(int ugcKind, int slot, const std::string& destPath) {
             nameData.insert(nameData.end(), sz, 0);
     }
 
-    // Build vector data (12 bytes) and vector2 data (8 bytes)
-    // NOTE: Python uses vOffset for both vector and vector2 reads — porting faithfully
+    // Build vector data (Vector3Array, 12 B/slot) and vector2 (Vector2Array,
+    // 8 B/slot). vector2 lives in its OWN array — the old code indexed both
+    // through off.v, so it read 8 bytes from the middle of some other slot's
+    // Vector3 record (and ImportUgc wrote them back there, corrupting
+    // neighbouring Exterior / MapObject entries).
     std::vector<uint8_t> vec(12, 0), vec2(8, 0);
     if (off.v >= 0 && off.v + s * 12 + 12 <= (int)psav.size())
         memcpy(vec.data(), psav.data() + off.v + s * 12, 12);
-    if (off.v2 >= 0 && off.v >= 0 && off.v + s * 8 + 8 <= (int)psav.size())
-        memcpy(vec2.data(), psav.data() + off.v + s * 8, 8);
+    if (off.v2 >= 0 && off.v2 + s * 8 + 8 <= (int)psav.size())
+        memcpy(vec2.data(), psav.data() + off.v2 + s * 8, 8);
 
     // Sanitize name for filename
     std::string utf8name = nameData.size() >= 2 ? Utf16leToUtf8(nameData.data(), std::min((int)nameData.size(), 128)) : "";
@@ -950,10 +1112,11 @@ std::string ExportUgc(int ugcKind, int slot, const std::string& destPath) {
     if (sanitName.empty()) sanitName = "ugc";
 
     // Build UGC file stem (e.g. "Food005")
-    std::string ugcNum;
-    if (s < 10)      ugcNum = "00" + std::to_string(s);
-    else if (s < 99) ugcNum = "0"  + std::to_string(s);
-    else             ugcNum = std::to_string(s);
+    // Stems are zero-padded to three digits (UgcCloth099, UgcCloth100).
+    // The old ladder used `s < 99` for the two-digit case, so slot index 99
+    // alone produced "Cloth99" and read/wrote the wrong file.
+    char ugcNum[8];
+    snprintf(ugcNum, sizeof(ugcNum), "%03d", s);
     std::string ugcStem = std::string(UGC_PFX[ugcKind]) + ugcNum;
 
     // Read texture files
@@ -985,8 +1148,13 @@ std::string ExportUgc(int ugcKind, int slot, const std::string& destPath) {
     std::string finalPath = destPath;
     if (finalPath.size() >= 4 && finalPath.substr(finalPath.size() - 4) == "auto")
         finalPath = finalPath.substr(0, finalPath.size() - 4) + sanitName;
+    // Append the extension unless the path already ENDS with it. `find` matched
+    // anywhere, so a destination folder containing e.g. ".ltdf" suppressed it
+    // and the export landed without an extension.
     const char* ext = UGC_EXT[ugcKind];
-    if (finalPath.find(ext) == std::string::npos)
+    size_t extLen = strlen(ext);
+    if (finalPath.size() < extLen ||
+        finalPath.compare(finalPath.size() - extLen, extLen, ext) != 0)
         finalPath += ext;
     finalPath = UniquePath(finalPath);
 
@@ -1028,25 +1196,30 @@ std::string ImportUgc(int ugcKind, int slot, const std::string& ltdxPath, bool i
         }
     }
 
-    // Find section markers
-    int nameMagic   = FindMagic(ltdx, MAGIC_A2);
-    int canvasMagic = FindMagic(ltdx, MAGIC_A3);
-    int ugctexMagic = FindMagic(ltdx, MAGIC_A4);
-    int thumbMagic  = FindMagic(ltdx, MAGIC_A5);
-    if (nameMagic < 0 || canvasMagic < 0 || ugctexMagic < 0 || thumbMagic < 0)
-        return "Invalid file structure — missing section markers";
-    if (nameMagic < 4)
-        return "Invalid file: A2 marker too early";
+    // Find section markers. Each search starts just past the previous marker
+    // (mirrors decodeLtdUgc in ltd-sharemii/src/codec.ts). Searching all four
+    // independently from offset 0 meant a marker-shaped byte run inside the
+    // name block or the canvas payload could be picked up as a later section's
+    // marker, silently slicing the textures apart at the wrong offsets.
+    int nameMagic = FindMagic(ltdx, MAGIC_A2, 4);
+    if (nameMagic < 0) return "Invalid file structure — missing name marker";
+    int canvasMagic = FindMagic(ltdx, MAGIC_A3, nameMagic + 4);
+    if (canvasMagic < 0) return "Invalid file structure — missing canvas marker";
+    int ugctexMagic = FindMagic(ltdx, MAGIC_A4, canvasMagic + 4);
+    if (ugctexMagic < 0) return "Invalid file structure — missing ugctex marker";
+    int thumbMagic  = FindMagic(ltdx, MAGIC_A5, ugctexMagic + 4);
+    if (thumbMagic < 0) return "Invalid file structure — missing thumb marker";
     int nameStart   = nameMagic   + 4;
     int canvasStart = canvasMagic + 4;
     int ugctexStart = ugctexMagic + 4;
     int thumbStart  = thumbMagic  + 4;
 
     // Write texture files
-    std::string ugcNum;
-    if (s < 10)      ugcNum = "00" + std::to_string(s);
-    else if (s < 99) ugcNum = "0"  + std::to_string(s);
-    else             ugcNum = std::to_string(s);
+    // Stems are zero-padded to three digits (UgcCloth099, UgcCloth100).
+    // The old ladder used `s < 99` for the two-digit case, so slot index 99
+    // alone produced "Cloth99" and read/wrote the wrong file.
+    char ugcNum[8];
+    snprintf(ugcNum, sizeof(ugcNum), "%03d", s);
     std::string ugcStem = std::string(UGC_PFX[ugcKind]) + ugcNum;
     MkdirP(SAVE_UGC_DIR);
     std::string canvasOut = std::string(SAVE_UGC_DIR) + "/Ugc" + ugcStem + ".canvas.zs";
@@ -1121,14 +1294,14 @@ std::string ImportUgc(int ugcKind, int slot, const std::string& ltdxPath, bool i
 
     // Write vector data embedded in the file before the A2 marker
     // Layout: [... vec(12) vec2(8) A2A2A2A2 names ...]
-    // NOTE: Python uses vOffset (not v2Offset) for both vec and vec2 writes — porting faithfully
+    // vector2 goes into off.v2, not off.v — see the matching note in ExportUgc.
     if (off.v >= 0 && nameStart >= 24) {
         if (nameStart - 24 + 12 <= (int)ltdx.size() && off.v + s*12 + 12 <= (int)psav.size())
             memcpy(psav.data() + off.v + s*12, ltdx.data() + nameStart - 24, 12);
     }
-    if (off.v2 >= 0 && off.v >= 0 && nameStart >= 12) {
-        if (nameStart - 12 + 8 <= (int)ltdx.size() && off.v + s*8 + 8 <= (int)psav.size())
-            memcpy(psav.data() + off.v + s*8, ltdx.data() + nameStart - 12, 8);
+    if (off.v2 >= 0 && nameStart >= 12) {
+        if (nameStart - 12 + 8 <= (int)ltdx.size() && off.v2 + s*8 + 8 <= (int)psav.size())
+            memcpy(psav.data() + off.v2 + s*8, ltdx.data() + nameStart - 12, 8);
     }
 
     if (!WriteFile(SAVE_PLAYER_SAV, psav)) return "Failed to write Player.sav";
@@ -1599,8 +1772,13 @@ std::string DeleteUgc(int ugcKind, int slot) {
     // Sweep the on-disk texture files. remove() returns non-zero on
     // failure; missing is fine, permission issues surface as an error
     // string once we've tried all three.
+    // Both thumbnail spellings are in the wild — ugc_scanner.cpp accepts either,
+    // and ExportUgc / ImportUgc / texture_processor.cpp all write the
+    // "_Thumb.ugctex.zs" form. Deleting only "_Thumb_ugctex.zs" left the
+    // thumbnail behind, so the scanner kept listing the deleted slot.
     std::string base = std::string(SAVE_UGC_DIR) + "/" + stem;
-    const char* suffixes[] = { ".canvas.zs", ".ugctex.zs", "_Thumb_ugctex.zs" };
+    const char* suffixes[] = { ".canvas.zs", ".ugctex.zs",
+                               "_Thumb.ugctex.zs", "_Thumb_ugctex.zs" };
     std::string err;
     for (const char* suf : suffixes) {
         std::string path = base + suf;

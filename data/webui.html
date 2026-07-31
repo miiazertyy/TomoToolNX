@@ -807,7 +807,7 @@ body.hou-picking .hou-slot:not(.picked):hover,body.hou-picking .hou-slot:not(.pi
   <div class="drop-ol-sub" id="drop-ol-sub"></div>
 </div>
 <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp,.ltdf,.ltdc,.ltdg,.ltdi,.ltde,.ltdo,.ltdl" style="display:none" onchange="fileChosen()">
-<input type="file" id="mii-file-input" accept=".ltd" style="display:none" onchange="miiFileChosen()">
+<input type="file" id="mii-file-input" accept=".ltd,.zs" multiple style="display:none" onchange="miiFileChosen()">
 
 <script>
 // ── Translations ─────────────────────────────────────────────────────────────
@@ -2532,15 +2532,23 @@ function doMiiImport(slot){
 function miiFileChosen(){
   const fi=document.getElementById('mii-file-input');
   if(!fi.files.length)return;
-  const f=fi.files[0];fi.value='';
-  uploadMiiFile(f);
+  const files=Array.from(fi.files);fi.value='';
+  // Facepaint may travel either inside the .ltd or as separate
+  // UgcFacePaintNNN.canvas.zs / .ugctex.zs sidecars (that's how
+  // ltd-save-editor exports it) — let the user pick all of them at once.
+  const ltd=files.find(f=>f.name.toLowerCase().endsWith('.ltd'));
+  if(!ltd){setMiiStatus('no .ltd file selected','err');pendingMiiSlot=null;return;}
+  const canvas=files.find(f=>f.name.toLowerCase().endsWith('.canvas.zs'));
+  const ugctex=files.find(f=>f.name.toLowerCase().endsWith('.ugctex.zs'));
+  uploadMiiFile(ltd,canvas,ugctex);
 }
-async function uploadMiiFile(file){
+async function uploadMiiFile(file,canvas,ugctex){
   showSpinner('importing mii...');
   const fd=new FormData();fd.append('file',file);fd.append('slot',String(pendingMiiSlot));
+  if(canvas&&ugctex){fd.append('canvas',canvas,canvas.name);fd.append('ugctex',ugctex,ugctex.name);}
   const d=await(await fetch('/api/mii/import',{method:'POST',body:fd})).json();
   modalClose();
-  if(d.ok){setMiiStatus('imported into slot '+pendingMiiSlot,'ok');}
+  if(d.ok){setMiiStatus('imported into slot '+pendingMiiSlot+((canvas&&ugctex)?' (with facepaint)':''),'ok');}
   else setMiiStatus('failed: '+d.error,'err');
   pendingMiiSlot=null;
 }
