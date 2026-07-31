@@ -1115,7 +1115,10 @@ std::string ExportUgc(int ugcKind, int slot, const std::string& destPath) {
     // Stems are zero-padded to three digits (UgcCloth099, UgcCloth100).
     // The old ladder used `s < 99` for the two-digit case, so slot index 99
     // alone produced "Cloth99" and read/wrote the wrong file.
-    char ugcNum[8];
+    // 16 bytes so the compiler can see the %03d can never truncate; `s` is
+    // already range-checked against UGC_MAX_SL above, but that isn't visible
+    // to -Wformat-truncation here.
+    char ugcNum[16];
     snprintf(ugcNum, sizeof(ugcNum), "%03d", s);
     std::string ugcStem = std::string(UGC_PFX[ugcKind]) + ugcNum;
 
@@ -1218,7 +1221,10 @@ std::string ImportUgc(int ugcKind, int slot, const std::string& ltdxPath, bool i
     // Stems are zero-padded to three digits (UgcCloth099, UgcCloth100).
     // The old ladder used `s < 99` for the two-digit case, so slot index 99
     // alone produced "Cloth99" and read/wrote the wrong file.
-    char ugcNum[8];
+    // 16 bytes so the compiler can see the %03d can never truncate; `s` is
+    // already range-checked against UGC_MAX_SL above, but that isn't visible
+    // to -Wformat-truncation here.
+    char ugcNum[16];
     snprintf(ugcNum, sizeof(ugcNum), "%03d", s);
     std::string ugcStem = std::string(UGC_PFX[ugcKind]) + ugcNum;
     MkdirP(SAVE_UGC_DIR);

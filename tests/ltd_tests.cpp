@@ -227,7 +227,7 @@ int main() {
     printf("\n== UGC stem padding (slot index 99) ==\n");
     {
         auto stem = [](int s) {
-            char n[8];
+            char n[16]; // matches the source buffer (silences -Wformat-truncation)
             snprintf(n, sizeof(n), "%03d", s);
             return std::string("Cloth") + n;
         };
