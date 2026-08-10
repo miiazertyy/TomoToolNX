@@ -3,7 +3,10 @@
 
 #include <string>
 
-#define APP_VERSION "1.3.10"  // bump this before each release
+// Bump this before each release — it is the single source of truth. The
+// Makefile greps this line for the NACP version too, so the number Sphaira
+// and the album show can't drift from the one the app prints.
+#define APP_VERSION "1.3.10"
 #define GITHUB_REPO "miiazertyy/TomoToolNX"
 
 namespace Updater {

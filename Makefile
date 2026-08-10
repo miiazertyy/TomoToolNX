@@ -46,7 +46,13 @@ include $(DEVKITPRO)/libnx/switch_rules
 TARGET      := TomoToolNX
 APP_TITLE   := TomoToolNX
 APP_AUTHOR  := Imprimante
-APP_VERSION := 1.3.8
+# Read from source/updater.h rather than duplicated here — the two drifted
+# apart before (the NACP still said 1.3.8 while the app printed 1.3.10, so
+# Sphaira showed the stale number).
+APP_VERSION := $(shell sed -n 's/^#define APP_VERSION "\([^"]*\)".*/\1/p' $(TOPDIR)/source/updater.h)
+ifeq ($(strip $(APP_VERSION)),)
+$(error "Could not read APP_VERSION from source/updater.h")
+endif
 # Title ID intentionally left blank for emulator compatibility:
 # Ryubing 1.3.279's Discord-integration module reacts to the "active title
 # changed" event during NRO load and dereferences the not-yet-registered
