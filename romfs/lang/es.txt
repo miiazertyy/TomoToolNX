@@ -65,10 +65,20 @@ player.field.FountainLv = Nv. fuente
 player.field.Wishes = Deseos
 player.field.Region = Región
 player.field.TTPenalty = Penalización VT
+player.field.Donation = Donación
 player.lastpenalty.active = activa
 player.lastpenalty.cleared = borrada
 player.lastpenalty.clear = borrar penalización
 player.lastpenalty.already = ya borrada
+player.donation.never = nunca
+player.donation.never.hint = la próxima donación está disponible ya
+player.donation.dayssince = días
+player.donation.dayssince.one = día
+player.donation.future = fecha futura — el juego esperará
+player.donation.dayback = 1 día antes
+player.donation.dayfwd = 1 día después
+player.donation.settoday = marcar como recibida ahora
+player.donation.clear = borrar (nunca recibida)
 
 # ── Player tab footer ────────────────────────────────────────────────────────
 player.footer = Arriba/Abajo  seleccionar    Izq/Der  ajustar    A  editar    X  deshacer    B/+  atrás
@@ -315,6 +325,7 @@ player.wishes.reset = Reiniciar deseos liberados
 player.wishes.reset.confirm = toca otra vez para REINICIAR
 player.footer.pron = ZL/ZR  campo    A  nombre    X  pronunciación    Izq/Der  idioma    L/R  pestaña    B/+  atrás
 player.footer.value = ZL/ZR  campo    Izq/Der  valor    A  editar    X  deshacer    L/R  pestaña    B/+  atrás
+player.footer.date = ZL/ZR  campo    Izq/Der  ±1 día    A  ahora    Y  borrar    X  deshacer    L/R  pestaña    B/+  atrás
 player.desc.Name = Nombre de tu jugador en el juego.
 player.desc.Island = Nombre de tu isla.
 player.desc.Money = Monedas actuales.
@@ -329,6 +340,7 @@ player.desc.FountainLv = Nivel de la fuente de los deseos.
 player.desc.Wishes = Número de deseos pedidos.
 player.desc.Region = Región del jugador (afecta estaciones y clima).
 player.desc.TTPenalty = Marca de tiempo de penalización por viaje temporal. Pulsa A para borrar y que las tiendas se reabastezcan.
+player.desc.Donation = Cuándo se recibió la última donación. Atrásala para que haya otra disponible.
 
 # ── Map tab ──────────────────────────────────────────────────────────────────
 map.picker.title = elegir actor

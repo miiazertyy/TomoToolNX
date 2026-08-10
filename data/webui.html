@@ -2453,7 +2453,23 @@ function setBc1(v){
   ['auto','fourColor','threeColor'].forEach(k=>document.getElementById('bc1-'+k).classList.toggle('enc-on',k===v));
   document.getElementById('bc1-hint').textContent=BC1_HINTS[v]||'';
 }
-function fileChosen(){const fi=document.getElementById('file-input');if(!fi.files.length)return;const f=fi.files[0];fi.value='';const ext=f.name.slice(f.name.lastIndexOf('.')).toLowerCase();if(UGC_ITEM_EXTS.includes(ext)){uploadUgcItemFile(f);}else{pendingFile=f;uploadFile();}}
+const IMAGE_EXTS=['.png','.jpg','.jpeg','.webp'];
+function fileChosen(){
+  const fi=document.getElementById('file-input');
+  if(!fi.files.length)return;
+  const f=fi.files[0];fi.value='';
+  const dot=f.name.lastIndexOf('.');
+  const ext=dot<0?'':f.name.slice(dot).toLowerCase();
+  if(UGC_ITEM_EXTS.includes(ext)){uploadUgcItemFile(f);return;}
+  // Touch devices browse with the accept filter removed (see
+  // relaxMobileFilePickers), so anything at all can land here — catch
+  // non-images now instead of letting the server fail on the decode.
+  if(!IMAGE_EXTS.includes(ext)&&!(f.type||'').startsWith('image/')){
+    setStatus('unsupported file type: '+(ext||f.name),'err');
+    return;
+  }
+  pendingFile=f;uploadFile();
+}
 async function uploadFile(){
   showSpinner('importing...');
   const fd=new FormData();fd.append('file',pendingFile);fd.append('stem',selected.stem);fd.append('encoder',encMode);fd.append('bc1Mode',bc1Mode);fd.append('fitMode',fitMode);fd.append('matte',matteHexForUpload());fd.append('shape',shape);
@@ -2730,8 +2746,22 @@ function showSpinner(msg){
 function modalClose(){document.getElementById('overlay').classList.remove('open');}
 function modalYes(){}
 
+// Mobile file pickers (Android's document picker, iOS Files) turn an `accept`
+// list into MIME types and grey out every file whose extension they don't
+// recognise — which is all of ours (.ltdc, .ltd, .zs). Drop the filter on
+// touch devices so the pickers show everything; the change handlers below
+// already validate the extension after the pick.
+function relaxMobileFilePickers(){
+  if(!(window.matchMedia&&window.matchMedia('(pointer:coarse)').matches))return;
+  ['file-input','mii-file-input'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el)el.removeAttribute('accept');
+  });
+}
+
 applyTranslations();
 syncLocaleFromHomebrew();
+relaxMobileFilePickers();
 loadList();
 
 // ── Drag & Drop ───────────────────────────────────────────────────────────────
@@ -3192,12 +3222,13 @@ function renderPlayerFields(){
     <div id="wishes-card-body" class="wsh-loading">loading...</div>
   </div>`;
 
-  // Advanced card: one-shot toggles that aren't worth a number-input
-  // affordance. Currently just the time-travel penalty clear (issue #32) —
-  // the field is a UInt64 game-clock timestamp; users only ever want to
-  // zero it so they can skip the 72-hour shop-restock cooldown after
-  // their Switch's clock drifted backwards.
+  // Advanced card: one-shot toggles and stamps that aren't worth a plain
+  // number input. Both entries here are UInt64 game-clock timestamps (POSIX
+  // seconds): the time-travel penalty (issue #32) and the last-donation
+  // stamp (issue #37).
   const ttpActive=(getUInt64S(e,0x71e3ba15)!==0n);
+  const donTs=getUInt64S(e,H_LAST_DONATION);
+  const donDays=(donTs===0n)?null:Math.floor((Date.now()/1000-Number(donTs))/86400);
   const advanced=`<div class="ed-card">
     <div class="ed-card-title">advanced</div>
     <div class="ed-field">
@@ -3217,6 +3248,27 @@ function renderPlayerFields(){
         shop restocks for ~72h. Zeroing it skips the cooldown.
       </div>
     </div>
+    <div class="ed-field" style="margin-top:12px">
+      <span class="ed-label">Last donation</span>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <input class="ed-input" type="datetime-local" step="1" style="width:auto"
+               value="${u64ToDateLocal(donTs)}" onchange="onDonationChange(event)">
+        <button class="btn" onclick="donationShiftDay(-1)" title="Move the stamp one day into the past">&minus;1 day</button>
+        <button class="btn" onclick="donationShiftDay(1)" title="Move the stamp one day into the future">+1 day</button>
+        <button class="btn" onclick="donationSetNow()" title="Stamp the donation as collected right now">now</button>
+        <button class="btn ${donTs===0n?'':'btn-gold'}" ${donTs===0n?'disabled':''}
+                onclick="donationClear()" title="Set Player.LastDonationGameTime to 0 — the game then treats the donation as never collected">
+          clear
+        </button>
+      </div>
+      <div style="color:var(--muted);font-size:.75rem;margin-top:4px">
+        Player.LastDonationGameTime &mdash; ${donTs===0n?'never collected, so the next donation is available right away'
+          :(donDays<0?'stamped in the future; the game will wait until that date passes'
+                     :'collected '+donDays+' day'+(donDays===1?'':'s')+' ago')}.
+        The game only offers the next donation once a day has passed since this stamp, so
+        back-dating it (or clearing it) makes up for days you missed.
+      </div>
+    </div>
   </div>`;
 
   document.getElementById('save-fields-player').innerHTML=identity+birthday+settings+island+economy+wishes+advanced;
@@ -3229,6 +3281,40 @@ function clearTTPenalty(){
   // disables itself without a manual refresh.
   renderPlayerFields();
   setSaveStatus('player','time-travel penalty cleared','ok');
+}
+
+// ── Last-donation stamp (issue #37) ──────────────────────────────────────────
+// Player.LastDonationGameTime is a scalar UInt64 of POSIX seconds. The game
+// hands out the next donation only once a day has elapsed since it, so the
+// useful edits are "pick a date", "shift a day", "stamp now" and "clear".
+const H_LAST_DONATION=0xbba9c090;
+function donationSet(v,msg){
+  if(!savPlayer)return;
+  setUInt64S(savPlayer.entries,H_LAST_DONATION,v);
+  renderPlayerFields();
+  setSaveStatus('player',msg,'ok');
+}
+function onDonationChange(ev){
+  const secs=dateLocalToU64(ev.target.value);
+  if(secs===null){setSaveStatus('player','invalid date','err');return;}
+  donationSet(secs,secs===0n?'donation stamp cleared':'donation stamp set');
+}
+function donationSetNow(){donationSet(BigInt(Math.floor(Date.now()/1000)),'donation stamped as collected now');}
+function donationClear(){donationSet(0n,'donation stamp cleared');}
+function donationShiftDay(dir){
+  if(!savPlayer)return;
+  const cur=getUInt64S(savPlayer.entries,H_LAST_DONATION);
+  // An empty stamp has no day to shift back from — nudging it forward seeds
+  // it with "now" instead, matching the on-Switch panel.
+  if(cur===0n){
+    if(dir<0)return;
+    donationSetNow();
+    return;
+  }
+  const day=86400n;
+  let nv=cur+BigInt(dir)*day;
+  if(nv<0n)nv=0n;
+  donationSet(nv,'donation stamp moved '+(dir<0?'back':'forward')+' a day');
 }
 
 // ── Player sub-tabs (edit / dashboard) ────────────────────────────────────────

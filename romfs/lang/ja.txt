@@ -98,10 +98,20 @@ player.field.FountainLv = 泉のレベル
 player.field.Wishes = おねがい
 player.field.Region = 地域
 player.field.TTPenalty = TTペナルティ
+player.field.Donation = 寄付
 player.lastpenalty.active = 適用中
 player.lastpenalty.cleared = 解除済み
 player.lastpenalty.clear = ペナルティ解除
 player.lastpenalty.already = すでに解除済み
+player.donation.never = なし
+player.donation.never.hint = 次の寄付はすぐに受け取れます
+player.donation.dayssince = 日前
+player.donation.dayssince.one = 日前
+player.donation.future = 未来の日時です — ゲームは待機します
+player.donation.dayback = 1日戻す
+player.donation.dayfwd = 1日進める
+player.donation.settoday = 今受け取ったことにする
+player.donation.clear = 消去（未受領）
 
 # ── Player tab footer ────────────────────────────────────────────────────────
 player.footer = 上/下  選択    左/右  調整    A  編集    X  取り消し    B/+  戻る
@@ -396,6 +406,7 @@ player.wishes.reset = 解放済みおねがいをリセット
 player.wishes.reset.confirm = もう一度タップで解放済みをリセット
 player.footer.pron = ZL/ZR  項目    A  名前    X  読み    左/右  言語    L/R  タブ    B/+  戻る
 player.footer.value = ZL/ZR  項目    左/右  値    A  編集    X  取り消し    L/R  タブ    B/+  戻る
+player.footer.date = ZL/ZR  項目    左/右  ±1日    A  現在    Y  消去    X  取り消し    L/R  タブ    B/+  戻る
 player.desc.Name = プレイヤーの表示名。
 player.desc.Island = あなたの島の名前。
 player.desc.Money = 現在の所持コイン。
@@ -410,6 +421,7 @@ player.desc.FountainLv = ねがいの泉のアップグレードレベル。
 player.desc.Wishes = 叶えたおねがいの数。
 player.desc.Region = プレイヤーの地域（季節と天気に影響）。
 player.desc.TTPenalty = タイムトラベルペナルティのタイムスタンプ。A で解除するとお店が補充されます。
+player.desc.Donation = 最後に寄付を受け取った日時。日付を戻すと再び受け取れます。
 
 # ── Map tab ──────────────────────────────────────────────────────────────────
 map.picker.title = アクターを選択

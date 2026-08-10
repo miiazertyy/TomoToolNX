@@ -98,10 +98,20 @@ player.field.FountainLv = Fountain Lv
 player.field.Wishes = Wishes
 player.field.Region = Region
 player.field.TTPenalty = TT Penalty
+player.field.Donation = Donation
 player.lastpenalty.active = active
 player.lastpenalty.cleared = cleared
 player.lastpenalty.clear = clear penalty
 player.lastpenalty.already = already cleared
+player.donation.never = never
+player.donation.never.hint = the next donation is available right away
+player.donation.dayssince = days ago
+player.donation.dayssince.one = day ago
+player.donation.future = stamped in the future — the game will wait
+player.donation.dayback = 1 day back
+player.donation.dayfwd = 1 day on
+player.donation.settoday = stamp as collected now
+player.donation.clear = clear (never collected)
 
 # ── Player tab footer ────────────────────────────────────────────────────────
 player.footer = Up/Down  select    Left/Right  adjust    A  edit    X  undo    B/+  back
@@ -399,6 +409,7 @@ player.wishes.reset = Reset Liberated Wishes
 player.wishes.reset.confirm = tap again to RESET liberated
 player.footer.pron = ZL/ZR  field    A  name    X  pronunciation    Left/Right  language    L/R  tab    B/+  back
 player.footer.value = ZL/ZR  field    Left/Right  value    A  edit    X  undo    L/R  tab    B/+  back
+player.footer.date = ZL/ZR  field    Left/Right  ±1 day    A  now    Y  clear    X  undo    L/R  tab    B/+  back
 player.desc.Name = Your player's display name.
 player.desc.Island = The name of your island.
 player.desc.Money = Current coin balance.
@@ -413,6 +424,7 @@ player.desc.FountainLv = Wishing fountain upgrade level.
 player.desc.Wishes = Number of wishes made.
 player.desc.Region = Player region (affects seasons and weather).
 player.desc.TTPenalty = Time-travel penalty timestamp. Press A to clear so shops restock.
+player.desc.Donation = When the last donation was collected. Back-date it to make one available.
 
 # ── Map tab ──────────────────────────────────────────────────────────────────
 map.picker.title = pick an actor

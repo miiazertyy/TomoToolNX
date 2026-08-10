@@ -65,10 +65,20 @@ player.field.FountainLv = Brunnen-Lv
 player.field.Wishes = Wünsche
 player.field.Region = Region
 player.field.TTPenalty = ZR-Strafe
+player.field.Donation = Spende
 player.lastpenalty.active = aktiv
 player.lastpenalty.cleared = aufgehoben
 player.lastpenalty.clear = Strafe aufheben
 player.lastpenalty.already = bereits aufgehoben
+player.donation.never = nie
+player.donation.never.hint = die nächste Spende ist sofort verfügbar
+player.donation.dayssince = Tage her
+player.donation.dayssince.one = Tag her
+player.donation.future = Zeitstempel in der Zukunft — das Spiel wartet
+player.donation.dayback = 1 Tag zurück
+player.donation.dayfwd = 1 Tag vor
+player.donation.settoday = als jetzt erhalten markieren
+player.donation.clear = löschen (nie erhalten)
 
 # ── Player tab footer ────────────────────────────────────────────────────────
 player.footer = Hoch/Runter  wählen    Links/Rechts  anpassen    A  bearbeiten    X  rückgängig    B/+  zurück
@@ -315,6 +325,7 @@ player.wishes.reset = Freigeschaltete Wünsche zurücksetzen
 player.wishes.reset.confirm = nochmal tippen, um ZURÜCKZUSETZEN
 player.footer.pron = ZL/ZR  Feld    A  Name    X  Aussprache    Links/Rechts  Sprache    L/R  Tab    B/+  zurück
 player.footer.value = ZL/ZR  Feld    Links/Rechts  Wert    A  bearbeiten    X  rückgängig    L/R  Tab    B/+  zurück
+player.footer.date = ZL/ZR  Feld    Links/Rechts  ±1 Tag    A  jetzt    Y  löschen    X  rückgängig    L/R  Tab    B/+  zurück
 player.desc.Name = Anzeigename deines Spielers.
 player.desc.Island = Name deiner Insel.
 player.desc.Money = Aktueller Münzbestand.
@@ -329,6 +340,7 @@ player.desc.FountainLv = Stufe des Wunschbrunnens.
 player.desc.Wishes = Anzahl der erfüllten Wünsche.
 player.desc.Region = Region des Spielers (beeinflusst Jahreszeiten und Wetter).
 player.desc.TTPenalty = Zeitreise-Strafzeitstempel. A drücken, um aufzuheben (Läden füllen wieder auf).
+player.desc.Donation = Wann die letzte Spende abgeholt wurde. Zurückdatieren macht eine neue verfügbar.
 
 # ── Map tab ──────────────────────────────────────────────────────────────────
 map.picker.title = Objekt wählen

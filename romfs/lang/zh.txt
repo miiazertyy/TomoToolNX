@@ -65,10 +65,20 @@ player.field.FountainLv = 喷泉等级
 player.field.Wishes = 愿望
 player.field.Region = 地区
 player.field.TTPenalty = 穿越惩罚
+player.field.Donation = 捐赠
 player.lastpenalty.active = 启用中
 player.lastpenalty.cleared = 已清除
 player.lastpenalty.clear = 清除惩罚
 player.lastpenalty.already = 已清除
+player.donation.never = 从未
+player.donation.never.hint = 下一次捐赠立即可领
+player.donation.dayssince = 天前
+player.donation.dayssince.one = 天前
+player.donation.future = 时间戳在未来 — 游戏会等待
+player.donation.dayback = 回退 1 天
+player.donation.dayfwd = 前进 1 天
+player.donation.settoday = 标记为刚刚领取
+player.donation.clear = 清除（从未领取）
 
 # ── Player tab footer ────────────────────────────────────────────────────────
 player.footer = 上/下  选择    左/右  调整    A  编辑    X  撤销    B/+  返回
@@ -315,6 +325,7 @@ player.wishes.reset = 重置已实现愿望
 player.wishes.reset.confirm = 再次点击以重置
 player.footer.pron = ZL/ZR  字段    A  名字    X  发音    左/右  语言    L/R  标签    B/+  返回
 player.footer.value = ZL/ZR  字段    左/右  数值    A  编辑    X  撤销    L/R  标签    B/+  返回
+player.footer.date = ZL/ZR  字段    左/右  ±1 天    A  现在    Y  清除    X  撤销    L/R  标签    B/+  返回
 player.desc.Name = 您的玩家在游戏中的显示名字。
 player.desc.Island = 岛屿的名字。
 player.desc.Money = 当前金币数量。
@@ -329,6 +340,7 @@ player.desc.FountainLv = 许愿喷泉的升级等级。
 player.desc.Wishes = 已许愿望的数量。
 player.desc.Region = 玩家地区（影响季节和天气）。
 player.desc.TTPenalty = 时间穿越惩罚时间戳。按 A 清除，商店会重新进货。
+player.desc.Donation = 上次领取捐赠的时间。往回调整即可再次领取。
 
 # ── Map tab ──────────────────────────────────────────────────────────────────
 map.picker.title = 选择对象

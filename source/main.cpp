@@ -1229,6 +1229,11 @@ static int         gMiiStatsMsgFrames = 0;  // auto-fade countdown for transient
 // Undo state (single-step undo per field)
 static int32_t gPlayerUndoVal[16]   = {};
 static bool    gPlayerUndoValid[16] = {};
+// Separate slot for UInt64 timestamp fields (the donation stamp) — the array
+// above is 32 bits wide and would truncate a game-clock value. Only one such
+// field exists, so a single slot is enough.
+static uint64_t gPlayerStampUndo      = 0;
+static bool     gPlayerStampUndoValid = false;
 // Wishes bulk-action confirmation state: 0=idle, 1=unlock armed, 2=reset armed.
 // Cleared after ~3 seconds (180 frames at 60 fps) so a single misclick can't
 // be confirmed by an unrelated later press.
@@ -1340,6 +1345,9 @@ struct SaveFieldDef {
     bool isUInt64Time; // Scalar DT_UInt64 timestamp. Display = "active" /
                        // "cleared"; A press zeroes the value. Used for
                        // Player.LastPenaltyTime (time-travel penalty).
+    bool isDateTime;   // Scalar DT_UInt64 timestamp shown as a real calendar
+                       // date. Left/Right shift by a day, A stamps "now",
+                       // Y clears to 0. Used for the donation stamp.
     int32_t minVal, maxVal; // -1 = unclamped
     const char* desc;
     // Action-only fields (no save hash); A press runs an action with a
@@ -1376,28 +1384,33 @@ static const struct { const char* name; const char* label; } LANG_OPTIONS[] = {
     {"TWzh",  "Chinese (Traditional)"},
 };
 static const int LANG_OPTION_COUNT = 11;
-//                    label           fieldName                              rawHash      Str    UInt   Enum   Int    Skin   Island Region Lang   RawEn  U64T  min  max  desc                                                                       Action  actionId
+//                    label           fieldName                              rawHash      Str    UInt   Enum   Int    Skin   Island Region Lang   RawEn  U64T   Date   min  max  desc                                                                       Action  actionId
 static const SaveFieldDef PLAYER_FIELDS[] = {
-    {"Name",          "Player.Name",                           0,           true,  false, false, false, false, false, false, false, false, false, 0,   0,   "Your player's display name.",                                              false, 0},
-    {"Island",        "Player.IslandName",                     0,           true,  false, false, false, false, false, false, false, false, false, 0,   0,   "The name of your island.",                                                 false, 0},
-    {"Money",         "Player.Money",                          0,           false, true,  false, false, false, false, false, false, false, false, 0,   -1,  "Current coin balance.",                                                    false, 0},
-    {"Currency",      "Player.Currency",                       0,           false, false, true,  false, false, false, false, false, false, false, 0,   -1,  "Regional currency symbol shown in-game.",                                  false, 0},
-    {"Boot Count",    "Player.BootNum",                        0,           false, true,  false, false, false, false, false, false, false, false, 0,   -1,  "Number of times the game has been launched.",                              false, 0},
-    {"Skin Tone",     "Player.SkinColorIndex",                 0,           false, false, false, false, true,  false, false, false, false, false, 0,   5,   "Player hand/skin color (0-5).",                                            false, 0},
-    {"Bday Day",      "",                                      0xdb7786bbu, false, false, false, false, false, false, false, false, true,  false, 1,   31,  "Birthday day of the month (1-31).",                                        false, 0},
-    {"Bday Month",    "",                                      0xc754bef3u, false, false, false, false, false, false, false, false, true,  false, 1,   12,  "Birthday month (1-12).",                                                   false, 0},
-    {"Bday Year",     "",                                      0x11996629u, false, false, false, true,  false, false, false, false, false, false, -1,  -1,  "Birthday year.",                                                           false, 0},
-    {"Island Size",   "",                                      0x870a807cu, false, false, false, false, false, true,  false, false, false, false, 1,   4,   "Island size preset. Other values corrupt the save!",                       false, 0},
-    {"Fountain Lv",   "Liberation.FountainLevel",              0,           false, false, false, false, false, false, false, false, true,  false, 0,   -1,  "Wishing fountain upgrade level.",                                          false, 0},
-    {"Wishes",        "",                                      0xa32f7e47u, false, false, false, false, false, false, false, false, true,  false, 0,   -1,  "Number of wishes made.",                                                   false, 0},
-    {"Region",        "Player.Region",                         0,           false, false, false, false, false, false, true,  false, false, false, 0,   -1,  "Player region (affects seasons and weather).",                             false, 0},
+    {"Name",          "Player.Name",                           0,           true,  false, false, false, false, false, false, false, false, false, false, 0,   0,   "Your player's display name.",                                              false, 0},
+    {"Island",        "Player.IslandName",                     0,           true,  false, false, false, false, false, false, false, false, false, false, 0,   0,   "The name of your island.",                                                 false, 0},
+    {"Money",         "Player.Money",                          0,           false, true,  false, false, false, false, false, false, false, false, false, 0,   -1,  "Current coin balance.",                                                    false, 0},
+    {"Currency",      "Player.Currency",                       0,           false, false, true,  false, false, false, false, false, false, false, false, 0,   -1,  "Regional currency symbol shown in-game.",                                  false, 0},
+    {"Boot Count",    "Player.BootNum",                        0,           false, true,  false, false, false, false, false, false, false, false, false, 0,   -1,  "Number of times the game has been launched.",                              false, 0},
+    {"Skin Tone",     "Player.SkinColorIndex",                 0,           false, false, false, false, true,  false, false, false, false, false, false, 0,   5,   "Player hand/skin color (0-5).",                                            false, 0},
+    {"Bday Day",      "",                                      0xdb7786bbu, false, false, false, false, false, false, false, false, true,  false, false, 1,   31,  "Birthday day of the month (1-31).",                                        false, 0},
+    {"Bday Month",    "",                                      0xc754bef3u, false, false, false, false, false, false, false, false, true,  false, false, 1,   12,  "Birthday month (1-12).",                                                   false, 0},
+    {"Bday Year",     "",                                      0x11996629u, false, false, false, true,  false, false, false, false, false, false, false, -1,  -1,  "Birthday year.",                                                           false, 0},
+    {"Island Size",   "",                                      0x870a807cu, false, false, false, false, false, true,  false, false, false, false, false, 1,   4,   "Island size preset. Other values corrupt the save!",                       false, 0},
+    {"Fountain Lv",   "Liberation.FountainLevel",              0,           false, false, false, false, false, false, false, false, true,  false, false, 0,   -1,  "Wishing fountain upgrade level.",                                          false, 0},
+    {"Wishes",        "",                                      0xa32f7e47u, false, false, false, false, false, false, false, false, true,  false, false, 0,   -1,  "Number of wishes made.",                                                   false, 0},
+    {"Region",        "Player.Region",                         0,           false, false, false, false, false, false, true,  false, false, false, false, 0,   -1,  "Player region (affects seasons and weather).",                             false, 0},
     // Time-travel penalty stamp. The game writes this when it detects the
     // system clock jumped backwards; while non-zero, shops won't restock
     // and trips to other islands stay locked. Zero it here to skip the
     // 72-hour cooldown (issue #32). Hash from 2.13.0 player schema.
-    {"TT Penalty",    "",                                      0x71e3ba15u, false, false, false, false, false, false, false, false, false, true,  0,   -1,  "Time-travel penalty timestamp. Press A to clear so shops restock.",        false, 0},
+    {"TT Penalty",    "",                                      0x71e3ba15u, false, false, false, false, false, false, false, false, false, true,  false, 0,   -1,  "Time-travel penalty timestamp. Press A to clear so shops restock.",        false, 0},
+    // Last-donation stamp (issue #37). The game writes it every time the
+    // island's donation is collected and only offers the next one once a
+    // day has passed, so a player who skipped days can back-date it (or
+    // clear it outright) to make the donation available again.
+    {"Donation",      "Player.LastDonationGameTime",           0,           false, false, false, false, false, false, false, false, false, false, true,  0,   -1,  "When the last donation was collected. Back-date it to make one available.", false, 0},
 };
-static const int PLAYER_FIELD_COUNT = 14;
+static const int PLAYER_FIELD_COUNT = 15;
 
 // ─── Mii stats field table ─────────────────────────────────────────────────────
 struct MiiStatsDef {
@@ -6668,6 +6681,48 @@ static std::string MiiDescT    (const char* label) { return FieldKey("mii.desc."
 static std::string PlayerLabelT(const char* label) { return FieldKey("player.field.", label); }
 static std::string PlayerDescT (const char* label) { return FieldKey("player.desc.",  label); }
 
+// ── Player.sav game-clock stamps ─────────────────────────────────────────────
+// The UInt64 "…GameTime" / "Last…Time" fields hold POSIX seconds — the same
+// convention the WebUI already uses for the relationship "since" pickers
+// (u64ToDateLocal / relBatchKnow in data/webui.html). Rendered with the
+// console's local time so the value lines up with the clock the game reads.
+static const uint64_t SECS_PER_DAY = 24ull * 60ull * 60ull;
+
+static std::string FormatSaveTimestamp(uint64_t secs) {
+    time_t t = (time_t)secs;
+    struct tm tmv;
+    if (!localtime_r(&t, &tmv)) return std::to_string(secs);
+    char buf[32];
+    if (!strftime(buf, sizeof(buf), "%Y-%m-%d  %H:%M", &tmv))
+        return std::to_string(secs);
+    return buf;
+}
+
+// Whole days between a stamp and the console clock. Negative when the stamp
+// sits in the future (which the game reads as "already collected today").
+static int64_t DaysSinceStamp(uint64_t secs) {
+    int64_t now = (int64_t)time(nullptr);
+    return ((int64_t)now - (int64_t)secs) / (int64_t)SECS_PER_DAY;
+}
+
+// Write a game-clock stamp on the selected player field. Shared by the
+// donation panel's touch buttons and its physical-button handler. The value
+// before the first edit is kept in gPlayerStampUndo so the panel's Undo
+// button can put the original stamp back.
+static void PlayerSetStamp(uint64_t v) {
+    if (!gPlayerSav.loaded) return;
+    if (gPlayerFieldSel < 0 || gPlayerFieldSel >= PLAYER_FIELD_COUNT) return;
+    const auto& fd = PLAYER_FIELDS[gPlayerFieldSel];
+    if (!fd.isDateTime) return;
+    uint32_t h = PFHash(fd);
+    if (!gPlayerStampUndoValid) {
+        gPlayerStampUndo      = SaveEditor::GetUInt64(gPlayerSav, h);
+        gPlayerStampUndoValid = true;
+    }
+    SaveEditor::SetUInt64(gPlayerSav, h, v);
+    gPlayerSavDirty = true;
+}
+
 // Open the number-pad keyboard on the currently-selected player field
 // (Money, etc.) and write the parsed value back. We clamp to UINT32_MAX so
 // a runaway 11-digit input can't wrap. Empty input = cancel = no-op.
@@ -6760,7 +6815,7 @@ static void DrawPlayer() {
     int plListH = SCREEN_H - SE_TOP_Y - 32;
     int plVis   = plListH / PL_ROW_H;
     // Small top margin so the first row doesn't sit flush on the box's top
-    // border. (Centering doesn't suit this list — there are only 14 fields for
+    // border. (Centering doesn't suit this list — there are only 15 fields for
     // ~18 rows of space, so splitting the leftover just floated the list with a
     // big gap. A fixed pad keeps it snug at the top like other lists; the empty
     // space below is inherent to the short field count.)
@@ -6817,6 +6872,12 @@ static void DrawPlayer() {
             val = (SaveEditor::GetUInt64(gPlayerSav, fh) != 0)
                   ? Lang::T("player.lastpenalty.active")
                   : Lang::T("player.lastpenalty.cleared");
+        } else if (fd.isDateTime) {
+            // Date only in the narrow list column — the detail panel carries
+            // the time of day and the "days ago" context.
+            uint64_t ts = SaveEditor::GetUInt64(gPlayerSav, fh);
+            val = ts ? FormatSaveTimestamp(ts).substr(0, 10)
+                     : Lang::T("player.donation.never");
         } else if (fd.isUInt) {
             // Money (and any future big-uint field) gets thousand separators
             // for readability — "1,234,567" is much easier to parse at a
@@ -6999,6 +7060,51 @@ static void DrawPlayer() {
                                          : "player.lastpenalty.already"),
                   cx, by + bh / 2, active ? COL_GOLD : COL_DIM, Font::Md);
         if (active) HitAdd(bx, by, bw, bh, TPlayerNumKbd, 0);
+    } else if (fd.isDateTime) {
+        // Donation stamp (issue #37). Shown as a real date because the field
+        // is POSIX seconds; the useful edits are "shift it back a day so the
+        // game hands out another donation", "stamp it as collected right now"
+        // and "wipe it so the game treats the donation as never collected".
+        uint64_t cur = SaveEditor::GetUInt64(gPlayerSav, ph);
+        DrawTextC(cur ? FormatSaveTimestamp(cur) : Lang::T("player.donation.never"),
+                  cx, midY-46, cur ? COL_TEXT : COL_DIM, Font::Lg);
+        if (cur) {
+            int64_t days = DaysSinceStamp(cur);
+            std::string ago = (days < 0)
+                ? Lang::T("player.donation.future")
+                : std::to_string(days) + " " + Lang::T(days == 1 ? "player.donation.dayssince.one"
+                                                                : "player.donation.dayssince");
+            DrawTextC(ago, cx, midY-18, days < 0 ? COL_RED : COL_DIM, Font::Sm);
+        } else {
+            DrawTextC(Lang::T("player.donation.never.hint"), cx, midY-18, COL_GREEN, Font::Sm);
+        }
+
+        // Day shift (Left/Right). Touch taps reuse TSimBtn so both paths land
+        // in the same input handler below.
+        const int btnW=140, btnH=36, btnGap=24;
+        int bxL=cx-btnGap/2-btnW, bxR=cx+btnGap/2, btnY=midY+10;
+        HitAdd(bxL,btnY,btnW,btnH, TSimBtn, (int)HidNpadButton_Left);
+        FillRect(bxL,btnY,btnW,btnH,COL_PANEL); DrawRect(bxL,btnY,btnW,btnH,COL_BORDER);
+        DrawTextC("< " + Lang::T("player.donation.dayback"), bxL+btnW/2, btnY+btnH/2, COL_DIM);
+        HitAdd(bxR,btnY,btnW,btnH, TSimBtn, (int)HidNpadButton_Right);
+        FillRect(bxR,btnY,btnW,btnH,COL_PANEL); DrawRect(bxR,btnY,btnW,btnH,COL_BORDER);
+        DrawTextC(Lang::T("player.donation.dayfwd") + " >", bxR+btnW/2, btnY+btnH/2, COL_DIM);
+        EmitPrevNextHighlight(/*sub=player donation*/116, bxL, bxR, btnY, btnW, btnH);
+
+        const int aw = 300, ah = 44;
+        int ax = cx - aw / 2, ay = btnY + btnH + 18;
+        HitAdd(ax, ay, aw, ah, TSimBtn, (int)HidNpadButton_A);
+        FillRect(ax, ay, aw, ah, COL_SEL); DrawRect(ax, ay, aw, ah, COL_ACCENT);
+        DrawTextC("A  " + Lang::T("player.donation.settoday"),
+                  cx, ay + ah/2, COL_ACCENT, Font::Md);
+
+        int yy = ay + ah + 10;
+        bool canClear = (cur != 0);
+        HitAdd(ax, yy, aw, ah, TSimBtn, (int)HidNpadButton_Y);
+        FillRect(ax, yy, aw, ah, COL_PANEL);
+        DrawRect(ax, yy, aw, ah, canClear ? COL_GOLD : COL_BORDER);
+        DrawTextC("Y  " + Lang::T("player.donation.clear"),
+                  cx, yy + ah/2, canClear ? COL_GOLD : COL_DIM, Font::Md);
     } else if (fd.isUInt && strcmp(fd.label, "Money") == 0) {
         // Money gets the number-pad-keyboard treatment instead of the +/-
         // stepper grid: nudging a 7-digit value 1/10/100/1000 at a time is
@@ -7066,10 +7172,13 @@ static void DrawPlayer() {
             DrawAnimatedHighlight(/*slot=*/1);
         }
     }
-    // Undo button for all non-string fields
+    // Undo button for all non-string fields. The donation panel stacks two
+    // full-width buttons where this normally sits, so it drops lower there
+    // and reads its own 64-bit undo slot.
     if (!fd.isStr) {
-        bool canUndo = gPlayerUndoValid[gPlayerFieldSel];
-        int ubW=100, ubH=44, ubX=cx-ubW/2, ubY=midY+130;
+        bool canUndo = fd.isDateTime ? gPlayerStampUndoValid
+                                     : gPlayerUndoValid[gPlayerFieldSel];
+        int ubW=100, ubH=44, ubX=cx-ubW/2, ubY=midY+(fd.isDateTime?176:130);
         HitAdd(ubX, ubY, ubW, ubH, TUndoPlayer, 0);
         FillRect(ubX, ubY, ubW, ubH, COL_PANEL);
         DrawRect(ubX, ubY, ubW, ubH, canUndo ? COL_GOLD : COL_BORDER);
@@ -7137,7 +7246,10 @@ static void DrawPlayer() {
 
     {
         bool hasPron = fd.isStr && (strcmp(fd.fieldName,"Player.Name")==0 || strcmp(fd.fieldName,"Player.IslandName")==0);
-        DrawFooter(Lang::T(hasPron ? "player.footer.pron" : "player.footer.value"));
+        const char* footerKey = fd.isDateTime ? "player.footer.date"
+                              : hasPron       ? "player.footer.pron"
+                                              : "player.footer.value";
+        DrawFooter(Lang::T(footerKey));
     }
     Present();
 }
@@ -10954,7 +11066,7 @@ static void TAckBackYes(int) {
     gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{}; gMapSav=SaveEditor::SavFile{};
     gPlayerSavDirty=false; gMiiSavDirty=false; gMapDirty=false; gUgcDirty=false; gWebUiDirty=false;
     memset(gPlayerUndoValid, 0, sizeof(gPlayerUndoValid));
-    gNameLangUndoValid=false; gIslandLangUndoValid=false;
+    gNameLangUndoValid=false; gIslandLangUndoValid=false; gPlayerStampUndoValid=false;
     memset(gMiiUndoValid,    0, sizeof(gMiiUndoValid));
     gWordUndo.valid = false;
     SaveMount::Unmount();
@@ -10968,7 +11080,7 @@ static void TAckBackNo(int) {
     gPlayerSav=SaveEditor::SavFile{}; gMiiSav=SaveEditor::SavFile{}; gMapSav=SaveEditor::SavFile{};
     gPlayerSavDirty=false; gMiiSavDirty=false; gMapDirty=false; gUgcDirty=false; gWebUiDirty=false;
     memset(gPlayerUndoValid, 0, sizeof(gPlayerUndoValid));
-    gNameLangUndoValid=false; gIslandLangUndoValid=false;
+    gNameLangUndoValid=false; gIslandLangUndoValid=false; gPlayerStampUndoValid=false;
     memset(gMiiUndoValid,    0, sizeof(gMiiUndoValid));
     gWordUndo.valid = false;
     SaveMount::Unmount();
@@ -11164,6 +11276,15 @@ static void DrawBackPrompt() {
     Present();
 }
 static void TUndoPlayer(int) {
+    const auto& fd0 = PLAYER_FIELDS[gPlayerFieldSel];
+    // Timestamp fields use their own 64-bit undo slot.
+    if (fd0.isDateTime) {
+        if (!gPlayerStampUndoValid) return;
+        SaveEditor::SetUInt64(gPlayerSav, PFHash(fd0), gPlayerStampUndo);
+        gPlayerStampUndoValid = false;
+        gPlayerSavDirty = true;
+        return;
+    }
     if (!gPlayerUndoValid[gPlayerFieldSel]) return;
     const auto& fd = PLAYER_FIELDS[gPlayerFieldSel];
     uint32_t h = PFHash(fd);
@@ -12822,6 +12943,7 @@ int main(int,char**) {
                     gPlayerSavDirty = false;
                     memset(gPlayerUndoValid, 0, sizeof(gPlayerUndoValid));
                     gNameLangUndoValid = false; gIslandLangUndoValid = false;
+                    gPlayerStampUndoValid = false;
                     LogOK("Player save synced from WebUI");
                 }
             }
@@ -13316,6 +13438,22 @@ int main(int,char**) {
                             SaveEditor::SetAnyScalar(gPlayerSav, h, (cur<4)?cur+1:1); gPlayerSavDirty=true;
                         }
                     }
+                    // Donation stamp: Left/Right shift it a day at a time,
+                    // A stamps the console clock ("collected today"), Y wipes
+                    // it so the game sees the donation as never collected.
+                    if (fd.isDateTime) {
+                        uint64_t cur = SaveEditor::GetUInt64(gPlayerSav, h);
+                        uint64_t now = (uint64_t)time(nullptr);
+                        if (kNav&(HidNpadButton_Left|HidNpadButton_StickLLeft|HidNpadButton_StickRLeft))
+                            PlayerSetStamp(cur > SECS_PER_DAY ? cur - SECS_PER_DAY : 0);
+                        if (kNav&(HidNpadButton_Right|HidNpadButton_StickLRight|HidNpadButton_StickRRight))
+                            PlayerSetStamp(cur ? cur + SECS_PER_DAY : now);
+                        if (kDown&HidNpadButton_A) PlayerSetStamp(now);
+                        if (kDown&HidNpadButton_Y) PlayerSetStamp(0);
+                    }
+                    // Clear the time-travel penalty stamp with A (the panel's
+                    // touch button routes to the same handler).
+                    if (fd.isUInt64Time && (kDown&HidNpadButton_A)) TPlayerNumKbd(0);
                     // A = keyboard for string fields
                     if (fd.isStr && (kDown&HidNpadButton_A)) {
                         std::string cur = SaveEditor::GetWStr32(gPlayerSav, h);

@@ -65,10 +65,20 @@ player.field.FountainLv = Ур. фонтана
 player.field.Wishes = Желания
 player.field.Region = Регион
 player.field.TTPenalty = Штраф ПВ
+player.field.Donation = Пожертвование
 player.lastpenalty.active = активен
 player.lastpenalty.cleared = снят
 player.lastpenalty.clear = снять штраф
 player.lastpenalty.already = уже снят
+player.donation.never = никогда
+player.donation.never.hint = следующее пожертвование доступно сразу
+player.donation.dayssince = дн. назад
+player.donation.dayssince.one = день назад
+player.donation.future = метка в будущем — игра будет ждать
+player.donation.dayback = на 1 день назад
+player.donation.dayfwd = на 1 день вперёд
+player.donation.settoday = отметить как полученное сейчас
+player.donation.clear = очистить (не получено)
 
 # ── Player tab footer ────────────────────────────────────────────────────────
 player.footer = Вверх/Вниз  выбор    Влево/Вправо  настройка    A  правка    X  отмена    B/+  назад
@@ -315,6 +325,7 @@ player.wishes.reset = Сбросить открытые желания
 player.wishes.reset.confirm = коснитесь ещё раз для СБРОСА
 player.footer.pron = ZL/ZR  поле    A  имя    X  произн.    Влево/Вправо  язык    L/R  вкладка    B/+  назад
 player.footer.value = ZL/ZR  поле    Влево/Вправо  значение    A  правка    X  отмена    L/R  вкладка    B/+  назад
+player.footer.date = ZL/ZR  поле    Влево/Вправо  ±1 день    A  сейчас    Y  очистить    X  отмена    L/R  вкладка    B/+  назад
 player.desc.Name = Отображаемое имя вашего игрока.
 player.desc.Island = Название вашего острова.
 player.desc.Money = Текущий баланс монет.
@@ -329,6 +340,7 @@ player.desc.FountainLv = Уровень фонтана желаний.
 player.desc.Wishes = Количество загаданных желаний.
 player.desc.Region = Регион игрока (влияет на сезоны и погоду).
 player.desc.TTPenalty = Метка времени штрафа за путешествие во времени. Нажмите A, чтобы снять — магазины снова пополнятся.
+player.desc.Donation = Когда получено последнее пожертвование. Сдвиньте назад, чтобы получить новое.
 
 # ── Map tab ──────────────────────────────────────────────────────────────────
 map.picker.title = выбрать объект

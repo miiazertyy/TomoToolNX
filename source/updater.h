@@ -3,7 +3,7 @@
 
 #include <string>
 
-#define APP_VERSION "1.3.9"  // bump this before each release
+#define APP_VERSION "1.3.10"  // bump this before each release
 #define GITHUB_REPO "miiazertyy/TomoToolNX"
 
 namespace Updater {

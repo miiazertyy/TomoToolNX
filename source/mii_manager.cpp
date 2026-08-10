@@ -414,6 +414,31 @@ static const char** UGC_N_H[7] = {(const char**)UGC_N_H0,(const char**)UGC_N_H1,
 static const char* UGC_V_H[7]  = {nullptr,nullptr,"F36C4E28",nullptr,"3C14025E","27F2ECDE",nullptr};
 static const char* UGC_V2_H[7] = {nullptr,nullptr,nullptr,   nullptr,"B9D21B4F","2F96203B",nullptr};
 
+// UGC.Cloth.UgcClothType (ugcOffsets[0] for Cloth) — an EnumArray whose
+// elements are murmur3 hashes of the member names below. The game keeps
+// clothes filed by type, so replacing an existing item only works within
+// the same type; naming both sides in the error tells the user which slot
+// to look for. Names are the schema's own, so they match the game data.
+static const char* CLOTH_TYPE_NAMES[] = {
+    "Invalid", "EasyH", "TShirtN", "TShirtH", "TShirtL",
+    "TopsLongAlineN", "TopsLongAlineH", "TopsLongAlineL",
+    "Robe", "Dress", "SkirtS", "SkirtL", "PantsM", "PantsL",
+    "Cap", "Costume", "Hat",
+};
+
+static std::string ClothTypeName(uint32_t hash) {
+    for (const char* n : CLOTH_TYPE_NAMES)
+        if (SaveEditor::Hash(n) == hash) return n;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "0x%08X", (unsigned)hash);
+    return buf;
+}
+
+static uint32_t ReadU32LE(const uint8_t* p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8)
+         | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
 struct UgcOffsets {
     int f[17]; // ugcOffsets: per-slot field data (absolute byte pos in Player.sav, already +4)
     int n[4];  // name offsets (absolute byte pos)
@@ -1191,11 +1216,31 @@ std::string ImportUgc(int ugcKind, int slot, const std::string& ltdxPath, bool i
 
     int s = slot - 1;
 
-    // Cloth: when replacing, subtype (ugcOffsets[0]) must match
+    // Cloth: when replacing, the subtype (ugcOffsets[0] = UGC.Cloth.UgcClothType)
+    // must match — the game files clothes by type, so a Dress slot can't hold a
+    // Hat. A slot with no type yet has nothing to preserve, so the guard is
+    // skipped there: "+ blank UGC" leaves UgcClothType unset (CreateBlankUgc
+    // only writes enable/texture/hashId), and the old check rejected every
+    // import onto a freshly created blank clothing item.
     if (ugcKind == 1 && !isAdding && (int)ltdx.size() >= 8) {
         if (off.f[0] + s * 4 + 4 <= (int)psav.size()) {
-            if (memcmp(psav.data() + off.f[0] + s * 4, ltdx.data() + 4, 4) != 0)
-                return "This item is not the same subtype as what you're importing! Find the same type or add the item.";
+            uint32_t dstType = ReadU32LE(psav.data() + off.f[0] + s * 4);
+            uint32_t srcType = ReadU32LE(ltdx.data() + 4);
+            static const uint32_t kInvalid = SaveEditor::Hash("Invalid");
+            bool dstUntyped = (dstType == 0 || dstType == kInvalid);
+            // A deleted slot keeps its old UgcClothType (DeleteUgc only clears
+            // state/texture/hashId), so an unset State means "no item here"
+            // even when a stale type is still lying around.
+            if (!dstUntyped && off.enable >= 0 &&
+                off.enable + s * 4 + 4 <= (int)psav.size() &&
+                ReadU32LE(psav.data() + off.enable + s * 4) == 0)
+                dstUntyped = true;
+            if (!dstUntyped && dstType != srcType)
+                return "Slot " + std::to_string(slot) + " holds a "
+                     + ClothTypeName(dstType) + " but this file is a "
+                     + ClothTypeName(srcType) + ". Replacing only works within the"
+                       " same clothing type — pick a " + ClothTypeName(srcType)
+                     + " slot, or add it as a new item instead.";
         }
     }
 
@@ -1473,7 +1518,7 @@ std::string CreateBlankMii(int slot) {
             }
         } else {
             // Fixed-size element arrays. Byte sizes are the per-element
-            // heap sizes from the reference parser (forclaude parse.ts /
+            // heap sizes from the reference parser (parse.ts /
             // GamedataLib.NET): note W-strings are 2 bytes/code-unit, so
             // e.g. WStr16Array is 32 (16 UTF-16 units), not 16.
             int esz;
@@ -1840,6 +1885,16 @@ std::string CreateBlankUgc(int ugcKind, int slot) {
                        | ((ki.kindTag & 0xffu) << 16);
     err = writeU32Arr(ki.hashIdHex,  slotIdx, hashIdVal,        "hashId");
     if (!err.empty()) return err;
+    // 3) Cloth only: reset UGC.Cloth.UgcClothType to Invalid. Deleting an item
+    //    leaves its old type behind, so a blank created over a deleted Dress
+    //    would inherit "Dress" — and ImportUgc refuses to replace an item with
+    //    one of a different type, which made every import onto a fresh blank
+    //    clothing item fail.
+    if (ugcKind == 1) {
+        err = writeU32Arr(UGC_F_H[1][0], slotIdx,
+                          SaveEditor::Hash("Invalid"), "cloth type");
+        if (!err.empty()) return err;
+    }
     if (!WriteFile(SAVE_PLAYER_SAV, psav)) return "Failed to write Player.sav";
     LoadUgcNames(); // refresh the in-memory name cache
     return "";
