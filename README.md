@@ -370,6 +370,19 @@ calls itself `0.0.0-dev`; those see new versions but never install over
 themselves. Locally, `make` takes the version from a clean checkout of a tag,
 or from `make APP_VERSION=2.0.0`.
 
+To release a version:
+
+```sh
+git tag -a 2.0.1 -m "Fixed the map's zoom"   # the message is what the app shows as what's new
+git push origin 2.0.1
+```
+
+A plain `git tag 2.0.1` works too (GitHub then writes the notes), and so does
+publishing a release with a new tag on GitHub's website, as long as you don't
+attach a `.nro` yourself: the workflow attaches the one it built. Before
+publishing, it checks that the app inside says the tag's version, then reads
+the release back the way the updater does.
+
 </details>
 
 <details>

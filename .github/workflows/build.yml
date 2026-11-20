@@ -3,7 +3,8 @@ name: Build
 # Builds TomoToolNX.nro on every push and pull request, and keeps it as a
 # downloadable artifact. Pushing a version tag (2.0.1 or v2.0.1) builds that
 # version and publishes it as a release with the NRO attached; the app's
-# updater finds it from there and installs it. The tag is the only place the
+# updater finds it from there and installs it. A release published by hand on
+# GitHub gets the build attached the same way. The tag is the only place the
 # version is written: there is no number to bump in the code.
 
 on:
@@ -12,6 +13,8 @@ on:
     tags:
       - '[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+'
+  release:
+    types: [published]
   pull_request:
   workflow_dispatch:
 
@@ -33,22 +36,39 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Install build tools
         run: |
-          # The Makefile compresses the seed saves with zstd, which the image
-          # does not ship. Its apt lists are stripped, so refresh them first.
+          # The Makefile compresses the seed saves with the zstd command, which
+          # the image does not ship. Its apt lists are stripped, so refresh them
+          # first. The image also lists Debian's backports, which nothing here
+          # needs and which stop answering once Debian archives them.
           if ! command -v zstd >/dev/null 2>&1; then
-            apt-get update
+            rm -f /etc/apt/sources.list.d/*backports*
+            apt-get -o Acquire::Retries=3 update
             apt-get install -y --no-install-recommends zstd
           fi
-          # Already part of the image; this is a no-op unless one goes missing.
-          dkp-pacman -S --needed --noconfirm \
-            switch-sdl2 switch-sdl2_image switch-sdl2_ttf switch-libwebp \
-            switch-freetype switch-harfbuzz switch-zstd \
-            switch-curl switch-mbedtls \
+          # Every package the Makefile links against (LIBS). The image ships
+          # them all, so normally nothing is installed here. One that goes
+          # missing is installed from a refreshed package list: the image's
+          # own list can name versions the server no longer has.
+          need="devkitA64 libnx switch-tools
+            switch-sdl2 switch-sdl2_image switch-sdl2_ttf switch-freetype switch-harfbuzz
+            switch-bzip2 switch-libpng switch-libjpeg-turbo switch-libwebp
+            switch-zlib switch-libzstd switch-curl switch-mbedtls
             switch-libopus switch-opusfile switch-libogg
+            switch-mesa switch-libdrm_nouveau"
+          set --
+          for p in $need; do
+            dkp-pacman -Q "$p" >/dev/null 2>&1 || set -- "$@" "$p"
+          done
+          if [ "$#" -gt 0 ]; then
+            echo "Installing: $*"
+            dkp-pacman -Sy --needed --noconfirm "$@"
+          fi
 
       # The tag is the version: v2.0.1 and 2.0.1 both build 2.0.1, stamped into
       # the app (About, the update check) and the NACP (what hbmenu shows).
@@ -61,21 +81,29 @@ jobs:
         run: |
           version="0.0.0-dev"
           if [ "$REF_TYPE" = "tag" ]; then
-            version="${REF_NAME#v}"
-            version="${version#V}"
+            tag="${REF_NAME#[vV]}"
+            if printf '%s\n' "$tag" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+'; then
+              version="$tag"
+            fi
           fi
-          case "$version" in
-            [0-9]*.[0-9]*) ;;
-            *) version="0.0.0-dev" ;;
-          esac
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Building TomoToolNX $version"
 
       - name: Build
-        run: make -j"$(nproc)" APP_VERSION="${{ steps.version.outputs.version }}"
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: make -j"$(nproc)" APP_VERSION="$VERSION"
+
+      # The updater compares the version inside the app with the newest
+      # release's tag. A release whose app said an older version would offer
+      # itself again forever; one built as 0.0.0-dev would never update.
+      - name: Check the NRO
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: python3 tools/ci/check_nro.py TomoToolNX.nro "$VERSION"
 
       - name: Upload NRO
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: TomoToolNX-${{ steps.version.outputs.version }}
           path: TomoToolNX.nro
@@ -83,31 +111,68 @@ jobs:
 
   release:
     name: Publish release
-    if: startsWith(github.ref, 'refs/tags/')
+    # Only for a version tag: never publish a development build.
+    if: startsWith(github.ref, 'refs/tags/') && needs.build.outputs.version != '0.0.0-dev'
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      VERSION: ${{ needs.build.outputs.version }}
     steps:
       - name: Download NRO
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: TomoToolNX-${{ needs.build.outputs.version }}
 
       # Published straight away: the app's updater only sees published
       # releases, and GitHub adds the file's SHA-256, which the updater checks
-      # before installing. Pushing the same tag again replaces the file.
+      # before installing. A release already made by hand for this tag keeps
+      # its notes and gets the build (pushing the tag again replaces it).
+      # Otherwise the notes are the tag's message (git tag -a 2.0.1 -m "...",
+      # what the app shows under "What's new"), or GitHub writes them.
       - name: Publish the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
-          VERSION: ${{ needs.build.outputs.version }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" TomoToolNX.nro --clobber
+            exit 0
+          fi
+          ref=$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '"\(.object.type) \(.object.sha)"' || true)
+          if [ "${ref%% *}" = "tag" ]; then
+            gh api "repos/$GH_REPO/git/tags/${ref#* }" --jq .message \
+              | sed '/^-----BEGIN [A-Z ]*SIGNATURE-----/,$d' > notes.md || true
+          fi
+          if [ -s notes.md ] && grep -q '[^[:space:]]' notes.md; then
+            gh release create "$TAG" TomoToolNX.nro --title "v$VERSION" --notes-file notes.md
           else
-            gh release create "$TAG" TomoToolNX.nro \
-              --title "v$VERSION" \
-              --generate-notes
+            gh release create "$TAG" TomoToolNX.nro --title "v$VERSION" --generate-notes
+          fi
+
+      # What the app reads when it checks: the newest published release, its
+      # tag, and TomoToolNX.nro with its size and GitHub's SHA-256 of it.
+      - name: Check what the updater sees
+        run: |
+          state=$(gh release view "$TAG" --json isDraft,isPrerelease --jq '"\(.isDraft) \(.isPrerelease)"')
+          if [ "$state" != "false false" ]; then
+            echo "::warning::$TAG is a draft or a pre-release, and the app only offers full releases."
+            exit 0
+          fi
+          size=$(stat -c %s TomoToolNX.nro)
+          sum="sha256:$(sha256sum TomoToolNX.nro | cut -d' ' -f1)"
+          asset=$(gh api "repos/$GH_REPO/releases/tags/$TAG" \
+            --jq '.assets[] | select(.name == "TomoToolNX.nro") | "\(.size) \(.digest)"')
+          if [ "$asset" = "$size null" ]; then
+            echo "::warning::GitHub gave no SHA-256 for TomoToolNX.nro: the app checks only its size."
+          elif [ "$asset" != "$size $sum" ]; then
+            echo "::error::The release's TomoToolNX.nro ($asset) is not this build ($size $sum)."
+            exit 1
+          fi
+          latest=$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)
+          if [ "$latest" = "$TAG" ]; then
+            echo "The app's update check now finds v$VERSION: TomoToolNX.nro, $size bytes, $sum"
+          else
+            echo "::warning::The newest release is $latest, so that is the one the app offers, not $TAG."
           fi

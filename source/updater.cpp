@@ -432,7 +432,9 @@ void FinishInstall() {
     remove(old.c_str());
     if (rename(cur.c_str(), old.c_str()) != 0) return;            // this copy stays as it is
     if (rename(nw.c_str(), cur.c_str()) != 0) { rename(old.c_str(), cur.c_str()); return; }
-    if (s_restart && envHasNextLoad()) envSetNextLoad(cur.c_str(), cur.c_str());
+    // The new copy's argv[0] is its path, quoted the way hbmenu passes it, so
+    // a folder name with spaces still reaches SetSelfPath whole.
+    if (s_restart && envHasNextLoad()) envSetNextLoad(cur.c_str(), ("\"" + cur + "\"").c_str());
 }
 
 void Cleanup() {
