@@ -5,6 +5,7 @@
 
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <cstdint>
 
 namespace SaveEditor {
@@ -42,13 +43,34 @@ struct SavFile {
     uint32_t version = 0;
     std::vector<Entry> entries;
     bool loaded = false;
+    // hash -> position in `entries`, built by Parse(). Entries are never added
+    // or removed after parsing (only their values change), so it stays valid;
+    // lookups re-check it and fall back to a scan if it ever does not line up.
+    std::unordered_map<uint32_t, uint32_t> index;
 };
 
-// Load a .sav from disk. Returns true on success; sets err on failure.
+// Parse a .sav held in memory. Strict: any entry that cannot be read exactly,
+// an undefined entry type or a non-empty Bool64Key table is an error, because
+// writing such a file back would silently change it. On failure `out` is left
+// untouched.
+bool Parse(const uint8_t* data, size_t size, SavFile& out, std::string& err);
+
+// Load a .sav from disk. Returns true on success; sets err on failure and
+// leaves `out` untouched.
 bool Load(const std::string& path, SavFile& out, std::string& err);
 
-// Write a .sav to disk. Returns empty string on success, error otherwise.
+// Build the on-disk bytes for a save. Refuses an unloaded or empty SavFile
+// (which would otherwise produce a valid-looking file with no entries).
+// Returns empty string on success, error otherwise.
+std::string Serialize(const SavFile& sav, std::vector<uint8_t>& out);
+
+// Write a .sav to disk. The write is verified (byte count, close, final size).
+// Returns empty string on success, error otherwise.
 std::string Save(const std::string& path, const SavFile& sav);
+
+// True if the save defines an entry with this hash. Used to check that an
+// uploaded file really is the kind of save it claims to be.
+bool HasEntry(const SavFile& s, uint32_t h);
 
 // Murmur3 x86 32-bit hash (seed 0) — matches the game's field name hashing.
 uint32_t Hash(const char* name);
@@ -100,6 +122,18 @@ void        SetWStr32At (SavFile& s, uint32_t h, int idx, const std::string& utf
 // Array element: WStr64Array (DataType 31, each element 128 bytes, 63 usable chars)
 std::string GetWStr64At (const SavFile& s, uint32_t h, int idx);
 void        SetWStr64At (SavFile& s, uint32_t h, int idx, const std::string& utf8);
+
+// Element `idx` of a BinArray (DataType 19): a pointer into the entry and its
+// size, or nullptr. Valid until the save changes.
+const uint8_t* GetBinAt(const SavFile& s, uint32_t h, int idx, size_t* size);
+
+// The undo history listens here (edit_history.h). The change hook runs with
+// an entry just before a setter changes it; code that writes an entry's bytes
+// itself calls Touched() first. The load hook runs when a file is (re)read
+// into a SavFile, whose old entries are then gone.
+void SetChangeHook(void (*fn)(SavFile& s, const Entry& e));
+void SetLoadHook(void (*fn)(SavFile& s));
+void Touched(SavFile& s, const Entry& e);
 
 // ── Any-scalar accessor (Bool/Int/UInt/Float/Enum regardless of stored type) ──
 uint32_t GetAnyScalar(const SavFile& s, uint32_t h, uint32_t def = 0);

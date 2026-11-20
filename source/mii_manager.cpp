@@ -3,6 +3,7 @@
 
 #include "mii_manager.h"
 #include "save_editor.h"
+#include "texture_processor.h"
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -32,8 +33,9 @@ static bool ReadFile(const std::string& path, std::vector<uint8_t>& out) {
 static bool WriteFile(const std::string& path, const std::vector<uint8_t>& data) {
     FILE* f = fopen(path.c_str(), "wb");
     if (!f) return false;
-    bool ok = fwrite(data.data(), 1, data.size(), f) == data.size();
-    fclose(f);
+    bool ok = data.empty() || fwrite(data.data(), 1, data.size(), f) == data.size();
+    // fclose flushes the last buffered block; a failure there is a failed write.
+    if (fclose(f) != 0) ok = false;
     return ok;
 }
 
@@ -49,42 +51,42 @@ static void MkdirP(const std::string& path) { mkdir(path.c_str(), 0777); }
 // (the 4 bytes immediately following the hash in the index entry).
 // For heap-based array fields the slot is the heap offset; callers add +4 to skip the count.
 
-static int OffsetLocator(const std::vector<uint8_t>& data, const char* hashHex) {
-    if (data.size() < 8) return -1;
-
-    uint8_t hash[4];
-    for (int i = 0; i < 4; i++) {
-        unsigned int v = 0;
-        sscanf(hashHex + i*2, "%02x", &v);
-        hash[i] = (uint8_t)v;
-    }
-    uint8_t le[4] = {hash[3], hash[2], hash[1], hash[0]};
-
-    for (size_t i = 0; i + 8 <= data.size(); i++) {
-        if (memcmp(data.data() + i, le, 4) == 0) {
-            uint32_t offset = 0;
-            memcpy(&offset, data.data() + i + 4, 4);
-            return (int)offset;
-        }
+//
+// The lookup walks the index table row by row: 8-byte [hash][slot] rows from
+// 0x20 up to the offset stored at header+8. It used to scan the whole file one
+// byte at a time for the 4 hash bytes, which could match in the wrong place:
+// across two neighbouring rows, on a row's slot value, or, for a field this
+// save does not have, on unrelated bytes in the 3 MB of heap data. Any of
+// those returned a bogus offset that callers then wrote through.
+static int OffsetLocatorU32(const std::vector<uint8_t>& data, uint32_t hash) {
+    if (data.size() < 0x20 || hash == 0) return -1;
+    if (data[0] != 0x04 || data[1] != 0x03 || data[2] != 0x02 || data[3] != 0x01) return -1;
+    uint32_t tableEnd = 0;
+    memcpy(&tableEnd, data.data() + 8, 4);
+    if (tableEnd < 0x20 || tableEnd > data.size()) return -1;
+    uint32_t curType = 0;
+    for (size_t pos = 0x20; pos + 8 <= tableEnd; pos += 8) {
+        uint32_t h = 0, slot = 0;
+        memcpy(&h,    data.data() + pos,     4);
+        memcpy(&slot, data.data() + pos + 4, 4);
+        if (h == 0) { curType = slot; continue; }   // section marker: type of the rows that follow
+        if (h != hash) continue;
+        // Bool / Int / Float / Enum / UInt rows hold their VALUE in the slot, and
+        // Bool64Key (32) holds no heap data: neither is an offset. Every field
+        // this file edits is an array, so anything else means "not usable".
+        bool inlineType = curType == 0 || curType == 2 || curType == 4 || curType == 6 || curType == 20;
+        if (inlineType || curType >= 32) return -1;
+        if (slot < tableEnd || (size_t)slot + 4 > data.size()) return -1;
+        return (int)slot;
     }
     return -1;
 }
 
-// Same as OffsetLocator but takes the hash as a uint32 directly (avoids
-// formatting to a hex string). Used by clearBelongings which iterates a
-// generated table of belongings-leaf hashes.
-static int OffsetLocatorU32(const std::vector<uint8_t>& data, uint32_t hash) {
-    if (data.size() < 8) return -1;
-    uint8_t le[4] = { (uint8_t)(hash & 0xff), (uint8_t)((hash >> 8) & 0xff),
-                      (uint8_t)((hash >> 16) & 0xff), (uint8_t)((hash >> 24) & 0xff) };
-    for (size_t i = 0; i + 8 <= data.size(); i++) {
-        if (memcmp(data.data() + i, le, 4) == 0) {
-            uint32_t offset = 0;
-            memcpy(&offset, data.data() + i + 4, 4);
-            return (int)offset;
-        }
-    }
-    return -1;
+static int OffsetLocator(const std::vector<uint8_t>& data, const char* hashHex) {
+    if (!hashHex || strlen(hashHex) != 8) return -1;
+    unsigned int v = 0;
+    if (sscanf(hashHex, "%8x", &v) != 1) return -1;
+    return OffsetLocatorU32(data, (uint32_t)v);
 }
 
 // ─── UTF-16LE → UTF-8 (minimal, BMP only) ────────────────────────────────────
@@ -182,6 +184,24 @@ static const char* FP_HASHES[5] = {
     "FFC750B6", // fpOffset4 Unknown
     "A56E42EC", // fpOffset5 Hash
 };
+
+// Face paint slots. 70, one per resident; the state arrays in Player.sav hold
+// 72 because the game keeps two more for Miis that are still being made.
+static const int      FP_SLOT_COUNT     = 70;
+// Values the game itself writes (same as ltd-save-editor's applyMii.ts).
+static const uint32_t FP_PRICE          = 0x000001f4u;   // 500
+static const uint32_t FP_TEX_SRC_USED   = 0x56934941u;
+static const uint32_t FP_TEX_SRC_UNUSED = 0xb6eede09u;
+static const uint32_t FP_STATE_USED     = 0x1d7fadf4u;
+static const uint32_t FP_STATE_UNUSED   = 0xafff8aa5u;
+static const uint32_t FP_UNKNOWN_USED   = 0x00008000u;
+
+// "tomodata:/Ugc/UgcFacePaintNNN" + suffix (".canvas.zs", ".ugctex.zs" or "").
+static std::string FacepaintPath(int id, const char* suffix) {
+    char num[8];
+    snprintf(num, sizeof(num), "%03d", id);
+    return std::string(SAVE_UGC_DIR) + "/UgcFacePaint" + num + suffix;
+}
 
 // Magic section markers
 static const uint8_t MAGIC_A2[4] = {0xA2,0xA2,0xA2,0xA2};
@@ -475,15 +495,12 @@ static bool BuildUgcOffsets(const std::vector<uint8_t>& psav, int kind, UgcOffse
 
 namespace MiiManager {
 
-std::vector<MiiSlot> ListMiis() {
-    std::vector<MiiSlot> result;
-    std::vector<uint8_t> miisav;
-    if (!ReadFile(SAVE_MII_SAV, miisav)) return result;
-
+// The filled slots of a Mii.sav held in memory. False if it is not one.
+static bool ListMiisIn(const std::vector<uint8_t>& miisav, std::vector<MiiSlot>& result) {
     int names_hash = OffsetLocator(miisav, "2499BFDA");
     int data_hash  = OffsetLocator(miisav, "881CA27A");
     int fp_hash    = OffsetLocator(miisav, "5E32ADF4");
-    if (names_hash < 0 || data_hash < 0) return result;
+    if (names_hash < 0 || data_hash < 0) return false;
 
     int miinames = names_hash + 4;
     int miidata  = data_hash  + 4;
@@ -492,6 +509,9 @@ std::vector<MiiSlot> ListMiis() {
     for (int x = 0; x < MII_MAX_SLOTS; x++) {
         int miiindex = miidata + 156 * x;
         if (miiindex + 156 > (int)miisav.size()) break;
+        // A short file (a backup cut off by a full SD card) ends the list
+        // instead of reading past its end.
+        if (miinames + x * 64 + 64 > (int)miisav.size()) break;
 
         // Check if slot is initialized (empty slot sums to 152)
         int sum = 0;
@@ -511,13 +531,37 @@ std::vector<MiiSlot> ListMiis() {
             // signal: in-game roster lookups also gate on it.
             if (nameLen == 0) continue;
             s.name = Utf16leToUtf8(namePtr, nameLen);
-            s.hasFacepaint = (miiOffset2 >= 0 &&
-                              miiOffset2 + 4*x < (int)miisav.size() &&
-                              miisav[miiOffset2 + 4*x] != 0xFF);
+            s.hasFacepaint = false;
+            if (miiOffset2 >= 0 && miiOffset2 + 4*x + 4 <= (int)miisav.size()) {
+                int32_t fp = -1;
+                memcpy(&fp, miisav.data() + miiOffset2 + 4*x, 4);
+                s.hasFacepaint = (fp >= 0 && fp < FP_SLOT_COUNT);
+            }
             result.push_back(s);
         }
     }
+    return true;
+}
+
+bool ListMiisInBytes(const std::vector<uint8_t>& miisav, std::vector<MiiSlot>& out) {
+    out.clear();
+    return ListMiisIn(miisav, out);
+}
+
+std::vector<MiiSlot> ListMiis() {
+    std::vector<MiiSlot> result;
+    std::vector<uint8_t> miisav;
+    if (!ReadFile(SAVE_MII_SAV, miisav)) return result;
+    ListMiisIn(miisav, result);
     return result;
+}
+
+int CountMiisIn(const std::string& miiSavPath) {
+    std::vector<uint8_t> miisav;
+    if (!ReadFile(miiSavPath, miisav)) return -1;
+    std::vector<MiiSlot> result;
+    if (!ListMiisIn(miisav, result)) return -1;
+    return (int)result.size();
 }
 
 std::string ExportMii(int slot, const std::string& destPath) {
@@ -583,19 +627,20 @@ std::string ExportMii(int slot, const std::string& destPath) {
     std::vector<uint8_t> canvastex, ugctex;
     uint8_t ltdData[3] = {0,0,0};
 
-    if (miiOffset2 >= 0 && miiOffset2 + 4*s < (int)miisav.size()) {
-        uint8_t fpID = miisav[miiOffset2 + 4*s];
-        if (fpID != 0xFF) {
+    if (miiOffset2 >= 0 && miiOffset2 + 4*s + 4 <= (int)miisav.size()) {
+        // The index is a 32-bit int, -1 for "none". Reading only its low byte
+        // (as this used to) turned any out-of-range value into a paint id.
+        int32_t fpID = -1;
+        memcpy(&fpID, miisav.data() + miiOffset2 + 4*s, 4);
+        if (fpID >= 0 && fpID < FP_SLOT_COUNT) {
             hasFacepaint = true;
             facepaintID  = fpID;
         }
     }
 
     if (hasFacepaint) {
-        char fpFile[8];
-        snprintf(fpFile, sizeof(fpFile), "%03d", facepaintID);
-        std::string canvasPath = std::string(SAVE_UGC_DIR) + "/UgcFacePaint" + fpFile + ".canvas.zs";
-        std::string ugctexPath = std::string(SAVE_UGC_DIR) + "/UgcFacePaint" + fpFile + ".ugctex.zs";
+        std::string canvasPath = FacepaintPath(facepaintID, ".canvas.zs");
+        std::string ugctexPath = FacepaintPath(facepaintID, ".ugctex.zs");
         // Both blobs must actually have content. ReadFile() succeeds on a
         // zero-byte file, and flagging an empty payload as present made the
         // importer commit facepaint state with no texture to back it.
@@ -658,6 +703,9 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
     std::vector<uint8_t> miisav, playersav;
     if (!ReadFile(SAVE_MII_SAV,    miisav))    return "Cannot read Mii.sav";
     if (!ReadFile(SAVE_PLAYER_SAV, playersav)) return "Cannot read Player.sav";
+    // Untouched copies, to restore from if a write fails part-way through.
+    const std::vector<uint8_t> miisavBefore    = miisav;
+    const std::vector<uint8_t> playersavBefore = playersav;
 
     // Locate offsets
     int names_hash  = OffsetLocator(miisav, "2499BFDA");
@@ -690,7 +738,7 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
     // Check slot is initialized
     int sum = 0;
     for (int i = 0; i < 156; i++) sum += miisav[miiindex + i];
-    if (sum == 152) return "Mii slot not initialized — create a Mii there first";
+    if (sum == 152) return "Mii slot not initialized: create a Mii there first";
 
     // ── Resolve the facepaint payload BEFORE touching any save state ─────────
     // Both blobs must exist and be non-empty. The old code committed the
@@ -751,99 +799,121 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
         }
     }
 
-    // Read existing facepaint ID for this slot (0xFF = none)
-    int facepaintID = -1;
-    if (miiOffset2 >= 0 && miiOffset2 + 4*s < (int)miisav.size()) {
-        uint8_t rawId = miisav[miiOffset2 + 4*s];
-        if (rawId != 0xFF) facepaintID = rawId;
-    }
+    // ── Face paint ───────────────────────────────────────────────────────────
+    // A face paint is one of 70 numbered slots (UgcFacePaintNNN.*.zs plus five
+    // state arrays in Player.sav), and Mii.FacePaintIndex says which one a Mii
+    // wears: -1 for none. One paint belongs to one Mii.
+    auto fpIndexAt = [&](int x) -> int {
+        if (miiOffset2 < 0 || miiOffset2 + 4*x + 4 > (int)miisav.size()) return -1;
+        int32_t v = -1;
+        memcpy(&v, miisav.data() + miiOffset2 + 4*x, 4);
+        return (v >= 0 && v < FP_SLOT_COUNT) ? (int)v : -1;
+    };
+    auto setFpIndex = [&](int x, int32_t v) {
+        if (miiOffset2 < 0 || miiOffset2 + 4*x + 4 > (int)miisav.size()) return;
+        memcpy(miisav.data() + miiOffset2 + 4*x, &v, 4);
+    };
+    auto slotPopulated = [&](int x) -> bool {
+        int nOff = miinames + x * 64;
+        return nOff + 2 <= (int)miisav.size() && (miisav[nOff] | miisav[nOff + 1]) != 0;
+    };
+    auto fpStateAt = [&](int id) -> uint32_t {
+        uint32_t v = FP_STATE_UNUSED;
+        if (fpOff[2] + id*4 + 4 <= (int)playersav.size())
+            memcpy(&v, playersav.data() + fpOff[2] + id*4, 4);
+        return v;
+    };
+    auto setFpField = [&](int field, int id, uint32_t v) {
+        if (fpOff[field] + id*4 + 4 <= (int)playersav.size())
+            memcpy(playersav.data() + fpOff[field] + id*4, &v, 4);
+    };
 
-    // Facepaint handling. `staleFpStem` records textures to delete once the
-    // saves have actually been committed — removing them earlier would strand
-    // a still-referenced facepaint if a .sav write then failed.
+    // The paint this slot points at now, and whether another resident points at
+    // the same one. Sharing is never legitimate: it is what "create blank Mii"
+    // left behind before 2.0 (the blank was cloned from an existing Mii,
+    // FacePaintIndex included), so a blank Mii shared paint #0 with the first
+    // Mii. Importing into the blank then "reused" index 0 and overwrote
+    // UgcFacePaint000: the face of a Mii the user never touched (issue #42).
+    // A shared paint is treated as not ours. We never write to it, never clear
+    // its state and never delete its files.
+    const int  curFp       = fpIndexAt(s);
+    bool       curFpShared = false;
+    if (curFp >= 0)
+        for (int x = 0; x < MII_MAX_SLOTS; x++)
+            if (x != s && slotPopulated(x) && fpIndexAt(x) == curFp) { curFpShared = true; break; }
+    const bool ownsCurFp = curFp >= 0 && !curFpShared;
+
+    // `staleFpStem` records textures to delete once the saves have actually
+    // been written; removing them earlier would strand a still-referenced
+    // paint if a .sav write then failed.
     std::string staleFpStem;
+    // What the texture files held before this import, so a failure further
+    // down can put them back.
+    std::string fpCanvasPath, fpUgcTexPath;
+    std::vector<uint8_t> oldCanvas, oldUgcTex;
+    bool hadCanvas = false, hadUgcTex = false, texturesTouched = false;
+    auto rollbackTextures = [&]() {
+        if (!texturesTouched) return;
+        if (hadCanvas) WriteFile(fpCanvasPath, oldCanvas); else remove(fpCanvasPath.c_str());
+        if (hadUgcTex) WriteFile(fpUgcTexPath, oldUgcTex); else remove(fpUgcTexPath.c_str());
+    };
     if (haveFacepaint) {
-        // Assign next available ID if this slot had no facepaint
+        if (miiOffset2 < 0) return "Mii.sav has no FacePaintIndex field";
+
+        int facepaintID = ownsCurFp ? curFp : -1;
         if (facepaintID < 0) {
-            std::vector<bool> used(MII_MAX_SLOTS, false);
+            // Every index any slot refers to is taken, populated or not, exactly
+            // as the reference pickFacepaintId does.
+            std::vector<bool> used(FP_SLOT_COUNT, false);
             for (int x = 0; x < MII_MAX_SLOTS; x++) {
-                if (miiOffset2 >= 0 && miiOffset2 + 4*x < (int)miisav.size()) {
-                    uint8_t id = miisav[miiOffset2 + 4*x];
-                    if (id != 0xFF && id < MII_MAX_SLOTS) used[id] = true;
-                }
+                int id = fpIndexAt(x);
+                if (id >= 0) used[id] = true;
             }
-            for (int id = 0; id < MII_MAX_SLOTS; id++) {
-                if (!used[id]) { facepaintID = id; break; }
+            // First choice: a slot nothing knows about. Not referenced, marked
+            // unused in Player.sav, and with no texture files on disk.
+            for (int id = 0; id < FP_SLOT_COUNT && facepaintID < 0; id++) {
+                if (used[id] || fpStateAt(id) != FP_STATE_UNUSED) continue;
+                if (FileExists(FacepaintPath(id, ".canvas.zs")) ||
+                    FileExists(FacepaintPath(id, ".ugctex.zs"))) continue;
+                facepaintID = id;
             }
+            // Otherwise any slot no Mii refers to (left over from a deleted Mii).
+            for (int id = 0; id < FP_SLOT_COUNT && facepaintID < 0; id++)
+                if (!used[id]) facepaintID = id;
         }
         if (facepaintID < 0) return "No free facepaint slots";
 
-        // Write the textures FIRST. If either write fails we return before
-        // Mii.sav / Player.sav are modified at all, so the save on disk stays
-        // exactly as it was rather than referencing a facepaint that isn't there.
-        char fpFile[8];
-        snprintf(fpFile, sizeof(fpFile), "%03d", facepaintID);
+        // Write the textures FIRST. If either write fails we put back whatever
+        // was there and return before Mii.sav / Player.sav are modified at all,
+        // so the save never ends up pointing at half a face paint.
         MkdirP(SAVE_UGC_DIR);
-        std::string canvasPath = std::string(SAVE_UGC_DIR) + "/UgcFacePaint" + fpFile + ".canvas.zs";
-        std::string ugctexPath = std::string(SAVE_UGC_DIR) + "/UgcFacePaint" + fpFile + ".ugctex.zs";
-        if (!WriteFile(canvasPath, fpCanvas)) return "Failed to write " + canvasPath;
-        if (!WriteFile(ugctexPath, fpUgcTex)) return "Failed to write " + ugctexPath;
+        fpCanvasPath = FacepaintPath(facepaintID, ".canvas.zs");
+        fpUgcTexPath = FacepaintPath(facepaintID, ".ugctex.zs");
+        hadCanvas = FileExists(fpCanvasPath) && ReadFile(fpCanvasPath, oldCanvas);
+        hadUgcTex = FileExists(fpUgcTexPath) && ReadFile(fpUgcTexPath, oldUgcTex);
+        texturesTouched = true;
+        if (!WriteFile(fpCanvasPath, fpCanvas)) { rollbackTextures(); return "Failed to write " + fpCanvasPath; }
+        if (!WriteFile(fpUgcTexPath, fpUgcTex)) { rollbackTextures(); return "Failed to write " + fpUgcTexPath; }
 
-        // Update Mii.sav facepaint index
-        if (miiOffset2 >= 0 && miiOffset2 + 4*s + 4 <= (int)miisav.size()) {
-            miisav[miiOffset2 + 4*s]   = (uint8_t)facepaintID;
-            miisav[miiOffset2 + 4*s+1] = 0;
-            miisav[miiOffset2 + 4*s+2] = 0;
-            miisav[miiOffset2 + 4*s+3] = 0;
-        }
-
-        // Update Player.sav facepaint state
-        static const uint8_t FP1VAL[4] = {0xF4,0x01,0x00,0x00};
-        static const uint8_t FP2VAL[4] = {0x41,0x49,0x93,0x56};
-        static const uint8_t FP3VAL[4] = {0xF4,0xAD,0x7F,0x1D};
-        static const uint8_t FP4VAL[4] = {0x00,0x80,0x00,0x00};
-        if (fpOff[0] + facepaintID*4 + 4 <= (int)playersav.size())
-            memcpy(playersav.data() + fpOff[0] + facepaintID*4, FP1VAL, 4);
-        if (fpOff[1] + facepaintID*4 + 4 <= (int)playersav.size())
-            memcpy(playersav.data() + fpOff[1] + facepaintID*4, FP2VAL, 4);
-        if (fpOff[2] + facepaintID*4 + 4 <= (int)playersav.size())
-            memcpy(playersav.data() + fpOff[2] + facepaintID*4, FP3VAL, 4);
-        if (fpOff[3] + facepaintID*4 + 4 <= (int)playersav.size())
-            memcpy(playersav.data() + fpOff[3] + facepaintID*4, FP4VAL, 4);
-        uint8_t fp5val[4] = {(uint8_t)facepaintID, 0, 8, 0};
-        if (fpOff[4] + facepaintID*4 + 4 <= (int)playersav.size())
-            memcpy(playersav.data() + fpOff[4] + facepaintID*4, fp5val, 4);
-    } else {
-        // New Mii has no facepaint — clear old facepaint data if slot previously had one
-        if (facepaintID >= 0) {
-            if (miiOffset2 >= 0 && miiOffset2 + 4*s + 4 <= (int)miisav.size()) {
-                miisav[miiOffset2 + 4*s]   = 0xFF;
-                miisav[miiOffset2 + 4*s+1] = 0xFF;
-                miisav[miiOffset2 + 4*s+2] = 0xFF;
-                miisav[miiOffset2 + 4*s+3] = 0xFF;
-            }
-            static const uint8_t CLR1[4] = {0x00,0x00,0x00,0x00};
-            static const uint8_t CLR2[4] = {0x09,0xDE,0xEE,0xB6};
-            static const uint8_t CLR3[4] = {0xA5,0x8A,0xFF,0xAF};
-            static const uint8_t CLR4[4] = {0x00,0x00,0x00,0x00};
-            static const uint8_t CLR5[4] = {0x00,0x00,0x00,0x00};
-            if (fpOff[0] + facepaintID*4 + 4 <= (int)playersav.size())
-                memcpy(playersav.data() + fpOff[0] + facepaintID*4, CLR1, 4);
-            if (fpOff[1] + facepaintID*4 + 4 <= (int)playersav.size())
-                memcpy(playersav.data() + fpOff[1] + facepaintID*4, CLR2, 4);
-            if (fpOff[2] + facepaintID*4 + 4 <= (int)playersav.size())
-                memcpy(playersav.data() + fpOff[2] + facepaintID*4, CLR3, 4);
-            if (fpOff[3] + facepaintID*4 + 4 <= (int)playersav.size())
-                memcpy(playersav.data() + fpOff[3] + facepaintID*4, CLR4, 4);
-            if (fpOff[4] + facepaintID*4 + 4 <= (int)playersav.size())
-                memcpy(playersav.data() + fpOff[4] + facepaintID*4, CLR5, 4);
-
-            // Drop the textures too. Leaving them behind meant the next Mii to
-            // be allocated this now-"free" id inherited the old resident's
-            // artwork whenever its own texture write didn't land.
-            char fpFile[8];
-            snprintf(fpFile, sizeof(fpFile), "%03d", facepaintID);
-            staleFpStem = std::string(SAVE_UGC_DIR) + "/UgcFacePaint" + fpFile;
+        setFpIndex(s, facepaintID);
+        setFpField(0, facepaintID, FP_PRICE);
+        setFpField(1, facepaintID, FP_TEX_SRC_USED);
+        setFpField(2, facepaintID, FP_STATE_USED);
+        setFpField(3, facepaintID, FP_UNKNOWN_USED);
+        setFpField(4, facepaintID, (8u << 16) | (uint32_t)facepaintID);
+    } else if (curFp >= 0) {
+        // The imported Mii has no face paint. Unhook this slot, and only if the
+        // old paint was really ours also mark it unused and drop its textures.
+        // Leaving those behind meant the next Mii to be given this "free" id
+        // inherited the old resident's artwork whenever its own write did not land.
+        setFpIndex(s, -1);
+        if (ownsCurFp) {
+            setFpField(0, curFp, 0);
+            setFpField(1, curFp, FP_TEX_SRC_UNUSED);
+            setFpField(2, curFp, FP_STATE_UNUSED);
+            setFpField(3, curFp, 0);
+            setFpField(4, curFp, 0);
+            staleFpStem = FacepaintPath(curFp, "");
         }
     }
 
@@ -873,9 +943,20 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
         }
     }
 
-    // Write save files
-    if (!WriteFile(SAVE_MII_SAV,    miisav))    return "Failed to write Mii.sav";
-    if (!WriteFile(SAVE_PLAYER_SAV, playersav)) return "Failed to write Player.sav";
+    // Write save files. If either write fails, put the first file and the
+    // textures back the way they were, so a half-applied import is never what
+    // a later "save" commits.
+    if (!WriteFile(SAVE_MII_SAV, miisav)) {
+        WriteFile(SAVE_MII_SAV, miisavBefore);
+        rollbackTextures();
+        return "Failed to write Mii.sav";
+    }
+    if (!WriteFile(SAVE_PLAYER_SAV, playersav)) {
+        WriteFile(SAVE_MII_SAV,    miisavBefore);
+        WriteFile(SAVE_PLAYER_SAV, playersavBefore);
+        rollbackTextures();
+        return "Failed to write Player.sav";
+    }
 
     if (!staleFpStem.empty()) {
         remove((staleFpStem + ".canvas.zs").c_str());
@@ -883,6 +964,56 @@ std::string ImportMii(int slot, const std::string& ltdPath) {
     }
 
     return ""; // success
+}
+
+int FacepaintIndexOf(int slot) {
+    if (slot < 1 || slot > MII_MAX_SLOTS) return -1;
+    std::vector<uint8_t> miisav;
+    if (!ReadFile(SAVE_MII_SAV, miisav)) return -1;
+    int o = OffsetLocator(miisav, "5E32ADF4");
+    if (o < 0) return -1;
+    int off = o + 4 + (slot - 1) * 4;
+    if (off + 4 > (int)miisav.size()) return -1;
+    int32_t v = -1;
+    memcpy(&v, miisav.data() + off, 4);
+    return (v >= 0 && v < FP_SLOT_COUNT) ? (int)v : -1;
+}
+
+std::string ReleaseFacepaintIfUnreferenced(int id) {
+    if (id < 0 || id >= FP_SLOT_COUNT) return "";
+
+    std::vector<uint8_t> miisav, playersav;
+    if (!ReadFile(SAVE_MII_SAV,    miisav))    return "Cannot read Mii.sav";
+    if (!ReadFile(SAVE_PLAYER_SAV, playersav)) return "Cannot read Player.sav";
+
+    // Still worn by someone (any slot at all, populated or not): leave it alone.
+    int o = OffsetLocator(miisav, "5E32ADF4");
+    if (o < 0) return "";
+    for (int x = 0; x < MII_MAX_SLOTS; x++) {
+        int off = o + 4 + x * 4;
+        if (off + 4 > (int)miisav.size()) break;
+        int32_t v = -1;
+        memcpy(&v, miisav.data() + off, 4);
+        if (v == id) return "";
+    }
+
+    static const uint32_t CLEARED[5] = { 0, FP_TEX_SRC_UNUSED, FP_STATE_UNUSED, 0, 0 };
+    bool changed = false;
+    for (int i = 0; i < 5; i++) {
+        int base = OffsetLocator(playersav, FP_HASHES[i]);
+        if (base < 0) continue;
+        int off = base + 4 + id * 4;
+        if (off + 4 > (int)playersav.size()) continue;
+        if (memcmp(playersav.data() + off, &CLEARED[i], 4) != 0) {
+            memcpy(playersav.data() + off, &CLEARED[i], 4);
+            changed = true;
+        }
+    }
+    if (changed && !WriteFile(SAVE_PLAYER_SAV, playersav)) return "Failed to write Player.sav";
+
+    remove(FacepaintPath(id, ".canvas.zs").c_str());
+    remove(FacepaintPath(id, ".ugctex.zs").c_str());
+    return "";
 }
 
 // ─── UGC name cache ───────────────────────────────────────────────────────────
@@ -1239,7 +1370,7 @@ std::string ImportUgc(int ugcKind, int slot, const std::string& ltdxPath, bool i
                 return "Slot " + std::to_string(slot) + " holds a "
                      + ClothTypeName(dstType) + " but this file is a "
                      + ClothTypeName(srcType) + ". Replacing only works within the"
-                       " same clothing type — pick a " + ClothTypeName(srcType)
+                       " same clothing type: pick a " + ClothTypeName(srcType)
                      + " slot, or add it as a new item instead.";
         }
     }
@@ -1250,13 +1381,13 @@ std::string ImportUgc(int ugcKind, int slot, const std::string& ltdxPath, bool i
     // name block or the canvas payload could be picked up as a later section's
     // marker, silently slicing the textures apart at the wrong offsets.
     int nameMagic = FindMagic(ltdx, MAGIC_A2, 4);
-    if (nameMagic < 0) return "Invalid file structure — missing name marker";
+    if (nameMagic < 0) return "Invalid file structure: missing name marker";
     int canvasMagic = FindMagic(ltdx, MAGIC_A3, nameMagic + 4);
-    if (canvasMagic < 0) return "Invalid file structure — missing canvas marker";
+    if (canvasMagic < 0) return "Invalid file structure: missing canvas marker";
     int ugctexMagic = FindMagic(ltdx, MAGIC_A4, canvasMagic + 4);
-    if (ugctexMagic < 0) return "Invalid file structure — missing ugctex marker";
+    if (ugctexMagic < 0) return "Invalid file structure: missing ugctex marker";
     int thumbMagic  = FindMagic(ltdx, MAGIC_A5, ugctexMagic + 4);
-    if (thumbMagic < 0) return "Invalid file structure — missing thumb marker";
+    if (thumbMagic < 0) return "Invalid file structure: missing thumb marker";
     int nameStart   = nameMagic   + 4;
     int canvasStart = canvasMagic + 4;
     int ugctexStart = ugctexMagic + 4;
@@ -1578,16 +1709,22 @@ std::string CreateBlankMii(int slot) {
         const uint32_t SECONDP = 0xa31978ddu;      // enum "SecondPerson"
         const uint32_t JPJA = 0xf618046eu;         // enum "JPja"
         auto w32 = [&](int base, int idx, uint32_t v) {
-            if (base < 0) return; int o = base + idx*4;
-            if (o + 4 > fileSize) return; memcpy(miisav.data() + o, &v, 4);
+            if (base < 0) return;
+            int o = base + idx*4;
+            if (o + 4 > fileSize) return;
+            memcpy(miisav.data() + o, &v, 4);
         };
         auto w64 = [&](int base, int idx, uint64_t v) {
-            if (base < 0) return; int o = base + idx*8;
-            if (o + 8 > fileSize) return; memcpy(miisav.data() + o, &v, 8);
+            if (base < 0) return;
+            int o = base + idx*8;
+            if (o + 8 > fileSize) return;
+            memcpy(miisav.data() + o, &v, 8);
         };
         auto wbit = [&](int base, int bitIdx, bool v) {
-            if (base < 0) return; int o = base + bitIdx/8;
-            if (o >= fileSize) return; uint8_t m = (uint8_t)(1u << (bitIdx & 7));
+            if (base < 0) return;
+            int o = base + bitIdx/8;
+            if (o >= fileSize) return;
+            uint8_t m = (uint8_t)(1u << (bitIdx & 7));
             if (v) miisav[o] |= m; else miisav[o] &= (uint8_t)~m;
         };
         for (int j = 0; j < capacity; j++) {
@@ -1679,6 +1816,32 @@ std::string CreateBlankMii(int slot) {
     wBool("DFC82223", s * 3 + 1, true);
     // Bond meter.
     wI32("D0882636", s, 30);
+
+    // ── Things a blank Mii must NOT inherit from the Mii it was cloned from ──
+    // The clone above copies every per-Mii array, and a few of those are not
+    // "defaults" at all but links to things the source Mii owns.
+    //
+    // FacePaintIndex is the important one. It is an index into the 70 face
+    // paint slots (UgcFacePaintNNN), and a paint belongs to exactly one Mii.
+    // Leaving the copy in place made the blank Mii share the source's paint,
+    // normally #0 because the source is the first Mii. The blank showed that
+    // Mii's face paint in game, and the next import into it reused the index
+    // and overwrote UgcFacePaint000, replacing the face of a Mii the user
+    // never touched (GitHub issue #42). -1 is the game's "no face paint".
+    wI32 ("5E32ADF4", s, -1);        // FaceInfo.FacePaintIndex
+    wBool("DE73CEE6", s, false);     // FaceInfo.IsFacePaintFront
+    // Sharing identity. A blank Mii is made on this island: not a copy that
+    // was received from someone else, never sent, and with no network id of
+    // its own yet. Two Miis carrying the same NetworkUuid look like the same
+    // Mii to local sharing.
+    wBool("DBDB59FA", s, false);     // UgcInfo.IsCopy
+    wBool("7F9B5D34", s, false);     // UgcInfo.IsEdit
+    wU32 ("62AAAA12", s, 0);         // UgcInfo.NetworkDeliverCount
+    {
+        int uuidBase = fieldBase("DC260809");   // UgcInfo.NetworkUuid (Str64Array)
+        if (uuidBase >= 0 && uuidBase + (s + 1) * 64 <= fileSize)
+            memset(miisav.data() + uuidBase + s * 64, 0, 64);
+    }
     // Housing — unhoused, mirroring the reference addMii. A new Mii is
     // left with no house (HouseMapId / CacheMapId = -1); on next launch
     // the game shows the "place the house" prompt once per added Mii
@@ -1841,7 +2004,7 @@ std::string DeleteUgc(int ugcKind, int slot) {
     return err;
 }
 
-std::string CreateBlankUgc(int ugcKind, int slot) {
+std::string CreateBlankUgc(int ugcKind, int slot, int canvasShape) {
     if (ugcKind < 0 || ugcKind >= UGC_KIND_COUNT)
         return "Invalid UGC kind";
     int maxSlots = UGC_KIND_DATA[ugcKind].maxSlots;
@@ -1896,6 +2059,32 @@ std::string CreateBlankUgc(int ugcKind, int slot) {
         if (!err.empty()) return err;
     }
     if (!WriteFile(SAVE_PLAYER_SAV, psav)) return "Failed to write Player.sav";
+
+    // 4) A see-through placeholder texture (canvas + ugctex + thumbnail), as a
+    //    new design is in the game's own editor, encoded by
+    //    the same pipeline a PNG import uses. An item only exists for the game
+    //    and for our own list (which is built from the .ugctex.zs files) once
+    //    these are on disk. This step used to live in the on-console button
+    //    handler only, so "+ blank UGC" in the WebUI enabled a slot with no
+    //    textures at all: nothing appeared in the list, and each further click
+    //    used up another slot.
+    {
+        RgbaImage white(256, 256);   // every pixel see-through (0, 0, 0, 0)
+        std::fill(white.pixels.begin(), white.pixels.end(), (uint8_t)0);
+        TextureProcessor::ImportOptions opts;
+        opts.destStem    = std::string(SAVE_UGC_DIR) + "/" + stem;
+        opts.writeCanvas = true;
+        opts.writeThumb  = true;
+        opts.noSrgb      = false;
+        opts.canvasShape = canvasShape == 1 ? TextureProcessor::CanvasShape::Book
+                         : canvasShape == 2 ? TextureProcessor::CanvasShape::Tv
+                         :                    TextureProcessor::CanvasShape::Square;
+        std::string werr = TextureProcessor::ImportRgbaImage(white, opts);
+        if (!werr.empty()) {
+            DeleteUgc(ugcKind, slot);   // do not leave a half-made slot behind
+            return "Could not write the placeholder texture: " + werr;
+        }
+    }
     LoadUgcNames(); // refresh the in-memory name cache
     return "";
 }

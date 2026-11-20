@@ -69,8 +69,12 @@ std::vector<UgcTextureEntry> Scan(const std::string& folderPath) {
         std::string thumbName2 = ToLower(stem + "_Thumb.ugctex.zs");  // _Thumb.ugctex.zs
         std::string canvasName = ToLower(stem + ".canvas.zs");
 
-        if      (byName.count(thumbName1)) e.thumbPath = byName[thumbName1];
-        else if (byName.count(thumbName2)) e.thumbPath = byName[thumbName2];
+        // The game's own thumbnail is <stem>_Thumb.ugctex.zs. Some older
+        // tools left a <stem>_Thumb_ugctex.zs beside it that the game never
+        // reads; preferring that one showed a stale picture (a design's old
+        // colours) and made imports update a file the game ignores.
+        if      (byName.count(thumbName2)) e.thumbPath = byName[thumbName2];
+        else if (byName.count(thumbName1)) e.thumbPath = byName[thumbName1];
         if (byName.count(canvasName)) e.canvasPath = byName[canvasName];
 
         entries.push_back(std::move(e));

@@ -46,12 +46,24 @@ include $(DEVKITPRO)/libnx/switch_rules
 TARGET      := TomoToolNX
 APP_TITLE   := TomoToolNX
 APP_AUTHOR  := Imprimante
-# Read from source/updater.h rather than duplicated here — the two drifted
-# apart before (the NACP still said 1.3.8 while the app printed 1.3.10, so
-# Sphaira showed the stale number).
-APP_VERSION := $(shell sed -n 's/^#define APP_VERSION "\([^"]*\)".*/\1/p' $(TOPDIR)/source/updater.h)
+# The version is the release tag being built, never a number edited by hand:
+#   make APP_VERSION=2.0.1      what the GitHub workflow does for a tag
+#   make                        a clean checkout of a tag uses that tag;
+#                               anything else is a development build, 0.0.0-dev
+# It goes into the NACP (what hbmenu shows) and into the code (-DAPP_VERSION).
+# After changing it, `make clean` so every file that shows it is rebuilt.
+# (switch_rules, included above, has already set APP_VERSION to its own 1.0.0
+# default, so only a value given on the command line is kept.)
+ifneq ($(origin APP_VERSION),command line)
+APP_VERSION := $(shell git -C "$(TOPDIR)" describe --tags --exact-match 2>/dev/null | sed 's/^[vV]//')
+ifneq ($(strip $(APP_VERSION)),)
+ifneq ($(strip $(shell git -C "$(TOPDIR)" status --porcelain --untracked-files=no 2>/dev/null)),)
+APP_VERSION :=
+endif
+endif
 ifeq ($(strip $(APP_VERSION)),)
-$(error "Could not read APP_VERSION from source/updater.h")
+APP_VERSION := 0.0.0-dev
+endif
 endif
 # Title ID intentionally left blank for emulator compatibility:
 # Ryubing 1.3.279's Discord-integration module reacts to the "active title
@@ -97,8 +109,9 @@ ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 CFLAGS	:=	-g -Wall -O2 -ffunction-sections -fdata-sections \
 			$(ARCH) $(DEFINES)
 
-CFLAGS	+=	$(INCLUDE) -D__SWITCH__ \
-			-DSDL_DISABLE_IMMINTRIN_H
+CFLAGS	+=	$(INCLUDE) -I$(PORTLIBS)/include/opus -D__SWITCH__ \
+			-DSDL_DISABLE_IMMINTRIN_H \
+			-DAPP_VERSION=\"$(APP_VERSION)\"
 
 CXXFLAGS	:= $(CFLAGS) -std=c++17 -fno-rtti -fno-exceptions
 
@@ -118,7 +131,7 @@ ASFLAGS	:=	-g $(ARCH)
 # emission only bloats relocation tables and saves nothing.
 LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map),--gc-sections
 
-LIBS	:= -lSDL2_ttf -lfreetype -lharfbuzz -lbz2 -lSDL2_image -lSDL2_mixer -lvorbisidec -lmodplug -lmpg123 -lopusfile -lopus -lFLAC -logg -lSDL2 -lpng -ljpeg -lwebp -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -lz -lzstd -lEGL -lglapi -ldrm_nouveau -lnx
+LIBS	:= -lSDL2_ttf -lfreetype -lharfbuzz -lbz2 -lSDL2_image -lSDL2 -lpng -ljpeg -lwebp -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -lopusfile -lopus -logg -lz -lzstd -lEGL -lglapi -ldrm_nouveau -lnx
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, libhaze.a is in $(BUILD)/
@@ -211,8 +224,10 @@ ifneq ($(ROMFS),)
 	# `/home/<user>` pointing under "C:\Program Files\Git\…", so cygpath
 	# produces a path with a space that breaks elf2nro's argv split. Prefer
 	# bash's builtin `pwd -W` (always gives a Windows path) and fall back to
-	# cygpath only when we're not in a shell that supports it.
-	export NROFLAGS += --romfsdir='$(shell pwd -W 2>/dev/null || cygpath -m $(CURDIR)/$(ROMFS) 2>/dev/null || echo $(CURDIR))/$(ROMFS)'
+	# cygpath only when we're not in a shell that supports it. On Linux (CI)
+	# neither exists and the plain $(CURDIR) is already what elf2nro wants.
+	# All three branches yield the project root; $(ROMFS) is appended once.
+	export NROFLAGS += --romfsdir='$(shell pwd -W 2>/dev/null || cygpath -m "$(CURDIR)" 2>/dev/null || echo "$(CURDIR)")/$(ROMFS)'
 endif
 
 .PHONY: $(BUILD) clean all setup
@@ -224,14 +239,20 @@ all: $(BUILD)
 # setup: one-time clone of libhaze — run this once after cloning the repo
 #---------------------------------------------------------------------------------
 setup:
-	@if [ -d "$(LIBHAZE_DIR)/.git" ]; then \
+	@# libhaze is vendored in libs/libhaze/, so a normal checkout already has it
+	@# and this target only has to re-apply the libsfix overlay. The clone path
+	@# is kept for trees that were checked out without libs/. Presence is
+	@# detected from the public header, not from a .git directory: the vendored
+	@# copy has none, and the old .git test made `make setup` try to clone into
+	@# the existing folder and then run `git checkout` against THIS repo.
+	@if [ -f "$(LIBHAZE_DIR)/include/haze.h" ]; then \
 		echo "libhaze already present at $(LIBHAZE_DIR)"; \
 	else \
 		echo "Cloning libhaze @ $(LIBHAZE_COMMIT)..."; \
-		mkdir -p libs; \
-		git clone https://github.com/ITotalJustice/libhaze.git $(LIBHAZE_DIR); \
-		git -C $(LIBHAZE_DIR) checkout $(LIBHAZE_COMMIT); \
-		echo "libhaze ready."; \
+		mkdir -p libs && \
+		git clone https://github.com/ITotalJustice/libhaze.git "$(LIBHAZE_DIR)" && \
+		git -C "$(LIBHAZE_DIR)" checkout $(LIBHAZE_COMMIT) && \
+		echo "libhaze ready." || { echo "error: could not fetch libhaze"; exit 1; }; \
 	fi
 	@# Overlay our patched headers from libsfix/. Upstream libhaze @$(LIBHAZE_COMMIT)
 	@# calls strcasecmp() without including <strings.h> and only built on older

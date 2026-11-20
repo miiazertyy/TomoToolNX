@@ -24,13 +24,18 @@ namespace ShareClient {
 long Fetch(const std::string& url,
            std::vector<uint8_t>& out,
            std::string& err) {
+    return FetchEx(url, out, err, 20, "TomoToolNX/share-proxy");
+}
+
+long FetchEx(const std::string& url, std::vector<uint8_t>& out, std::string& err, long timeoutSec, const char* agent) {
     CURL* c = curl_easy_init();
     if (!c) { err = "curl_easy_init failed"; return 0; }
     curl_easy_setopt(c, CURLOPT_URL, url.c_str());
     curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(c, CURLOPT_USERAGENT, "TomoToolNX/share-proxy");
+    curl_easy_setopt(c, CURLOPT_USERAGENT, agent ? agent : "TomoToolNX/share-proxy");
     curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L); // Switch has no cert store
-    curl_easy_setopt(c, CURLOPT_TIMEOUT, 20L);
+    curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 10L);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT, timeoutSec);
     curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, WriteAppend);
     curl_easy_setopt(c, CURLOPT_WRITEDATA, &out);
     CURLcode res = curl_easy_perform(c);

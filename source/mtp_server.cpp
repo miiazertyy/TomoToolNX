@@ -191,7 +191,12 @@ void HazeCallback(const haze::CallbackData* data) {
         case haze::CallbackType_ReadBegin:    std::snprintf(msg, sizeof msg, "MTP: reading %s", data->file.filename); break;
         case haze::CallbackType_CreateFile:   std::snprintf(msg, sizeof msg, "MTP: create %s", data->file.filename); break;
         case haze::CallbackType_DeleteFile:   std::snprintf(msg, sizeof msg, "MTP: delete %s", data->file.filename); break;
-        case haze::CallbackType_RenameFile:   std::snprintf(msg, sizeof msg, "MTP: rename %s→%s", data->rename.filename, data->rename.newname); break;
+        case haze::CallbackType_RenameFile: {
+            // Two names can be longer than the buffer: the log line is cut short.
+            const std::string line = std::string("MTP: rename ") + data->rename.filename + "→" + data->rename.newname;
+            std::snprintf(msg, sizeof msg, "%s", line.c_str());
+            break;
+        }
         case haze::CallbackType_CreateFolder: std::snprintf(msg, sizeof msg, "MTP: mkdir %s", data->file.filename); break;
         case haze::CallbackType_DeleteFolder: std::snprintf(msg, sizeof msg, "MTP: rmdir %s", data->file.filename); break;
         default: return;

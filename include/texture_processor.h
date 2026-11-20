@@ -44,7 +44,10 @@ namespace TextureProcessor {
     //         no further improvement (up to 4 rounds).
     // PCA:    single-pass principal-axis fit (8 power-iteration steps), no
     //         candidate scoring or refinement. Faster fallback.
-    enum class Bc1Encoder { Custom, PCA };
+    // Rgbcx:  Richard Geldreich's rgbcx (libs/rgbcx), level 10, on the
+    //         linear values, as ltd-save-editor's "rgbcx" choice; blocks with
+    //         see-through pixels go through Custom (rgbcx ignores alpha).
+    enum class Bc1Encoder { Custom, PCA, Rgbcx };
     enum class Bc1Mode   { Auto, FourColor, ThreeColor };
     // How the source image is scaled to fit the target texture size.
     // - Cover:   scale up to fill, crop the overflow. Preserves aspect ratio.
@@ -114,7 +117,46 @@ namespace TextureProcessor {
         // explicit override for slots whose mesh expects a non-square canvas
         // (books, TVs, etc.) — see the CanvasShape enum above.
         CanvasShape canvasShape = CanvasShape::Square;
+        // Turned clockwise this many quarter turns, then mirrored left to
+        // right (flipH) and/or top to bottom (flipV), before anything else.
+        int  rotate = 0;
+        bool flipH  = false;
+        bool flipV  = false;
     };
+
+    // The picture turned/mirrored as above.
+    RgbaImage Transformed(const RgbaImage& src, int quarterTurns, bool flipH, bool flipV);
+    // The picture fitted into W x H the way an import fits it: the fit mode
+    // and matte (Contain), in linear light, averaging every source pixel when
+    // shrinking and blending the nearest four when growing; with shapeBars,
+    // stretched into the book/TV cut-out with black bars around. sRGB.
+    RgbaImage FitForTexture(const RgbaImage& src, int W, int H, const ImportOptions& opts, bool shapeBars);
+    // What the game will hold at W x H, in sRGB: turned, fitted (with the
+    // bars), alpha cut at half, through the block encoder the import uses
+    // (BC1 with the options' encoder and mode, or BC3) and read back. The
+    // previews draw exactly this, so they match what an import writes.
+    RgbaImage PreviewTexture(const RgbaImage& src, int W, int H, TextureFormat fmt, const ImportOptions& opts);
+    // The size and format of the ugctex an import into this slot writes
+    // (from the slot's current file; 512 x 512 BC1 without one).
+    UgctexLayout LayoutOfFile(const std::string& ugctexPath);
+    // A PNG, JPEG or WebP picture as sRGB RGBA. "" or an error.
+    std::string LoadImageFile(const std::string& path, RgbaImage& out);
+
+    // ── Designs as the game stores them ──
+    // A design is a slot's own files: <stem>.ugctex.zs (always), <stem>.canvas.zs
+    // and <stem>_Thumb.ugctex.zs; people trade them zipped or loose.
+    struct DesignFiles { std::string stem; std::vector<uint8_t> canvas, ugctex, thumb; };
+    // A zip archive's files (stored or deflated), by name. "" or an error.
+    std::string ReadZip(const std::vector<uint8_t>& zip, std::vector<std::pair<std::string, std::vector<uint8_t>>>& out);
+    // The first design among named files (folders in the names are ignored).
+    bool FindDesign(const std::vector<std::pair<std::string, std::vector<uint8_t>>>& files, DesignFiles& d);
+    // Writes a design into a slot (destStem: folder + "/" + stem). Each file must
+    // be what its name says, and the ugctex must have the slot's own size and
+    // format (a design for another shape would come out scrambled). A missing
+    // canvas (when the slot has one) or thumb (when thumbPath is set) is made
+    // from the ugctex. "" or an error.
+    std::string ImportDesign(const DesignFiles& d, const std::string& destStem, const std::string& originalUgctexPath,
+                             const std::string& thumbPath, bool writeCanvas);
 
     // Returns empty string on success, error message on failure.
     std::string ImportPng(const ImportOptions& opts);

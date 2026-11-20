@@ -66,6 +66,27 @@ std::vector<std::string> ListBackups(const std::string& uidTag = "");
 // Returns empty string on success, error message on failure.
 std::string RestoreBackup(const std::string& backupPath, const std::string& saveMountRoot);
 
+// ── What a backup holds ───────────────────────────────────────────────────────
+// Read on a background thread, one backup at a time, and kept in memory only:
+// a restore copies the whole folder back into the save, so nothing may ever
+// be written into a backup.
+struct BackupInfo {
+    uint64_t    bytes = 0;      // every file in it
+    int         files = 0;
+    int         textures = 0;   // the UGC textures (thumbnails not counted)
+    int         miis = -1;      // -1: its Mii.sav could not be read
+    std::string island, player; // from its Player.sav; "" when unreadable
+};
+// Queue these backups for reading (those not read or queued yet). The one a
+// running backup is still writing is left for later.
+void RequestInfo(const std::vector<std::string>& paths);
+// A backup's details, once read.
+bool GetInfo(const std::string& path, BackupInfo& out);
+// Forget a backup's details (it was deleted).
+void ForgetInfo(const std::string& path);
+// Stop the reader and wait for it. Call before the app exits.
+void StopInfo();
+
 // ── Save bundles (Island Generator Phase C) ───────────────────────────────────
 //
 // A "bundle" is a self-contained set of three .sav files + Ugc/PhotoStudio

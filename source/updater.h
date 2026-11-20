@@ -1,12 +1,18 @@
 #pragma once
-// updater.h — Check GitHub for a newer release and tell the user where to grab it.
+// updater.h — Finds the newest TomoToolNX release on GitHub, downloads it and
+// installs it over this copy.
+//
+// The version this build reports comes from the release tag it was built from
+// (the Makefile stamps it in: `make APP_VERSION=2.0.1`, which the GitHub
+// workflow does for a tag). A build that is not a release is a development
+// build, 0.0.0-dev: it sees new releases but never installs over itself.
 
+#include <cstdint>
 #include <string>
 
-// Bump this before each release — it is the single source of truth. The
-// Makefile greps this line for the NACP version too, so the number Sphaira
-// and the album show can't drift from the one the app prints.
-#define APP_VERSION "1.3.10"
+#ifndef APP_VERSION
+#define APP_VERSION "0.0.0-dev"
+#endif
 #define GITHUB_REPO "miiazertyy/TomoToolNX"
 
 namespace Updater {
@@ -14,18 +20,46 @@ namespace Updater {
 enum class State {
     Idle,
     Checking,
-    UpdateAvailable,
+    UpdateAvailable,     // a newer release exists
     NoUpdate,
-    Error
+    Error,
+    Downloading,         // GetProgress() goes 0 → 1
+    Ready,               // downloaded and checked; installs when the app closes
 };
 
-void     StartCheck();           // Start background version check
-State    GetState();
-std::string GetLatestVersion();  // e.g. "1.0.1"
+void        StartCheck();        // background check of the latest release
+State       GetState();
+std::string GetLatestVersion();  // "2.0.1"
+std::string GetNotes();          // the release's notes (Markdown, as written on GitHub)
 std::string GetError();
-void     Cleanup();              // Call on exit
+void        Cleanup();           // join the worker (call on exit)
 
-// Compare version strings, returns true if a > b
+// Is this a development build (it never installs over itself)?
+bool IsDevBuild();
+// Can the latest release be installed from here (a release build, and the
+// release carries TomoToolNX.nro)?
+bool CanInstall();
+// Download TomoToolNX.nro next to this copy, then check its size, its SHA-256
+// against the one GitHub publishes, and that it is an NRO.
+void        StartDownload();
+float       GetProgress();       // 0..1 while downloading
+uint64_t    GetDownloadSize();   // bytes, from the release
+void        CancelDownload();
+
+// Where this copy of the app lives (argv[0] from the homebrew loader).
+void SetSelfPath(const char* argv0);
+// Remove what an earlier update left behind (.part, .old). Call at start.
+void CleanLeftovers();
+// Close the app now and start the new version straight away.
+void RequestRestart();
+bool RestartRequested();
+// Called by main() once nothing holds the app's file open (after romfsExit):
+// puts the downloaded copy in place of this one, and asks the loader to start
+// it when a restart was requested. Does nothing without a Ready download.
+void FinishInstall();
+
+// True if version a is newer than b. A leading "v" is ignored, and so is
+// anything after the numbers ("2.0.1-beta" counts as 2.0.1).
 bool VersionGreater(const std::string& a, const std::string& b);
 
 } // namespace Updater

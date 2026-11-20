@@ -109,7 +109,7 @@ std::string StepMap(const IslandGenRunner::Options& opts) {
     return "";
 }
 
-std::string StepWishes() {
+[[maybe_unused]] std::string StepWishes() {
     SaveEditor::SavFile pl;
     std::string err;
     if (!SaveEditor::Load("tomodata:/Player.sav", pl, err))
@@ -120,7 +120,7 @@ std::string StepWishes() {
     return SaveMount::Commit();
 }
 
-std::string StepLevels(const IslandGenRunner::Options& opts) {
+[[maybe_unused]] std::string StepLevels(const IslandGenRunner::Options& opts) {
     SaveEditor::SavFile mi;
     std::string err;
     if (!SaveEditor::Load("tomodata:/Mii.sav", mi, err))
@@ -134,7 +134,7 @@ std::string StepLevels(const IslandGenRunner::Options& opts) {
     return SaveMount::Commit();
 }
 
-std::string StepHouses() {
+[[maybe_unused]] std::string StepHouses() {
     SaveEditor::SavFile mp, mi;
     std::string err;
     if (!SaveEditor::Load("tomodata:/Map.sav", mp, err)) return "load Map.sav: " + err;
@@ -450,7 +450,7 @@ std::string StepMiiFill(const IslandGenRunner::Options& opts,
         u32 ip = 0;
         Result rc = nifmGetCurrentIpAddress(&ip);
         if (R_FAILED(rc) || ip == 0) {
-            return "no internet — connect to WiFi and re-run, "
+            return "no internet: connect to WiFi and re-run, "
                    "or pick \"Skip\" for fetch on the previous screen";
         }
     }
@@ -625,7 +625,7 @@ std::string StepMiiFill(const IslandGenRunner::Options& opts,
     }
 
     if (successCount == 0 && targetSlots > 0) {
-        return "TomoShare returned no Miis — service may be down "
+        return "TomoShare returned no Miis: service may be down "
                "or your network can't reach api.tomodachishare.com";
     }
     if (successCount < targetSlots) {

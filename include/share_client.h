@@ -18,6 +18,8 @@ namespace ShareClient {
 long Fetch(const std::string& url,
            std::vector<uint8_t>& out,
            std::string& err);
+// The same with its own time limit (seconds) and User-Agent.
+long FetchEx(const std::string& url, std::vector<uint8_t>& out, std::string& err, long timeoutSec, const char* agent);
 
 // Convenience: percent-encode a single query value using curl_easy_escape.
 // Returns "" on failure (rare). Callers should use this for any value that

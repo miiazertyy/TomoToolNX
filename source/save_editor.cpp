@@ -6,8 +6,13 @@
 #include <cstring>
 #include <cstdio>
 #include <algorithm>
+#include <sys/stat.h>
 
 namespace SaveEditor {
+
+// The undo history's hooks (SetChangeHook, SetLoadHook).
+static void (*sChangeHook)(SavFile&, const Entry&) = nullptr;
+static void (*sLoadHook)(SavFile&) = nullptr;
 
 // ── Murmur3 x86 32-bit (seed 0) ──────────────────────────────────────────────
 static uint32_t rotl32(uint32_t x, int r) { return (x << r) | (x >> (32 - r)); }
@@ -70,23 +75,37 @@ static size_t FixedSize(DataType t) {
     }
 }
 
-static std::vector<uint8_t> ReadHeap(const std::vector<uint8_t>& b, uint32_t off, DataType t) {
-    if (t == DT_Bool64Key) return {};
+// ── Heap payloads ─────────────────────────────────────────────────────────────
+// Strict by design. A payload that cannot be read exactly is an error, never an
+// empty entry: Serialize() lays the heap out from the payload sizes, so a single
+// silently-empty payload shifts every entry after it and produces a file the
+// game refuses to load. The reference parser (ltd-save-editor parse.ts) throws
+// in the same places.
+static bool ReadHeap(const uint8_t* b, size_t size, uint32_t off, DataType t,
+                     std::vector<uint8_t>& out, std::string& err) {
+    auto fail = [&](const char* what) {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "%s (type %u at 0x%X)", what, (unsigned)t, (unsigned)off);
+        err = buf;
+        return false;
+    };
+    out.clear();
 
     size_t fixed = FixedSize(t);
     if (fixed) {
-        if (off + fixed > b.size()) return {};
-        return std::vector<uint8_t>(b.begin()+off, b.begin()+off+fixed);
+        if ((size_t)off + fixed > size) return fail("Entry runs past the end of the file");
+        out.assign(b + off, b + off + fixed);
+        return true;
     }
 
-    if (off + 4 > b.size()) return {};
-    uint32_t count = R32(b.data() + off);
+    if ((size_t)off + 4 > size) return fail("Entry runs past the end of the file");
+    const size_t count = R32(b + off);
     size_t total = 0;
 
     switch (t) {
         case DT_Bin:       total = 4 + count; break;
         case DT_BoolArray: {
-            size_t byteSize = std::max((size_t)4, (size_t)((count + 7) / 8));
+            size_t byteSize = std::max((size_t)4, (count + 7) / 8);
             size_t aligned  = (byteSize + 3) & ~(size_t)3;
             total = 4 + aligned;
             break;
@@ -103,88 +122,145 @@ static std::vector<uint8_t> ReadHeap(const std::vector<uint8_t>& b, uint32_t off
         case DT_WStr32Array:                   total = 4 + count * 64; break;
         case DT_WStr64Array:                   total = 4 + count * 128; break;
         case DT_BinArray: {
-            size_t p = off + 4;
-            for (uint32_t i = 0; i < count; i++) {
-                if (p + 4 > b.size()) return {};
-                uint32_t sz = R32(b.data() + p);
+            size_t p = (size_t)off + 4;
+            for (size_t i = 0; i < count; i++) {
+                if (p + 4 > size) return fail("Binary array runs past the end of the file");
+                size_t sz = R32(b + p);
                 p += 4 + sz;
-                if (p > b.size()) return {};
+                if (p > size) return fail("Binary array runs past the end of the file");
             }
-            return std::vector<uint8_t>(b.begin()+off, b.begin()+p);
+            out.assign(b + off, b + p);
+            return true;
         }
-        default: return {};
+        default: return fail("Unsupported entry type");
     }
 
-    if (total == 0 || off + total > b.size()) return {};
-    return std::vector<uint8_t>(b.begin()+off, b.begin()+off+total);
+    if ((size_t)off + total > size) return fail("Entry runs past the end of the file");
+    out.assign(b + off, b + off + total);
+    return true;
 }
 
-// ── Load ──────────────────────────────────────────────────────────────────────
-bool Load(const std::string& path, SavFile& out, std::string& err) {
-    FILE* f = fopen(path.c_str(), "rb");
-    if (!f) { err = "Cannot open: " + path; return false; }
-    fseek(f, 0, SEEK_END); size_t sz = (size_t)ftell(f); fseek(f, 0, SEEK_SET);
-    std::vector<uint8_t> b(sz);
-    size_t nread = fread(b.data(), 1, sz, f); fclose(f);
-    if (nread != sz) { err = "Short read: " + path; return false; }
+static void RebuildIndex(SavFile& s) {
+    s.index.clear();
+    s.index.reserve(s.entries.size());
+    // emplace keeps the FIRST entry for a hash, matching the old linear scan.
+    for (size_t i = 0; i < s.entries.size(); i++)
+        s.index.emplace(s.entries[i].hash, (uint32_t)i);
+}
 
-    if (sz < 0x20) { err = "File too small"; return false; }
+// ── Parse ─────────────────────────────────────────────────────────────────────
+bool Parse(const uint8_t* b, size_t sz, SavFile& out, std::string& err) {
+    if (!b || sz < 0x20) { err = "File too small"; return false; }
     if (b[0]!=0x04 || b[1]!=0x03 || b[2]!=0x02 || b[3]!=0x01) { err = "Bad magic"; return false; }
 
-    out.version = R32(b.data() + 4);
-    uint32_t saveDataOff = R32(b.data() + 8);
-    if (saveDataOff < 0x20 || saveDataOff > (uint32_t)sz) { err = "Bad saveDataOffset"; return false; }
+    SavFile sav;
+    sav.version = R32(b + 4);
+    const size_t saveDataOff = R32(b + 8);
+    if (saveDataOff < 0x20 || saveDataOff > sz || ((saveDataOff - 0x20) & 7) != 0) {
+        err = "Bad saveDataOffset"; return false;
+    }
 
-    out.entries.clear();
     size_t pos = 0x20;
     DataType curType = DT_Bool;
 
-    while (pos + 8 <= (size_t)saveDataOff) {
-        uint32_t hash = R32(b.data() + pos); pos += 4;
-        uint32_t slot = R32(b.data() + pos); pos += 4;
-        if (hash == 0) { curType = (DataType)(slot < (uint32_t)DT_COUNT ? slot : 0); continue; }
+    while (pos + 8 <= saveDataOff) {
+        uint32_t hash = R32(b + pos); pos += 4;
+        uint32_t slot = R32(b + pos); pos += 4;
+        if (hash == 0) {
+            // Section marker. An index the format does not define used to be
+            // read as Bool, which turned every entry after it into nonsense.
+            if (slot >= (uint32_t)DT_COUNT) {
+                err = "Unknown entry type " + std::to_string(slot);
+                return false;
+            }
+            curType = (DataType)slot;
+            continue;
+        }
         Entry e;
         e.hash = hash; e.type = curType;
         if (IsInline(curType)) {
             e.inlineRaw = slot;
-        } else {
-            e.payload = ReadHeap(b, slot, curType);
+        } else if (curType == DT_Bool64Key) {
+            // Offset 0 means "no table" and is the only form we can write back.
+            // A real table would be dropped on save, so refuse rather than lose it.
+            if (slot != 0) {
+                err = "This save uses a Bool64Key table, which cannot be rewritten safely";
+                return false;
+            }
+        } else if (!ReadHeap(b, sz, slot, curType, e.payload, err)) {
+            return false;
         }
-        out.entries.push_back(std::move(e));
+        sav.entries.push_back(std::move(e));
     }
 
-    out.loaded = true;
+    if (sav.entries.empty()) { err = "Save has no entries"; return false; }
+    RebuildIndex(sav);
+    sav.loaded = true;
+    out = std::move(sav);
     return true;
 }
 
-// ── Save ──────────────────────────────────────────────────────────────────────
-std::string Save(const std::string& path, const SavFile& sav) {
+// ── Load ──────────────────────────────────────────────────────────────────────
+// On failure `out` is left exactly as it was, so a failed reload never replaces
+// good in-memory data with an empty file that a later Save() could write out.
+bool Load(const std::string& path, SavFile& out, std::string& err) {
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) { err = "Cannot open: " + path; return false; }
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (len < 0) { fclose(f); err = "Cannot size: " + path; return false; }
+    std::vector<uint8_t> b((size_t)len);
+    size_t nread = b.empty() ? 0 : fread(b.data(), 1, b.size(), f);
+    fclose(f);
+    if (nread != b.size()) { err = "Short read: " + path; return false; }
+
+    SavFile parsed;
+    if (!Parse(b.data(), b.size(), parsed, err)) return false;
+    out = std::move(parsed);
+    if (sLoadHook) sLoadHook(out);
+    return true;
+}
+
+// ── Serialize ─────────────────────────────────────────────────────────────────
+std::string Serialize(const SavFile& sav, std::vector<uint8_t>& out) {
+    out.clear();
+    // An unloaded SavFile serializes to a valid-looking 296-byte file with no
+    // entries. Writing that over Mii.sav / Player.sav destroys the save, and it
+    // used to happen whenever a "dirty" flag was set for a file that had never
+    // been opened in this session.
+    if (!sav.loaded || sav.entries.empty()) return "Nothing loaded to save";
+
     // Group entry indices by DataType
     std::vector<std::vector<size_t>> byType((size_t)DT_COUNT);
     for (size_t i = 0; i < sav.entries.size(); i++) {
-        uint32_t t = (uint32_t)sav.entries[i].type;
-        if (t < (uint32_t)DT_COUNT) byType[t].push_back(i);
+        const Entry& e = sav.entries[i];
+        uint32_t t = (uint32_t)e.type;
+        if (t >= (uint32_t)DT_COUNT) return "Entry has an invalid type";
+        if (!IsInline(e.type) && e.type != DT_Bool64Key && e.payload.empty())
+            return "Entry is missing its data";
+        byType[t].push_back(i);
     }
 
     // Index row count: one sentinel per type + one row per entry
-    size_t rowCount = (size_t)DT_COUNT;
-    for (auto& v : byType) rowCount += v.size();
+    size_t rowCount = (size_t)DT_COUNT + sav.entries.size();
     uint32_t saveDataOff = (uint32_t)(0x20 + rowCount * 8);
 
     // Compute heap offsets in type order (matches write.ts)
     std::vector<uint32_t> heapOff(sav.entries.size(), 0);
-    uint32_t heapPos = saveDataOff;
+    uint64_t heapPos = saveDataOff;
     for (size_t t = 0; t < (size_t)DT_COUNT; t++) {
         for (size_t idx : byType[t]) {
             const auto& e = sav.entries[idx];
             if (IsInline(e.type)) continue;
             if (e.type == DT_Bool64Key && e.payload.empty()) { heapOff[idx] = 0; continue; }
-            heapOff[idx] = heapPos;
-            heapPos += (uint32_t)e.payload.size();
+            heapOff[idx] = (uint32_t)heapPos;
+            heapPos += e.payload.size();
         }
     }
+    if (heapPos > 0x7fffffffu) return "Save is too large";
 
-    std::vector<uint8_t> out(heapPos, 0);
+    out.assign((size_t)heapPos, 0);
 
     // Header
     out[0]=0x04; out[1]=0x03; out[2]=0x02; out[3]=0x01;
@@ -209,26 +285,79 @@ std::string Save(const std::string& path, const SavFile& sav) {
     for (size_t i = 0; i < sav.entries.size(); i++) {
         const auto& e = sav.entries[i];
         if (IsInline(e.type) || e.payload.empty()) continue;
-        uint32_t off = heapOff[i];
-        if (off + e.payload.size() <= out.size())
-            memcpy(out.data() + off, e.payload.data(), e.payload.size());
+        memcpy(out.data() + heapOff[i], e.payload.data(), e.payload.size());
     }
-
-    FILE* f = fopen(path.c_str(), "wb");
-    if (!f) return "Cannot open for write: " + path;
-    fwrite(out.data(), 1, out.size(), f);
-    fclose(f);
     return "";
 }
 
+// ── Save ──────────────────────────────────────────────────────────────────────
+std::string Save(const std::string& path, const SavFile& sav) {
+    std::vector<uint8_t> out;
+    std::string err = Serialize(sav, out);
+    if (!err.empty()) return err + ": " + path;
+
+    // Every step is checked. A short write that went unnoticed here used to be
+    // committed as-is, leaving a truncated .sav in the real save data.
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) return "Cannot open for write: " + path;
+    size_t n = fwrite(out.data(), 1, out.size(), f);
+    int closeRc = fclose(f);
+    if (n != out.size())
+        return "Short write: " + path + " (" + std::to_string(n) + "/" + std::to_string(out.size()) + ")";
+    if (closeRc != 0) return "Close failed: " + path;
+    struct stat st{};
+    if (stat(path.c_str(), &st) != 0) return "Cannot verify: " + path;
+    if ((size_t)st.st_size != out.size())
+        return "Size mismatch after write: " + path + " (" + std::to_string((size_t)st.st_size)
+             + "/" + std::to_string(out.size()) + ")";
+    return "";
+}
+
+bool HasEntry(const SavFile& s, uint32_t h) {
+    for (auto& e : s.entries) if (e.hash == h) return true;
+    return false;
+}
+
 // ── Entry lookup ──────────────────────────────────────────────────────────────
+// Lookups go through the hash index built at parse time. The accessors below are
+// called hundreds of times per frame by the editor screens; a linear scan over
+// Player.sav's ~3800 entries for each of them was a measurable part of a frame.
+// The index entry is re-checked against the vector, and anything that does not
+// line up falls back to the scan, so a stale index can never return a wrong entry.
 static const Entry* Find(const SavFile& s, uint32_t h) {
+    auto it = s.index.find(h);
+    if (it != s.index.end() && it->second < s.entries.size() && s.entries[it->second].hash == h)
+        return &s.entries[it->second];
     for (auto& e : s.entries) if (e.hash == h) return &e;
     return nullptr;
 }
+void SetChangeHook(void (*fn)(SavFile&, const Entry&)) { sChangeHook = fn; }
+void SetLoadHook(void (*fn)(SavFile&)) { sLoadHook = fn; }
+void Touched(SavFile& s, const Entry& e) { if (sChangeHook) sChangeHook(s, e); }
+
+// Only the setters ask for a mutable entry: each one is about to change it.
 static Entry* FindMut(SavFile& s, uint32_t h) {
-    for (auto& e : s.entries) if (e.hash == h) return &e;
-    return nullptr;
+    Entry* e = const_cast<Entry*>(Find(s, h));
+    if (e && sChangeHook) sChangeHook(s, *e);
+    return e;
+}
+
+const uint8_t* GetBinAt(const SavFile& s, uint32_t h, int idx, size_t* size) {
+    if (size) *size = 0;
+    const Entry* e = Find(s, h);
+    if (!e || e->type != DT_BinArray || idx < 0 || e->payload.size() < 4) return nullptr;
+    const uint8_t* b = e->payload.data();
+    const size_t n = e->payload.size();
+    const uint32_t count = (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
+    if ((uint32_t)idx >= count) return nullptr;
+    size_t p = 4;
+    for (int i = 0; ; i++) {
+        if (p + 4 > n) return nullptr;
+        const size_t sz = (size_t)b[p] | ((size_t)b[p + 1] << 8) | ((size_t)b[p + 2] << 16) | ((size_t)b[p + 3] << 24);
+        if (p + 4 + sz > n) return nullptr;
+        if (i == idx) { if (size) *size = sz; return b + p + 4; }
+        p += 4 + sz;
+    }
 }
 
 // ── Scalar accessors ──────────────────────────────────────────────────────────
@@ -417,6 +546,19 @@ static std::string Utf16LeToUtf8(const uint8_t* buf, size_t maxBytes) {
     for (size_t i = 0; i + 1 < maxBytes; i += 2) {
         uint16_t cp = (uint16_t)buf[i] | ((uint16_t)buf[i+1] << 8);
         if (cp == 0) break;
+        if (cp >= 0xD800 && cp <= 0xDBFF && i + 3 < maxBytes) {
+            uint16_t lo = (uint16_t)buf[i+2] | ((uint16_t)buf[i+3] << 8);
+            if (lo >= 0xDC00 && lo <= 0xDFFF) {
+                uint32_t full = 0x10000u + (((uint32_t)cp - 0xD800u) << 10) + ((uint32_t)lo - 0xDC00u);
+                out += (char)(0xF0 | (full >> 18));
+                out += (char)(0x80 | ((full >> 12) & 0x3F));
+                out += (char)(0x80 | ((full >> 6) & 0x3F));
+                out += (char)(0x80 | (full & 0x3F));
+                i += 2;
+                continue;
+            }
+        }
+        if (cp >= 0xD800 && cp <= 0xDFFF) { out += '?'; continue; }   // lone surrogate
         if (cp < 0x80) {
             out += (char)cp;
         } else if (cp < 0x800) {
@@ -442,10 +584,24 @@ static void Utf8ToUtf16Le(const std::string& utf8, uint8_t* buf, size_t maxChars
         else if ((c & 0xE0)==0xC0 && i+1<utf8.size())   { cp = ((c&0x1F)<<6)   | ((uint8_t)utf8[i+1]&0x3F);                  i += 2; }
         else if ((c & 0xF0)==0xE0 && i+2<utf8.size())   { cp = ((c&0x0F)<<12)  | (((uint8_t)utf8[i+1]&0x3F)<<6)
                                                               | ((uint8_t)utf8[i+2]&0x3F);                                    i += 3; }
+        else if ((c & 0xF8)==0xF0 && i+3<utf8.size())   { cp = ((c&0x07)<<18)  | (((uint8_t)utf8[i+1]&0x3F)<<12)
+                                                              | (((uint8_t)utf8[i+2]&0x3F)<<6)
+                                                              | ((uint8_t)utf8[i+3]&0x3F);                                    i += 4; }
         else                                             { cp = '?';                                                           i += 1; }
         if (cp <= 0xFFFF) {
             buf[out*2]   = (uint8_t)(cp & 0xFF);
             buf[out*2+1] = (uint8_t)((cp >> 8) & 0xFF);
+            out++;
+        } else if (cp <= 0x10FFFF && out + 1 < maxChars - 1) {
+            // Astral character: a surrogate pair, only if both halves fit.
+            uint32_t v  = cp - 0x10000u;
+            uint16_t hi = (uint16_t)(0xD800u + (v >> 10));
+            uint16_t lo = (uint16_t)(0xDC00u + (v & 0x3FFu));
+            buf[out*2]   = (uint8_t)(hi & 0xFF);
+            buf[out*2+1] = (uint8_t)(hi >> 8);
+            out++;
+            buf[out*2]   = (uint8_t)(lo & 0xFF);
+            buf[out*2+1] = (uint8_t)(lo >> 8);
             out++;
         }
     }

@@ -4,6 +4,7 @@
 
 #include "texture_processor.h"
 #include <zstd.h>
+#include <zlib.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 
@@ -14,6 +15,9 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+
+#define RGBCX_USE_SMALLER_TABLES 1
+#include "../libs/rgbcx/rgbcx.h"
 
 namespace TextureProcessor {
 
@@ -187,6 +191,19 @@ static bool WriteFile(const std::string& path, const std::vector<uint8_t>& data,
 // ─────────────────────────────────────────────────────────────────────────────
 // Block-linear swizzle
 // ─────────────────────────────────────────────────────────────────────────────
+
+// A slot's thumbnail: always the game's own <stem>_Thumb.ugctex.zs, and the
+// other file too when the slot has one under another name (an older tool's
+// <stem>_Thumb_ugctex.zs), so whatever reads it sees the same picture.
+static bool WriteThumb(const std::string& destStem, const std::string& known, const std::vector<uint8_t>& data, std::string& err) {
+    const std::string game = destStem + "_Thumb.ugctex.zs";
+    if (!WriteFile(game, data, err)) return false;
+    if (!known.empty() && known != game) {
+        FILE* f = fopen(known.c_str(), "rb");
+        if (f) { fclose(f); if (!WriteFile(known, data, err)) return false; }
+    }
+    return true;
+}
 
 static int DivRoundUp(int n, int d) { return (n + d - 1) / d; }
 
@@ -1021,7 +1038,11 @@ std::vector<uint8_t> Bc1Encode(const std::vector<uint8_t>& srgbRgba, int W, int 
     std::vector<uint8_t> out((size_t)bx*by*8);
     uint8_t srgbBlk[64];
     uint8_t linBlk[64];
-    bool wantLinear = (enc == Bc1Encoder::PCA);
+    bool wantLinear = (enc == Bc1Encoder::PCA || enc == Bc1Encoder::Rgbcx);
+    if (enc == Bc1Encoder::Rgbcx) {
+        static const bool ready = (rgbcx::init(rgbcx::bc1_approx_mode::cBC1Ideal), true);
+        (void)ready;
+    }
     for (int iy = 0; iy < by; iy++) for (int ix = 0; ix < bx; ix++) {
         for (int row = 0; row < 4; row++) for (int col = 0; col < 4; col++) {
             int src = ((iy*4 + row) * W + (ix*4 + col)) * 4;
@@ -1040,7 +1061,14 @@ std::vector<uint8_t> Bc1Encode(const std::vector<uint8_t>& srgbRgba, int W, int 
         int off = (iy * bx + ix) * 8;
         if (enc == Bc1Encoder::PCA)
             Bc1EncodeBlockPCA(linBlk, mode, out.data(), off);
-        else
+        else if (enc == Bc1Encoder::Rgbcx) {
+            // rgbcx ignores alpha: blocks with see-through pixels need the
+            // 3-colour cut-out, which Custom does.
+            bool cut = false;
+            for (int i = 0; i < 16 && !cut; i++) cut = linBlk[i * 4 + 3] < 128;
+            if (cut) custom_bc::EncodeColorBlock(srgbBlk, mode, /*allowAlpha=*/true, out.data(), off);
+            else rgbcx::encode_bc1(10, out.data() + off, linBlk, mode != Bc1Mode::FourColor, false);
+        } else
             custom_bc::EncodeColorBlock(srgbBlk, mode, /*allowAlpha=*/true, out.data(), off);
     }
     return out;
@@ -1193,115 +1221,239 @@ static void ThresholdAlpha(std::vector<uint8_t>& rgba, uint8_t threshold=128) {
         rgba[i] = (rgba[i] >= threshold) ? 255 : 0;
 }
 
-static RgbaImage ResizeBilinear(const RgbaImage& src, int dw, int dh) {
-    RgbaImage dst(dw, dh);
-    for (int dy = 0; dy < dh; dy++) {
-        float fy = (dy + 0.5f) * src.height / dh - 0.5f;
-        if (fy < 0) fy = 0;
-        int y0 = (int)fy, y1 = y0 + 1;
-        if (y1 >= src.height) y1 = src.height - 1;
-        float wy = fy - y0;
-        for (int dx = 0; dx < dw; dx++) {
-            float fx = (dx + 0.5f) * src.width / dw - 0.5f;
-            if (fx < 0) fx = 0;
-            int x0 = (int)fx, x1 = x0 + 1;
-            if (x1 >= src.width) x1 = src.width - 1;
-            float wx = fx - x0;
-            uint8_t* p = dst.row(dy) + dx * 4;
-            for (int c = 0; c < 4; c++) {
-                float v = src.row(y0)[x0*4+c]*(1-wx)*(1-wy)
-                        + src.row(y0)[x1*4+c]*wx*(1-wy)
-                        + src.row(y1)[x0*4+c]*(1-wx)*wy
-                        + src.row(y1)[x1*4+c]*wx*wy;
-                p[c] = (uint8_t)(v + 0.5f);
+// ─────────────────────────────────────────────────────────────────────────────
+// Turning and fitting a picture
+// ─────────────────────────────────────────────────────────────────────────────
+
+RgbaImage Transformed(const RgbaImage& src, int quarterTurns, bool flipH, bool flipV) {
+    const int q = ((quarterTurns % 4) + 4) % 4;
+    const int W = src.width, H = src.height;
+    RgbaImage out(q % 2 ? H : W, q % 2 ? W : H);
+    for (int y = 0; y < out.height; y++)
+        for (int x = 0; x < out.width; x++) {
+            // Undo the mirrors (they come last), then the turn.
+            const int ux = flipH ? out.width - 1 - x : x;
+            const int uy = flipV ? out.height - 1 - y : y;
+            int sx, sy;
+            switch (q) {
+                case 0:  sx = ux;         sy = uy;         break;
+                case 1:  sx = uy;         sy = H - 1 - ux; break;   // clockwise
+                case 2:  sx = W - 1 - ux; sy = H - 1 - uy; break;
+                default: sx = W - 1 - uy; sy = ux;         break;   // counter-clockwise
             }
+            memcpy(out.pixels.data() + ((size_t)y * out.width + x) * 4, src.pixels.data() + ((size_t)sy * W + sx) * 4, 4);
         }
-    }
-    return dst;
+    return out;
 }
 
-static RgbaImage ResizeNearest(const RgbaImage& src, int dw, int dh) {
-    RgbaImage dst(dw, dh); // zero-initialized = fully transparent
-    float scale = std::min((float)dw / src.width, (float)dh / src.height);
-    int scaledW = (int)(src.width  * scale);
-    int scaledH = (int)(src.height * scale);
-    int offX = (dw - scaledW) / 2;
-    int offY = (dh - scaledH) / 2;
-    for (int y = 0; y < scaledH; y++) {
-        int sy = y * src.height / scaledH;
-        for (int x = 0; x < scaledW; x++) {
-            int sx = x * src.width / scaledW;
-            memcpy(dst.pixels.data() + ((offY + y) * dw + (offX + x)) * 4,
-                   src.pixels.data() + (sy * src.width + sx) * 4, 4);
-        }
+// sRGB byte → linear light (0..1), and back.
+static float s_linF[256];
+static bool  s_linFBuilt = false;
+static void BuildLinF() {
+    if (s_linFBuilt) return;
+    for (int i = 0; i < 256; i++) {
+        const double c = i / 255.0;
+        s_linF[i] = (float)(c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4));
     }
-    return dst;
+    s_linFBuilt = true;
+}
+static inline uint8_t ToSrgb8(float l) {
+    if (!(l > 0.f)) return 0;
+    if (l >= 1.f) return 255;
+    const float c = l <= 0.0031308f ? l * 12.92f : 1.055f * powf(l, 1.f / 2.4f) - 0.055f;
+    return (uint8_t)std::max(0, std::min(255, (int)lroundf(c * 255.f)));
 }
 
-// Single-stop resize that handles the three fit modes (cover / contain / fill)
-// plus an optional matte color for contain's letterbox. Cover crops; contain
-// letterboxes; fill stretches. All use nearest-neighbour to match the existing
-// import pipeline.
+// One axis of a resize. For each destination pixel: the source pixels it
+// reads with their weights (summing to 1), and how much of the pixel the
+// picture covers (Contain can leave the edge pixels partly matte).
+struct AxisTaps {
+    std::vector<int> start, count, idx;
+    std::vector<float> w, cover;
+};
+// Destination pixels [0, dn); the picture lands on [d0, d0 + dlen) and shows
+// the source span [s0, s0 + slen) of a line of n pixels.
+static AxisTaps MakeTaps(int dn, double d0, double dlen, double s0, double slen, int n) {
+    AxisTaps t;
+    t.start.resize(dn); t.count.resize(dn); t.cover.resize(dn);
+    const double step = slen / dlen;                       // source pixels per destination pixel
+    const int lo = std::max(0, (int)std::floor(s0));
+    const int hi = std::min(n - 1, (int)std::ceil(s0 + slen) - 1);
+    for (int o = 0; o < dn; o++) {
+        const double c0 = std::max((double)o, d0), c1 = std::min((double)o + 1.0, d0 + dlen);
+        t.start[o] = (int)t.idx.size();
+        t.count[o] = 0;
+        t.cover[o] = (float)std::max(0.0, std::min(1.0, c1 - c0));
+        if (c1 <= c0 || hi < lo) continue;
+        const size_t first = t.idx.size();
+        double sum = 0;
+        if (step > 1.0) {
+            // Shrinking: the average of all the source under it (area).
+            const double u0 = s0 + (c0 - d0) * step, u1 = s0 + (c1 - d0) * step;
+            const int i1 = std::min(hi, (int)std::ceil(u1) - 1);
+            for (int i = std::max(lo, (int)std::floor(u0)); i <= i1; i++) {
+                const double wa = std::min((double)i + 1.0, u1) - std::max((double)i, u0);
+                if (wa > 0) { t.idx.push_back(i); t.w.push_back((float)wa); sum += wa; }
+            }
+        } else {
+            // Growing: between the two nearest source pixels (bilinear).
+            const double u = s0 + ((c0 + c1) * 0.5 - d0) * step - 0.5;
+            const int i0 = (int)std::floor(u);
+            const double f = u - i0;
+            const int ia = std::max(lo, std::min(hi, i0)), ib = std::max(lo, std::min(hi, i0 + 1));
+            if (ia == ib) { t.idx.push_back(ia); t.w.push_back(1.f); }
+            else { t.idx.push_back(ia); t.w.push_back((float)(1.0 - f)); t.idx.push_back(ib); t.w.push_back((float)f); }
+            sum = 1.0;
+        }
+        if (sum <= 0) {                                    // a sliver: the nearest pixel
+            t.idx.resize(first); t.w.resize(first);
+            t.idx.push_back(std::max(lo, std::min(hi, (int)std::floor(s0 + ((c0 + c1) * 0.5 - d0) * step))));
+            t.w.push_back(1.f);
+            sum = 1.0;
+        }
+        for (size_t k = first; k < t.w.size(); k++) t.w[k] = (float)(t.w[k] / sum);
+        t.count[o] = (int)(t.idx.size() - first);
+    }
+    return t;
+}
+
+// Resize in linear light with premultiplied alpha (see-through pixels lend
+// no colour to their neighbours): cover crops the middle, contain fits the
+// whole picture over the matte, fill stretches.
 static RgbaImage ResizeWithFit(const RgbaImage& src, int dw, int dh,
                                 FitMode mode, const Matte& matte) {
+    BuildLinF();
     RgbaImage dst(dw, dh);
-    // Pre-fill with matte for letterbox case; cover/fill rewrite the whole canvas.
+    if (src.width <= 0 || src.height <= 0 || dw <= 0 || dh <= 0) return dst;
+    double s0x = 0, s0y = 0, slx = src.width, sly = src.height;
+    double d0x = 0, d0y = 0, dlx = dw, dly = dh;
+    if (mode == FitMode::Contain) {
+        const double k = std::min((double)dw / src.width, (double)dh / src.height);
+        dlx = src.width * k; dly = src.height * k;
+        d0x = (dw - dlx) / 2.0; d0y = (dh - dly) / 2.0;
+    } else if (mode == FitMode::Cover) {
+        const double k = std::max((double)dw / src.width, (double)dh / src.height);
+        slx = dw / k; sly = dh / k;
+        s0x = (src.width - slx) / 2.0; s0y = (src.height - sly) / 2.0;
+    }
+    const AxisTaps tx = MakeTaps(dw, d0x, dlx, s0x, slx, src.width);
+    const AxisTaps ty = MakeTaps(dh, d0y, dly, s0y, sly, src.height);
+    // The destination rows each source row feeds, and how much.
+    std::vector<std::vector<std::pair<int, float>>> feeds(src.height);
+    for (int oy = 0; oy < dh; oy++)
+        for (int k = 0; k < ty.count[oy]; k++)
+            feeds[ty.idx[ty.start[oy] + k]].push_back({ oy, ty.w[ty.start[oy] + k] });
+    // Rows one at a time: across first, then into the rows they feed.
+    std::vector<float> acc((size_t)dw * dh * 4, 0.f), line((size_t)src.width * 4), across((size_t)dw * 4);
+    for (int sy = 0; sy < src.height; sy++) {
+        if (feeds[sy].empty()) continue;
+        const uint8_t* p = src.row(sy);
+        for (int x = 0; x < src.width; x++, p += 4) {
+            const float a = p[3] * (1.f / 255.f);
+            float* l = &line[(size_t)x * 4];
+            l[0] = s_linF[p[0]] * a; l[1] = s_linF[p[1]] * a; l[2] = s_linF[p[2]] * a; l[3] = a;
+        }
+        for (int ox = 0; ox < dw; ox++) {
+            float r = 0, g = 0, b = 0, a = 0;
+            const int st = tx.start[ox];
+            for (int k = 0; k < tx.count[ox]; k++) {
+                const float* l = &line[(size_t)tx.idx[st + k] * 4];
+                const float wv = tx.w[st + k];
+                r += l[0] * wv; g += l[1] * wv; b += l[2] * wv; a += l[3] * wv;
+            }
+            float* o = &across[(size_t)ox * 4];
+            o[0] = r; o[1] = g; o[2] = b; o[3] = a;
+        }
+        for (const auto& f : feeds[sy]) {
+            float* d = &acc[(size_t)f.first * dw * 4];
+            for (int i = 0; i < dw * 4; i++) d[i] += across[i] * f.second;
+        }
+    }
+    // Over the matte (Contain), then back to sRGB.
+    float mr = 0, mg = 0, mb = 0, ma = 0;
     if (mode == FitMode::Contain && matte.a > 0) {
-        for (int i = 0; i < dw * dh; i++) {
-            dst.pixels[i*4+0] = matte.r;
-            dst.pixels[i*4+1] = matte.g;
-            dst.pixels[i*4+2] = matte.b;
-            dst.pixels[i*4+3] = matte.a;
-        }
+        ma = matte.a / 255.f;
+        mr = s_linF[matte.r] * ma; mg = s_linF[matte.g] * ma; mb = s_linF[matte.b] * ma;
     }
-    if (mode == FitMode::Fill) {
-        for (int y = 0; y < dh; y++) {
-            int sy = y * src.height / dh;
-            for (int x = 0; x < dw; x++) {
-                int sx = x * src.width / dw;
-                memcpy(dst.pixels.data() + (y * dw + x) * 4,
-                       src.pixels.data() + (sy * src.width + sx) * 4, 4);
-            }
-        }
-        return dst;
-    }
-    if (mode == FitMode::Cover) {
-        // Source rect that maps to the full target: scale = max(dw/sw, dh/sh)
-        // → crop the longer source axis.
-        float scale = std::max((float)dw / src.width, (float)dh / src.height);
-        int cropW = (int)((float)dw / scale + 0.5f);
-        int cropH = (int)((float)dh / scale + 0.5f);
-        if (cropW < 1) cropW = 1;
-        if (cropH < 1) cropH = 1;
-        int cropX = (src.width  - cropW) / 2;
-        int cropY = (src.height - cropH) / 2;
-        for (int y = 0; y < dh; y++) {
-            int sy = cropY + y * cropH / dh;
-            if (sy < 0) sy = 0; if (sy >= src.height) sy = src.height - 1;
-            for (int x = 0; x < dw; x++) {
-                int sx = cropX + x * cropW / dw;
-                if (sx < 0) sx = 0; if (sx >= src.width) sx = src.width - 1;
-                memcpy(dst.pixels.data() + (y * dw + x) * 4,
-                       src.pixels.data() + (sy * src.width + sx) * 4, 4);
-            }
-        }
-        return dst;
-    }
-    // Contain: same as ResizeNearest but on top of the pre-filled matte canvas.
-    float scale = std::min((float)dw / src.width, (float)dh / src.height);
-    int scaledW = std::max(1, (int)(src.width  * scale));
-    int scaledH = std::max(1, (int)(src.height * scale));
-    int offX = (dw - scaledW) / 2;
-    int offY = (dh - scaledH) / 2;
-    for (int y = 0; y < scaledH; y++) {
-        int sy = y * src.height / scaledH;
-        for (int x = 0; x < scaledW; x++) {
-            int sx = x * src.width / scaledW;
-            memcpy(dst.pixels.data() + ((offY + y) * dw + (offX + x)) * 4,
-                   src.pixels.data() + (sy * src.width + sx) * 4, 4);
+    for (int oy = 0; oy < dh; oy++) {
+        uint8_t* o = dst.row(oy);
+        for (int ox = 0; ox < dw; ox++, o += 4) {
+            const float cov = tx.cover[ox] * ty.cover[oy];
+            const float* a4 = &acc[((size_t)oy * dw + ox) * 4];
+            float r = a4[0] * cov, g = a4[1] * cov, b = a4[2] * cov, a = a4[3] * cov;
+            r += mr * (1.f - a); g += mg * (1.f - a); b += mb * (1.f - a); a += ma * (1.f - a);
+            if (a > 1e-6f) { o[0] = ToSrgb8(r / a); o[1] = ToSrgb8(g / a); o[2] = ToSrgb8(b / a); }
+            else { o[0] = o[1] = o[2] = 0; }
+            o[3] = (uint8_t)std::max(0, std::min(255, (int)lroundf(a * 255.f)));
         }
     }
     return dst;
+}
+
+// Book is ~3:4 portrait (256×256 → 200-wide inner), TV is 16:9 wide
+// (256×256 → 144-tall inner). The remaining area gets filled with opaque
+// black bars so the in-game mesh, which renders the canvas 1:1, shows the
+// picture in the right aspect with pillarbox / letterbox bars around it.
+// (Pre-stretching the whole square came back squashed: the mesh does not
+// stretch.) Multiples of 4 keep BC blocks aligned.
+static void InnerSizeFor(CanvasShape shape, int boxW, int boxH, int& iw, int& ih) {
+    iw = boxW; ih = boxH;
+    if (shape == CanvasShape::Book)    iw = ((boxW * 200) / 256) & ~3;
+    else if (shape == CanvasShape::Tv) ih = ((boxH * 144) / 256) & ~3;
+    if (iw < 1) iw = 1;
+    if (ih < 1) ih = 1;
+}
+static RgbaImage PasteCentered(const RgbaImage& inner, int outW, int outH) {
+    RgbaImage out(outW, outH);
+    for (int i = 0; i < outW * outH; i++) out.pixels[(size_t)i * 4 + 3] = 255;   // opaque black bars
+    const int offX = (outW - inner.width) / 2, offY = (outH - inner.height) / 2;
+    for (int y = 0; y < inner.height; y++) {
+        const int dy = y + offY;
+        if (dy < 0 || dy >= outH) continue;
+        const int copyW = std::min(inner.width, outW - offX);
+        if (copyW <= 0) continue;
+        memcpy(out.pixels.data() + ((size_t)dy * outW + std::max(0, offX)) * 4,
+               inner.pixels.data() + ((size_t)y * inner.width + std::max(0, -offX)) * 4, (size_t)copyW * 4);
+    }
+    return out;
+}
+
+RgbaImage FitForTexture(const RgbaImage& src, int W, int H, const ImportOptions& opts, bool shapeBars) {
+    int iw = W, ih = H;
+    if (shapeBars) InnerSizeFor(opts.canvasShape, W, H, iw, ih);
+    if (iw == W && ih == H)
+        return (src.width == W && src.height == H) ? src : ResizeWithFit(src, W, H, opts.fitMode, opts.matte);
+    // Book / TV: the picture fills the cut-out (cropping would lose part of
+    // it), so the fit is Fill there whatever the setting.
+    return PasteCentered(ResizeWithFit(src, iw, ih, FitMode::Fill, opts.matte), W, H);
+}
+
+static bool Turned(const ImportOptions& o) { return (o.rotate % 4) != 0 || o.flipH || o.flipV; }
+
+RgbaImage PreviewTexture(const RgbaImage& src0, int W, int H, TextureFormat fmt, const ImportOptions& opts) {
+    RgbaImage turned;
+    const RgbaImage* src = &src0;
+    if (Turned(opts)) { turned = Transformed(src0, opts.rotate, opts.flipH, opts.flipV); src = &turned; }
+    RgbaImage img = FitForTexture(*src, W, H, opts, true);
+    ThresholdAlpha(img.pixels);
+    std::vector<uint8_t> px = (fmt == TextureFormat::Bc3)
+        ? Bc3Decode(Bc3Encode(img.pixels, W, H), W, H)
+        : Bc1Decode(Bc1Encode(img.pixels, W, H, opts.encoder, opts.bc1Mode), W, H);
+    if (px.size() == img.pixels.size()) {
+        ConvertLinearToSrgb(px);            // the blocks hold linear values
+        img.pixels = std::move(px);
+    }
+    return img;
+}
+
+UgctexLayout LayoutOfFile(const std::string& ugctexPath) {
+    UgctexLayout layout{512, 512, 128, 128, 16, TextureFormat::Bc1};
+    if (ugctexPath.empty()) return layout;
+    std::vector<uint8_t> raw;
+    std::string err;
+    UgctexLayout found{};
+    if (ZstdDecompressFile(ugctexPath, raw, err) && DetectUgctexLayoutInner(raw.size(), found, err)) layout = found;
+    return layout;
 }
 
 static bool LoadPng(const std::string& path, RgbaImage& out, std::string& errOut) {
@@ -1323,12 +1475,21 @@ static bool LoadPng(const std::string& path, RgbaImage& out, std::string& errOut
     return true;
 }
 
+std::string LoadImageFile(const std::string& path, RgbaImage& out) {
+    std::string err;
+    return LoadPng(path, out, err) ? std::string() : err;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ImportRgbaImage / ImportPng  (no exceptions)
 // ─────────────────────────────────────────────────────────────────────────────
 
-std::string ImportRgbaImage(const RgbaImage& src, const ImportOptions& opts) {
+std::string ImportRgbaImage(const RgbaImage& src0, const ImportOptions& opts) {
     std::string err;
+
+    // Turned / mirrored first, as the preview shows it.
+    RgbaImage turnedImg;
+    const RgbaImage& src = Turned(opts) ? (turnedImg = Transformed(src0, opts.rotate, opts.flipH, opts.flipV)) : src0;
 
     // Detect layout from original ugctex
     UgctexLayout layout{512, 512, 128, 128, 16, TextureFormat::Bc1};
@@ -1346,85 +1507,14 @@ std::string ImportRgbaImage(const RgbaImage& src, const ImportOptions& opts) {
         }
     }
 
-    // Shape → inner content aspect inside the always-square target buffer.
-    // Book is ~3:4 portrait (256×256 → 200-wide inner), TV is 16:9 wide
-    // (256×256 → 144-tall inner). The remaining area gets filled with
-    // opaque black bars so the in-game mesh — which renders the canvas
-    // 1:1 — shows the source image fitted into the right aspect with
-    // pillarbox / letterbox bars around it. Earlier attempts pre-stretched
-    // the source into the full square assuming the mesh would un-stretch
-    // it; that was wrong (the mesh doesn't stretch), which is why imports
-    // came back visibly squashed.
-    auto innerSizeFor = [&](CanvasShape shape, int boxW, int boxH,
-                            int& iw, int& ih) {
-        if (shape == CanvasShape::Book) {
-            // ~3:4 (200/256). Round to multiples of 4 so BC blocks stay
-            // aligned when this size is used for the ugctex pass too.
-            iw = ((boxW * 200) / 256) & ~3;
-            ih = boxH;
-        } else if (shape == CanvasShape::Tv) {
-            // 16:9 — derived from height so the wider edge sits at the
-            // canvas's full width.
-            iw = boxW;
-            ih = ((boxH * 144) / 256) & ~3;
-        } else {
-            iw = boxW;
-            ih = boxH;
-        }
-        if (iw < 1) iw = 1;
-        if (ih < 1) ih = 1;
-    };
-    auto pasteCentered = [&](const RgbaImage& inner, int outW, int outH,
-                             bool transparentBars) -> RgbaImage {
-        RgbaImage out(outW, outH);
-        if (!transparentBars) {
-            for (int i = 0; i < outW * outH; i++) {
-                out.pixels[i*4+0] = 0;
-                out.pixels[i*4+1] = 0;
-                out.pixels[i*4+2] = 0;
-                out.pixels[i*4+3] = 255;
-            }
-        }
-        int offX = (outW - inner.width) / 2;
-        int offY = (outH - inner.height) / 2;
-        for (int y = 0; y < inner.height; y++) {
-            int dy = y + offY;
-            if (dy < 0 || dy >= outH) continue;
-            int copyW = std::min(inner.width, outW - offX);
-            if (copyW <= 0) continue;
-            memcpy(out.pixels.data() + (dy * outW + std::max(0, offX)) * 4,
-                   inner.pixels.data() + (y * inner.width + std::max(0, -offX)) * 4,
-                   (size_t)copyW * 4);
-        }
-        return out;
-    };
-
     // ── Canvas ──
     if (opts.writeCanvas) {
         // Upstream ltd-save-editor's encoder writes every UGC canvas as
         // 256×256 regardless of mesh type (see codec.ts:258); we match
-        // that. For Book / TV the source is fit-resized into an inner
-        // book/TV-shaped rectangle and pasted centered into 256×256, with
-        // the rest of the buffer left as opaque-black bars.
+        // that. For Book / TV the picture goes into the book/TV-shaped
+        // cut-out with opaque black bars around (FitForTexture).
         const int cW = 256, cH = 256;
-        int innerW, innerH;
-        innerSizeFor(opts.canvasShape, cW, cH, innerW, innerH);
-        RgbaImage ci;
-        if (innerW == cW && innerH == cH) {
-            // Square — preserve the existing fit-mode behaviour.
-            ci = (src.width != cW || src.height != cH)
-                 ? ResizeWithFit(src, cW, cH, opts.fitMode, opts.matte)
-                 : src;
-        } else {
-            // Book / TV — stretch the source to exactly fill the inner
-            // rect, then pillarbox / letterbox the result. The user
-            // explicitly wants the image to fill the book / TV cutout
-            // (cropping it would lose content), so we override the fit
-            // mode to Fill here regardless of the canvas matte preset.
-            RgbaImage inner = ResizeWithFit(src, innerW, innerH,
-                                            FitMode::Fill, opts.matte);
-            ci = pasteCentered(inner, cW, cH, /*transparentBars=*/false);
-        }
+        RgbaImage ci = FitForTexture(src, cW, cH, opts, true);
         auto rgba = ci.pixels;
         ThresholdAlpha(rgba);
         ConvertSrgbToLinear(rgba);
@@ -1434,29 +1524,14 @@ std::string ImportRgbaImage(const RgbaImage& src, const ImportOptions& opts) {
     }
 
     // ── Ugctex ──
-    // BC1/BC3 encoders now take sRGB-u8 directly (they handle sRGB↔linear
+    // BC1/BC3 encoders take sRGB-u8 directly (they handle sRGB↔linear
     // conversion themselves with float precision). Only the canvas, which is
     // stored as linear RGBA8 on disk, needs the pre-linearization step.
     {
         int uW=layout.Width, uH=layout.Height;
-        // Same letterbox/pillarbox treatment as the canvas — the ugctex
-        // sits on the same mesh and gets rendered at distance, so it
-        // needs to show the same aspect with the same black bars.
-        int innerW, innerH;
-        innerSizeFor(opts.canvasShape, uW, uH, innerW, innerH);
-        RgbaImage ui;
-        if (innerW == uW && innerH == uH) {
-            ui = (src.width != uW || src.height != uH)
-                 ? ResizeWithFit(src, uW, uH, opts.fitMode, opts.matte)
-                 : src;
-        } else {
-            // Same Fill override as the canvas pass above — keeps the
-            // ugctex (used at distance) visually consistent with the
-            // canvas (used at close range).
-            RgbaImage inner = ResizeWithFit(src, innerW, innerH,
-                                            FitMode::Fill, opts.matte);
-            ui = pasteCentered(inner, uW, uH, /*transparentBars=*/false);
-        }
+        // Same bars as the canvas: the ugctex sits on the same mesh and is
+        // drawn at a distance, so it needs the same aspect.
+        RgbaImage ui = FitForTexture(src, uW, uH, opts, true);
         auto rgba = ui.pixels;
         ThresholdAlpha(rgba);
 
@@ -1474,19 +1549,134 @@ std::string ImportRgbaImage(const RgbaImage& src, const ImportOptions& opts) {
     // ── Thumb ──
     if (opts.writeThumb) {
         const int tW=256, tH=256;
-        RgbaImage ti = (src.width!=tW||src.height!=tH)
-            ? ResizeWithFit(src, tW, tH, opts.fitMode, opts.matte)
-            : src;
+        RgbaImage ti = FitForTexture(src, tW, tH, opts, false);
         auto rgba = ti.pixels;
         auto blocks = Bc3Encode(rgba, tW, tH);
         auto sw     = SwizzleBlockLinear(blocks, tW/4, tH/4, 16, ThumbBlockHeight);
         auto comp   = ZstdCompress(sw);
-        std::string thumbDest = opts.thumbPath.empty()
-            ? opts.destStem + "_Thumb.ugctex.zs"
-            : opts.thumbPath;
-        if (!WriteFile(thumbDest, comp, err)) return err;
+        if (!WriteThumb(opts.destStem, opts.thumbPath, comp, err)) return err;
     }
 
+    return "";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Designs as the game stores them (zipped or loose)
+// ─────────────────────────────────────────────────────────────────────────────
+
+static uint32_t Rd16(const uint8_t* p) { return (uint32_t)p[0] | ((uint32_t)p[1] << 8); }
+static uint32_t Rd32(const uint8_t* p) { return Rd16(p) | (Rd16(p + 2) << 16); }
+
+std::string ReadZip(const std::vector<uint8_t>& zip, std::vector<std::pair<std::string, std::vector<uint8_t>>>& out) {
+    const size_t n = zip.size();
+    if (n < 22) return "Not a zip file";
+    // The end of the central directory, searched from the end (comment <= 64 KB).
+    size_t eocd = std::string::npos;
+    for (size_t i = n - 22 + 1; i-- > 0 && n - i <= 22 + 65535;)
+        if (Rd32(&zip[i]) == 0x06054b50u) { eocd = i; break; }
+    if (eocd == std::string::npos) return "Not a zip file";
+    const uint32_t count = Rd16(&zip[eocd + 10]), cdSize = Rd32(&zip[eocd + 12]), cdOff = Rd32(&zip[eocd + 16]);
+    if ((size_t)cdOff + cdSize > n || count > 256) return "Damaged zip file";
+    size_t p = cdOff;
+    for (uint32_t k = 0; k < count; k++) {
+        if (p + 46 > n || Rd32(&zip[p]) != 0x02014b50u) return "Damaged zip file";
+        const uint32_t method = Rd16(&zip[p + 10]), csize = Rd32(&zip[p + 20]), usize = Rd32(&zip[p + 24]);
+        const uint32_t nameLen = Rd16(&zip[p + 28]), extraLen = Rd16(&zip[p + 30]), commentLen = Rd16(&zip[p + 32]);
+        const uint32_t local = Rd32(&zip[p + 42]);
+        if (p + 46 + nameLen > n) return "Damaged zip file";
+        const std::string name((const char*)&zip[p + 46], nameLen);
+        p += 46 + nameLen + extraLen + commentLen;
+        if (name.empty() || name.back() == '/') continue;                 // a folder
+        if (usize > 16u * 1024 * 1024) continue;                           // nothing a design holds
+        if ((size_t)local + 30 > n || Rd32(&zip[local]) != 0x04034b50u) return "Damaged zip file";
+        const size_t data = (size_t)local + 30 + Rd16(&zip[local + 26]) + Rd16(&zip[local + 28]);
+        if (data + csize > n) return "Damaged zip file";
+        std::vector<uint8_t> bytes;
+        if (method == 0) bytes.assign(zip.begin() + data, zip.begin() + data + csize);
+        else if (method == 8) {
+            bytes.resize(usize);
+            z_stream zs{};
+            if (inflateInit2(&zs, -MAX_WBITS) != Z_OK) return "Cannot unpack the zip file";
+            zs.next_in = (Bytef*)&zip[data]; zs.avail_in = csize;
+            zs.next_out = bytes.data(); zs.avail_out = usize;
+            const int rc = inflate(&zs, Z_FINISH);
+            const bool ok = rc == Z_STREAM_END && zs.total_out == usize;
+            inflateEnd(&zs);
+            if (!ok) return "Cannot unpack " + name;
+        } else continue;                                                    // other methods: skipped
+        out.push_back({ name, std::move(bytes) });
+    }
+    return "";
+}
+
+bool FindDesign(const std::vector<std::pair<std::string, std::vector<uint8_t>>>& files, DesignFiles& d) {
+    auto base = [](const std::string& s) { const size_t q = s.find_last_of("/\\"); return q == std::string::npos ? s : s.substr(q + 1); };
+    auto ends = [](const std::string& s, const char* suf) { const size_t m = strlen(suf); return s.size() > m && s.compare(s.size() - m, m, suf) == 0; };
+    // The stem of the first ugctex that is not a thumb.
+    for (const auto& f : files) {
+        const std::string b = base(f.first);
+        if (ends(b, ".ugctex.zs") && !ends(b, "_Thumb.ugctex.zs")) { d.stem = b.substr(0, b.size() - 10); d.ugctex = f.second; break; }
+    }
+    if (d.stem.empty()) return false;
+    for (const auto& f : files) {
+        const std::string b = base(f.first);
+        if (b == d.stem + ".canvas.zs") d.canvas = f.second;
+        else if (b == d.stem + "_Thumb.ugctex.zs") d.thumb = f.second;
+    }
+    return true;
+}
+
+std::string ImportDesign(const DesignFiles& d, const std::string& destStem, const std::string& originalUgctexPath,
+                         const std::string& thumbPath, bool writeCanvas) {
+    std::string err;
+    auto unz = [](const std::vector<uint8_t>& z) { return z.empty() ? std::vector<uint8_t>() : ZstdDecompressBuffer(z.data(), z.size()); };
+    // The ugctex: a layout the game knows, the same as the slot's.
+    const std::vector<uint8_t> uraw = unz(d.ugctex);
+    UgctexLayout lay{};
+    if (uraw.empty() || !DetectUgctexLayoutInner(uraw.size(), lay, err)) return "The design's .ugctex.zs is damaged";
+    if (!originalUgctexPath.empty()) {
+        const UgctexLayout slot = LayoutOfFile(originalUgctexPath);
+        if (slot.Width != lay.Width || slot.Height != lay.Height || slot.Format != lay.Format)
+            return "This design is " + std::to_string(lay.Width) + "x" + std::to_string(lay.Height) + ", this slot takes " +
+                   std::to_string(slot.Width) + "x" + std::to_string(slot.Height) + ": it is for another kind of item";
+    }
+    // The canvas: square, or 256 wide.
+    if (!d.canvas.empty()) {
+        const std::vector<uint8_t> c = unz(d.canvas);
+        const size_t px = c.size() / 4;
+        const size_t side = (size_t)std::sqrt((double)px);
+        if (c.empty() || c.size() % 4 || !(side * side == px || px % 256 == 0)) return "The design's .canvas.zs is damaged";
+    }
+    if (!d.thumb.empty()) {
+        const std::vector<uint8_t> t = unz(d.thumb);
+        const size_t blocks = t.size() / 16, gs = (size_t)std::sqrt((double)blocks);
+        if (t.empty() || t.size() % 16 || gs * gs != blocks) return "The design's _Thumb.ugctex.zs is damaged";
+    }
+    // What is missing comes from the ugctex.
+    RgbaImage pic;
+    if ((writeCanvas && d.canvas.empty()) || (!thumbPath.empty() && d.thumb.empty())) {
+        if (!DecodeUgctex(uraw, pic, false).empty() || pic.width <= 0) return "The design's .ugctex.zs is damaged";
+    }
+    if (!WriteFile(destStem + ".ugctex.zs", d.ugctex, err)) return err;
+    if (writeCanvas) {
+        if (!d.canvas.empty()) { if (!WriteFile(destStem + ".canvas.zs", d.canvas, err)) return err; }
+        else {
+            ImportOptions o;
+            o.fitMode = FitMode::Fill;
+            auto rgba = FitForTexture(pic, 256, 256, o, false).pixels;
+            ConvertSrgbToLinear(rgba);
+            if (!WriteFile(destStem + ".canvas.zs", ZstdCompress(SwizzleBlockLinear(rgba, 256, 256, 4, DefaultBlockHeight)), err)) return err;
+        }
+    }
+    if (!thumbPath.empty()) {
+        if (!d.thumb.empty()) { if (!WriteThumb(destStem, thumbPath, d.thumb, err)) return err; }
+        else {
+            ImportOptions o;
+            o.fitMode = FitMode::Fill;
+            const auto blocks = Bc3Encode(FitForTexture(pic, 256, 256, o, false).pixels, 256, 256);
+            if (!WriteThumb(destStem, thumbPath, ZstdCompress(SwizzleBlockLinear(blocks, 64, 64, 16, ThumbBlockHeight)), err)) return err;
+        }
+    }
     return "";
 }
 

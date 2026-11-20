@@ -44,6 +44,20 @@ void ClearPendingMiiSavReload();
 bool HasPendingMapSavReload();
 void ClearPendingMapSavReload();
 
+// Set when the WebUI added, replaced or removed a UGC item (textures on disk
+// and/or its entry in Player.sav), so the main thread rescans the list.
+bool HasPendingUgcRescan();
+void ClearPendingUgcRescan();
+
+// ── "Write your pending edits first" handshake ──────────────────────────────
+// Before the server thread rewrites a .sav directly, it asks the main thread to
+// write any edits the on-console editor still holds in memory, and waits. The
+// main loop polls HasFlushRequest() every frame, writes its dirty saves, and
+// answers with FinishFlush("") or FinishFlush(error). Afterwards the usual
+// pending-reload flags tell it which files to load back in.
+bool HasFlushRequest();
+void FinishFlush(const std::string& err);
+
 // ── Import job (queued by server thread, executed by main thread) ───────────
 // The server thread must NOT call IMG_Load — it's not thread-safe on Atmosphere.
 // Instead it writes the upload to a temp file and queues an ImportJob.
@@ -52,7 +66,13 @@ void ClearPendingMapSavReload();
 struct ImportJob {
     TextureProcessor::ImportOptions opts;
     std::string tmpPath; // temp file to delete after import
+    // The WebUI's import sheet: only read the picture (into the server's
+    // copy, SetImportSource) and keep the file for the import that follows.
+    bool decodeOnly = false;
 };
+
+// The picture the WebUI's import sheet is looking at, read by the main thread.
+void SetImportSource(RgbaImage&& img);
 
 // Returns true when the server thread has queued an import for the main thread.
 bool HasPendingImport();
@@ -86,5 +106,7 @@ void DrainLog(std::vector<LogEntry>& out);
 
 // Sync the save-warning ack state so the WebUI can skip showing the warning.
 void SetSaveWarnAcked(bool v);
+// The console's theme code ("classic", ...), reported by /api/config.
+void SetUiTheme(const std::string& code);
 
 } // namespace HttpServer

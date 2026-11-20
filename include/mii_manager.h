@@ -25,6 +25,12 @@ struct MiiSlot {
 
 // List all filled Mii slots. Returns empty vector on error.
 std::vector<MiiSlot> ListMiis();
+// The same from a Mii.sav already in memory (serialized), e.g. after an undo.
+bool ListMiisInBytes(const std::vector<uint8_t>& miisav, std::vector<MiiSlot>& out);
+
+// How many Miis live in the Mii.sav at `miiSavPath` (a backup's, say).
+// -1 if it cannot be read or is not a Mii.sav.
+int CountMiisIn(const std::string& miiSavPath);
 
 // Export Mii at slot (1-based) to a .ltd file at destPath.
 // Returns empty string on success, error message on failure.
@@ -33,6 +39,17 @@ std::string ExportMii(int slot, const std::string& destPath);
 // Import a .ltd file into slot (1-based).
 // Returns empty string on success, error message on failure.
 std::string ImportMii(int slot, const std::string& ltdPath);
+
+// Face paint slot (0-69) worn by the Mii in `slot` (1-based), read from the
+// Mii.sav on disk. -1 if it has none or the save is unreadable.
+int FacepaintIndexOf(int slot);
+
+// Free face paint slot `id` (mark it unused in Player.sav and delete its two
+// texture files), but only if no Mii slot in the Mii.sav on disk still refers
+// to it. Call it after a Mii that wore the paint has been deleted AND that
+// change has been written to Mii.sav. Returns "" on success or when there was
+// nothing to do, otherwise an error string.
+std::string ReleaseFacepaintIfUnreferenced(int id);
 
 // Load all UGC slot names from Player.sav into an internal cache.
 // Call this after mounting the save / after each UGC scan.
@@ -74,11 +91,13 @@ std::string CreateBlankMii(int slot);
 // Returns -1 if all 100 slots are full.
 int FirstEmptyUgcSlot(int ugcKind);
 
-// Generate a white 256×256 placeholder UGC at slot `slot` of kind `ugcKind`,
-// writing the {stem}.canvas.zs / {stem}.ugctex.zs / {stem}.thumb files via
-// our normal texture_processor pipeline. Also sets the UGC name. Returns ""
-// on success or an error string.
-std::string CreateBlankUgc(int ugcKind, int slot);
+// Create a new UGC item at slot `slot` of kind `ugcKind`: its name and the
+// enable / texture-source / id fields in Player.sav, plus a white placeholder
+// texture ({stem}.canvas.zs, {stem}.ugctex.zs and the thumbnail) written by the
+// normal texture pipeline. `canvasShape`: 0 = square 256x256, 1 = book
+// (256x512), 2 = TV (256x128). If the textures cannot be written the slot is
+// cleared again. Returns "" on success or an error string.
+std::string CreateBlankUgc(int ugcKind, int slot, int canvasShape = 0);
 
 // Empty out the slot: clears the name in Player.sav (so the game shows
 // the slot as blank) and removes the on-disk .canvas.zs, .ugctex.zs and

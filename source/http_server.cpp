@@ -13,6 +13,15 @@
 #include "habits_data.h"
 #include "wishes_data.h"
 #include "island_generator.h"
+#include "updater.h"   // APP_VERSION
+#include "map_data.h"
+#include "map_art_data.h"
+#include "share_client.h"
+#include "mii_art.h"
+#include "mii_pack.h"
+#include "image_search.h"
+#include "game_data.h"
+#include "music.h"
 
 // Pre-gzipped WebUI HTML/JS bundle. The source-of-truth lives at
 // data/webui.html; the Makefile gzips it at build time, devkitPro's bin2s
@@ -52,7 +61,14 @@ static bool        s_pendingMiiRefresh      = false;
 static bool        s_pendingPlayerSavReload = false;
 static bool        s_pendingMiiSavReload    = false;
 static bool        s_pendingMapSavReload    = false;
+static bool        s_pendingUgcRescan       = false;
 static bool        s_saveWarnAcked          = false;
+static std::string s_uiTheme                = "classic";
+static bool        s_threadStarted          = false;   // s_thread holds a live handle
+// "Write your pending edits first" handshake with the main thread:
+// 0 = idle, 1 = requested by the server thread, 2 = done (s_flushError set).
+static int         s_flushState             = 0;
+static std::string s_flushError;
 static int         s_port          = 8080;
 static std::string s_ugcPath;
 static Mutex       s_mutex;
@@ -61,6 +77,15 @@ static constexpr int LOG_RING_SIZE = 64;
 static HttpServer::LogEntry s_logRing[LOG_RING_SIZE];
 static int   s_logWrite = 0, s_logRead = 0;
 static Mutex s_logMutex;
+
+// debug.log is appended to on every request, so it is rolled over once it
+// passes 256 KB (checked when the server starts). It used to grow for ever.
+static void RotateDebugLog() {
+    struct stat st{};
+    if (stat("/switch/TomoToolNX/debug.log", &st) != 0 || st.st_size < 256 * 1024) return;
+    remove("/switch/TomoToolNX/debug.old.log");
+    rename("/switch/TomoToolNX/debug.log", "/switch/TomoToolNX/debug.old.log");
+}
 
 static void SrvLog(const std::string& text, bool isError = false) {
     FILE* f = fopen("/switch/TomoToolNX/debug.log", "a");
@@ -85,29 +110,96 @@ static u64                   s_lastConnectTick = 0;
 
 static void SendAll(int fd,const char* data,size_t len){size_t sent=0;while(sent<len){ssize_t n=send(fd,data+sent,len-sent,0);if(n>0)sent+=n;else if(n<0&&errno==EAGAIN)svcSleepThread(1000000ULL);else break;}}
 static void SendStr(int fd,const std::string& s){SendAll(fd,s.c_str(),s.size());}
-static void Send200(int fd,const std::string& ct,const std::string& body){std::string h="HTTP/1.1 200 OK\r\nContent-Type: "+ct+"\r\nContent-Length: "+std::to_string(body.size())+"\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n";SendStr(fd,h);SendStr(fd,body);}
-static void Send200Bin(int fd,const std::string& ct,const std::vector<uint8_t>& body,const std::string& disp=""){std::string h="HTTP/1.1 200 OK\r\nContent-Type: "+ct+"\r\nContent-Length: "+std::to_string(body.size())+"\r\nAccess-Control-Allow-Origin: *\r\n";if(!disp.empty())h+="Content-Disposition: "+disp+"\r\n";h+="Connection: close\r\n\r\n";SendStr(fd,h);SendAll(fd,(const char*)body.data(),body.size());}
-static void Send200Gzip(int fd,const std::string& ct,const unsigned char* data,size_t len){std::string h="HTTP/1.1 200 OK\r\nContent-Type: "+ct+"\r\nContent-Length: "+std::to_string(len)+"\r\nContent-Encoding: gzip\r\nVary: Accept-Encoding\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n";SendStr(fd,h);SendAll(fd,(const char*)data,len);}
+// JSON string escaping for anything that did not come from a literal: names typed
+// on the console, file names, error text. Quotes and backslashes were handled
+// before; control characters were not, and one of those makes the whole
+// response unparseable in the browser.
+static std::string JsonEscape(const std::string& in){
+    std::string out;out.reserve(in.size()+8);
+    for(unsigned char c:in){
+        switch(c){
+            case '"': out+="\\\"";break;
+            case '\\':out+="\\\\";break;
+            case '\n':out+="\\n";break;
+            case '\r':out+="\\r";break;
+            case '\t':out+="\\t";break;
+            default:
+                if(c<0x20){char b[8];snprintf(b,sizeof(b),"\\u%04x",c);out+=b;}
+                else out+=(char)c;
+        }
+    }
+    return out;
+}
+// No Access-Control-Allow-Origin header on purpose. The WebUI is served from
+// this same origin and does not need one, and a wildcard let any web page open
+// on the same network read the save through the visitor's browser.
+static void SendStatus(int fd,const char* status,const std::string& ct,const std::string& body){std::string h=std::string("HTTP/1.1 ")+status+"\r\nContent-Type: "+ct+"\r\nContent-Length: "+std::to_string(body.size())+"\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";SendStr(fd,h);SendStr(fd,body);}
+static void Send200(int fd,const std::string& ct,const std::string& body){SendStatus(fd,"200 OK",ct,body);}
+static void SendJsonError(int fd,const char* status,const std::string& msg){SendStatus(fd,status,"application/json","{\"ok\":false,\"error\":\""+JsonEscape(msg)+"\"}");}
+static void Send200Bin(int fd,const std::string& ct,const std::vector<uint8_t>& body,const std::string& disp=""){std::string h="HTTP/1.1 200 OK\r\nContent-Type: "+ct+"\r\nContent-Length: "+std::to_string(body.size())+"\r\nCache-Control: no-store\r\n";if(!disp.empty())h+="Content-Disposition: "+disp+"\r\n";h+="Connection: close\r\n\r\n";SendStr(fd,h);SendAll(fd,(const char*)body.data(),body.size());}
+// no-cache (revalidate every time) so a browser never keeps showing the page of
+// a previous TomoToolNX version after the .nro was updated.
+static void Send200Gzip(int fd,const std::string& ct,const unsigned char* data,size_t len){std::string h="HTTP/1.1 200 OK\r\nContent-Type: "+ct+"\r\nContent-Length: "+std::to_string(len)+"\r\nContent-Encoding: gzip\r\nVary: Accept-Encoding\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";SendStr(fd,h);SendAll(fd,(const char*)data,len);}
 static void Send404(int fd){SendStr(fd,"HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nNot found");}
 static void Send302(int fd,const std::string& location){std::string h="HTTP/1.1 302 Found\r\nLocation: "+location+"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";SendStr(fd,h);}
-static void Send500(int fd,const std::string& msg){std::string esc;for(char c:msg){if(c=='"')esc+="\\\"";else if(c=='\\')esc+="\\\\";else esc+=c;}std::string body="{\"ok\":false,\"error\":\""+esc+"\"}";std::string h="HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nContent-Length: "+std::to_string(body.size())+"\r\nConnection: close\r\n\r\n";SendStr(fd,h);SendStr(fd,body);}
+static void Send500(int fd,const std::string& msg){SendJsonError(fd,"500 Internal Server Error",msg);}
 
-struct Request{std::string method,path,query,body,contentType;size_t contentLength=0;};
+struct Request{std::string method,path,query,body,contentType;size_t contentLength=0;bool fromWebUi=false;};
 static std::string UrlDecode(const std::string& s){std::string out;for(size_t i=0;i<s.size();i++){if(s[i]=='%'&&i+2<s.size()){int v=0;sscanf(s.c_str()+i+1,"%2x",&v);out+=(char)v;i+=2;}else if(s[i]=='+')out+=' ';else out+=s[i];}return out;}
-static std::string GetQueryParam(const std::string& q,const std::string& key){std::string search=key+"=";size_t pos=q.find(search);if(pos==std::string::npos)return"";pos+=search.size();size_t end=q.find('&',pos);return UrlDecode(end==std::string::npos?q.substr(pos):q.substr(pos,end-pos));}
+// Looks the key up as a whole parameter name. A plain substring search for
+// "id=" also matched inside "uid=" or "mid=" and returned that value instead.
+static std::string GetQueryParam(const std::string& q,const std::string& key){
+    size_t pos=0;
+    while(pos<=q.size()){
+        size_t end=q.find('&',pos);if(end==std::string::npos)end=q.size();
+        size_t eq=q.find('=',pos);
+        if(eq!=std::string::npos&&eq<end&&q.compare(pos,eq-pos,key)==0)return UrlDecode(q.substr(eq+1,end-eq-1));
+        pos=end+1;
+    }
+    return "";
+}
 
-static bool ReadRequest(int fd,Request& req){
-    std::string raw;char buf[4096];
-    while(true){ssize_t n=recv(fd,buf,sizeof(buf)-1,0);if(n<=0)return false;raw.append(buf,n);if(raw.find("\r\n\r\n")!=std::string::npos)break;if(raw.size()>65536)return false;}
-    size_t hdrEnd=raw.find("\r\n\r\n");std::string headers=raw.substr(0,hdrEnd);req.body=raw.substr(hdrEnd+4);
-    size_t sp1=headers.find(' '),sp2=headers.find(' ',sp1+1);if(sp1==std::string::npos||sp2==std::string::npos)return false;
+// Largest request body accepted. The biggest real upload is Mii.sav (about
+// 3 MB); a photo straight off a phone camera can reach 10-20 MB.
+static const size_t kMaxHeaderBytes = 64 * 1024;
+static const size_t kMaxBodyBytes   = 48 * 1024 * 1024;
+
+enum class ReadResult { Ok, Drop, TooLarge, Incomplete };
+
+static ReadResult ReadRequest(int fd,Request& req){
+    std::string raw;char buf[8192];size_t hdrEnd=std::string::npos;
+    while(true){
+        ssize_t n=recv(fd,buf,sizeof(buf),0);
+        if(n<=0)return ReadResult::Drop;
+        raw.append(buf,(size_t)n);
+        hdrEnd=raw.find("\r\n\r\n");
+        if(hdrEnd!=std::string::npos)break;
+        if(raw.size()>kMaxHeaderBytes)return ReadResult::Drop;
+    }
+    std::string headers=raw.substr(0,hdrEnd);
+    size_t sp1=headers.find(' '),sp2=headers.find(' ',sp1+1);if(sp1==std::string::npos||sp2==std::string::npos)return ReadResult::Drop;
     req.method=headers.substr(0,sp1);std::string pf=headers.substr(sp1+1,sp2-sp1-1);size_t qp=pf.find('?');
     if(qp!=std::string::npos){req.path=pf.substr(0,qp);req.query=pf.substr(qp+1);}else req.path=pf;
-    auto findHdr=[&](const std::string& name){std::string lo=name;for(auto& c:lo)c=tolower(c);size_t pos=0;while((pos=headers.find('\n',pos))!=std::string::npos){pos++;std::string line=headers.substr(pos,headers.find('\n',pos)-pos);std::string ll=line;for(auto& c:ll)c=tolower(c);if(ll.find(lo+":")!=0)continue;size_t vp=line.find(':')+1;while(vp<line.size()&&line[vp]==' ')vp++;std::string val=line.substr(vp);while(!val.empty()&&(val.back()=='\r'||val.back()=='\n'))val.pop_back();return val;}return std::string{};};
-    std::string cl=findHdr("content-length");if(!cl.empty())req.contentLength=(size_t)atoll(cl.c_str());
+    auto findHdr=[&](const std::string& name,bool* present=nullptr){std::string lo=name;for(auto& c:lo)c=tolower(c);size_t pos=0;while((pos=headers.find('\n',pos))!=std::string::npos){pos++;std::string line=headers.substr(pos,headers.find('\n',pos)-pos);std::string ll=line;for(auto& c:ll)c=tolower(c);if(ll.find(lo+":")!=0)continue;if(present)*present=true;size_t vp=line.find(':')+1;while(vp<line.size()&&line[vp]==' ')vp++;std::string val=line.substr(vp);while(!val.empty()&&(val.back()=='\r'||val.back()=='\n'))val.pop_back();return val;}return std::string{};};
+    std::string cl=findHdr("content-length");
+    if(!cl.empty()){
+        char* end=nullptr;unsigned long long v=strtoull(cl.c_str(),&end,10);
+        if(end==cl.c_str()||cl[0]=='-'||v>kMaxBodyBytes)return ReadResult::TooLarge;
+        req.contentLength=(size_t)v;
+    }
     req.contentType=findHdr("content-type");
-    while(req.body.size()<req.contentLength){ssize_t n=recv(fd,buf,std::min(sizeof(buf)-1,req.contentLength-req.body.size()),0);if(n<=0)break;req.body.append(buf,n);}
-    return true;
+    findHdr("x-tomotoolnx",&req.fromWebUi);
+    req.body=raw.substr(hdrEnd+4);
+    if(req.contentLength>req.body.size())req.body.reserve(req.contentLength);
+    // The whole body or nothing. This loop used to stop quietly when the
+    // connection dropped and hand the handlers whatever had arrived, so a WiFi
+    // hiccup in the middle of a save upload wrote a cut-off .sav over the real one.
+    while(req.body.size()<req.contentLength){
+        ssize_t n=recv(fd,buf,std::min(sizeof(buf),req.contentLength-req.body.size()),0);
+        if(n<=0)return ReadResult::Incomplete;
+        req.body.append(buf,(size_t)n);
+    }
+    return ReadResult::Ok;
 }
 
 struct FormField{std::string name,filename,data;};
@@ -138,12 +230,60 @@ static std::vector<uint8_t> EncodePng(const RgbaImage& img){
     return out;
 }
 
+// ── Working with the console's own editor ───────────────────────────────────
+// The on-console editor keeps its Player.sav / Mii.sav / Map.sav edits in memory
+// until the user saves. Every handler below that rewrites one of those files
+// calls this first: the main thread writes whatever it has pending to the
+// mounted save, we change the file on top of that, and the pending-reload flags
+// then make the main thread load the result. Without this, an edit made here
+// was silently undone by the console's next save (it wrote its older in-memory
+// copy back), or the console's unsaved edits vanished when it reloaded.
+// Returns false after having answered the request with an error.
+static bool SyncConsoleEdits(int fd){
+    mutexLock(&s_mutex);s_flushState=1;s_flushError.clear();mutexUnlock(&s_mutex);
+    bool done=false;std::string err;
+    for(int i=0;i<8000&&s_running;i++){
+        svcSleepThread(1000000ULL);
+        mutexLock(&s_mutex);if(s_flushState==2){done=true;err=s_flushError;}mutexUnlock(&s_mutex);
+        if(done)break;
+    }
+    mutexLock(&s_mutex);s_flushState=0;mutexUnlock(&s_mutex);
+    if(!done){
+        SrvLog("Sync: console did not answer in time",true);
+        SendJsonError(fd,"503 Service Unavailable","The console is busy. Close any keyboard or dialog on the Switch, then try again.");
+        return false;
+    }
+    if(!err.empty()){
+        SrvLog("Sync: console could not write its edits: "+err,true);
+        Send500(fd,"The console could not write its own pending edits first: "+err);
+        return false;
+    }
+    return true;
+}
+
+static bool ReadWholeFile(const char* path,std::vector<uint8_t>& out){
+    out.clear();FILE* f=fopen(path,"rb");if(!f)return false;
+    fseek(f,0,SEEK_END);long len=ftell(f);fseek(f,0,SEEK_SET);
+    if(len<0){fclose(f);return false;}
+    out.resize((size_t)len);
+    size_t n=out.empty()?0:fread(out.data(),1,out.size(),f);
+    fclose(f);return n==out.size();
+}
+static bool WriteWholeFile(const char* path,const void* data,size_t len){
+    FILE* f=fopen(path,"wb");if(!f)return false;
+    bool ok=len==0||fwrite(data,1,len,f)==len;
+    if(fclose(f)!=0)ok=false;
+    if(!ok)return false;
+    struct stat st{};
+    return stat(path,&st)==0&&(size_t)st.st_size==len;
+}
+
 static void HandleList(int fd){
     MiiManager::LoadUgcNames();
     auto entries=UgcScanner::Scan(s_ugcPath);
     SrvLog("WebUI: list ("+std::to_string(entries.size())+" textures)");
     std::string json="{\"entries\":[";
-    for(size_t i=0;i<entries.size();i++){if(i)json+=",";std::string nm=MiiManager::GetUgcName(entries[i].stem);std::string ne;for(char c:nm){if(c=='"')ne+="\\\"";else if(c=='\\')ne+="\\\\";else ne+=c;}json+="{\"stem\":\""+entries[i].stem+"\",\"name\":\""+ne+"\",\"hasThumb\":"+(entries[i].hasThumb()?"true":"false")+",\"hasCanvas\":"+(entries[i].hasCanvas()?"true":"false")+"}";}
+    for(size_t i=0;i<entries.size();i++){if(i)json+=",";std::string ne=JsonEscape(MiiManager::GetUgcName(entries[i].stem));json+="{\"stem\":\""+entries[i].stem+"\",\"name\":\""+ne+"\",\"hasThumb\":"+(entries[i].hasThumb()?"true":"false")+",\"hasCanvas\":"+(entries[i].hasCanvas()?"true":"false")+"}";}
     json+="]}";Send200(fd,"application/json",json);
 }
 static void HandlePreview(int fd,const std::string& query){
@@ -155,6 +295,230 @@ static void HandlePreview(int fd,const std::string& query){
     auto png=EncodePng(img);if(png.empty()){Send500(fd,"PNG encode failed");return;}
     Send200Bin(fd,"image/png",png);
 }
+// Small pictures are encoded in memory (the preview goes through a file).
+static std::vector<uint8_t> EncodePngMem(const RgbaImage& img){
+    SDL_Surface* s=SDL_CreateRGBSurfaceFrom((void*)img.pixels.data(),img.width,img.height,32,img.width*4,0x000000FF,0x0000FF00,0x00FF0000,0xFF000000);
+    if(!s)return{};
+    std::vector<uint8_t> buf((size_t)img.width*img.height*4+(size_t)img.height+65536);
+    std::vector<uint8_t> out;
+    if(SDL_RWops* rw=SDL_RWFromMem(buf.data(),(int)buf.size())){
+        if(IMG_SavePNG_RW(s,rw,0)==0){const Sint64 n=SDL_RWtell(rw);if(n>0&&(size_t)n<=buf.size())out.assign(buf.begin(),buf.begin()+(size_t)n);}
+        SDL_RWclose(rw);
+    }
+    SDL_FreeSurface(s);
+    return out.empty()?EncodePng(img):out;
+}
+
+// A texture at most 128 px across, for the WebUI's grid: its own thumbnail
+// when it has one, else the texture halved until it fits. The stem must be a
+// plain name (letters and digits), so no other file can be asked for.
+static void HandleThumb(int fd,const std::string& query){
+    const std::string stem=GetQueryParam(query,"stem");
+    bool ok=!stem.empty()&&stem.size()<48;
+    for(char c:stem)if(!((c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')))ok=false;
+    if(!ok){Send404(fd);return;}
+    const std::string base=s_ugcPath+"/"+stem;
+    struct stat st;
+    if(stat((base+".ugctex.zs").c_str(),&st)!=0){Send404(fd);return;}
+    RgbaImage img;std::string err="no thumb";
+    for(const char* suf:{"_Thumb.ugctex.zs","_Thumb_ugctex.zs"})
+        if(stat((base+suf).c_str(),&st)==0){img=RgbaImage();err=TextureProcessor::DecodeFile(base+suf,img,false);if(err.empty()&&img.width>0)break;}
+    if(!err.empty()||img.width<=0){img=RgbaImage();err=TextureProcessor::DecodeFile(base+".ugctex.zs",img,false);}
+    if(!err.empty()||img.width<=0){Send500(fd,err.empty()?std::string("empty texture"):err);return;}
+    while(img.width>128||img.height>128){
+        const int nw=std::max(1,img.width/2),nh=std::max(1,img.height/2);
+        std::vector<uint8_t> out((size_t)nw*nh*4);
+        for(int y=0;y<nh;y++)for(int x=0;x<nw;x++)for(int c=0;c<4;c++){
+            const int x0=std::min(img.width-1,x*2),x1=std::min(img.width-1,x*2+1),y0=std::min(img.height-1,y*2),y1=std::min(img.height-1,y*2+1);
+            const int s=img.pixels[((size_t)y0*img.width+x0)*4+c]+img.pixels[((size_t)y0*img.width+x1)*4+c]+img.pixels[((size_t)y1*img.width+x0)*4+c]+img.pixels[((size_t)y1*img.width+x1)*4+c];
+            out[((size_t)y*nw+x)*4+c]=(uint8_t)((s+2)/4);
+        }
+        img.width=nw;img.height=nh;img.pixels.swap(out);
+    }
+    auto png=EncodePngMem(img);if(png.empty()){Send500(fd,"PNG encode failed");return;}
+    Send200Bin(fd,"image/png",png);
+}
+
+// The game's art the app carries (romfs:/gfx), for the WebUI's icons, faces
+// and wallpapers. Plain file names only: nothing outside that folder.
+static void HandleGfx(int fd,const std::string& path){
+    const std::string name=path.size()>5?path.substr(5):std::string();
+    bool ok=!name.empty()&&name.size()<=48&&name.find("..")==std::string::npos;
+    for(char c:name)if(!((c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='_'||c=='.'))ok=false;
+    const size_t dot=name.rfind('.');
+    const std::string ext=dot==std::string::npos?std::string():name.substr(dot);
+    if(!ok||(ext!=".png"&&ext!=".jpg")){Send404(fd);return;}
+    FILE* f=fopen(("romfs:/gfx/"+name).c_str(),"rb");
+    if(!f){Send404(fd);return;}
+    std::vector<uint8_t> data;
+    fseek(f,0,SEEK_END);const long sz=ftell(f);fseek(f,0,SEEK_SET);
+    if(sz>0&&sz<4*1024*1024){data.resize((size_t)sz);if(fread(data.data(),1,data.size(),f)!=data.size())data.clear();}
+    fclose(f);
+    if(data.empty()){Send404(fd);return;}
+    // Cached for an hour: the pictures only change with the app.
+    std::string h="HTTP/1.1 200 OK\r\nContent-Type: "+std::string(ext==".png"?"image/png":"image/jpeg")+"\r\nContent-Length: "+std::to_string(data.size())+
+                  "\r\nCache-Control: public, max-age=3600\r\nConnection: close\r\n\r\n";
+    SendStr(fd,h);SendAll(fd,(const char*)data.data(),data.size());
+}
+
+// GET /music/<file>.opus: one of the pieces the app carries (romfs/music,
+// tools/assets/build_music.py), for the WebUI to play as well; /music/index.txt
+// says each one's length, loop points and loudness.
+static void HandleMusic(int fd,const std::string& path){
+    std::string name=path.size()>7?path.substr(7):std::string();
+    const bool index=name=="index.txt";
+    if(!index){
+        if(name.size()>5&&name.compare(name.size()-5,5,".opus")==0)name.resize(name.size()-5);
+        bool known=false;
+        for(int i=0;i<Music::kPieceCount&&!known;i++){
+            const Music::Piece& p=Music::kPieces[i];
+            known=name==p.file||(p.alt&&name==p.alt);
+        }
+        if(!known){Send404(fd);return;}
+    }
+    FILE* f=fopen(index?"romfs:/music/index.txt":("romfs:/music/"+name+".opus").c_str(),"rb");
+    if(!f){Send404(fd);return;}
+    std::vector<uint8_t> data;
+    fseek(f,0,SEEK_END);const long sz=ftell(f);fseek(f,0,SEEK_SET);
+    if(sz>0&&sz<16*1024*1024){data.resize((size_t)sz);if(fread(data.data(),1,data.size(),f)!=data.size())data.clear();}
+    fclose(f);
+    if(data.empty()){Send404(fd);return;}
+    // They only change with the app: the browser may keep them.
+    std::string h="HTTP/1.1 200 OK\r\nContent-Type: "+std::string(index?"text/plain; charset=utf-8":"audio/ogg")+"\r\nContent-Length: "+
+                  std::to_string(data.size())+"\r\nCache-Control: public, max-age=86400\r\nConnection: close\r\n\r\n";
+    SendStr(fd,h);SendAll(fd,(const char*)data.data(),data.size());
+}
+
+// GET /mapart/<key>.png: a map object's or ground's picture from the renders
+// the app carries (romfs:/items, tools/assets/build_map_art.py), found by its
+// actor key ("ObjFenceIron_07") or ground ("Floor_Grass"), or a big facility
+// seen from above ("Top_FacilityPark", tools/assets/build_map_tops.py). 404
+// when there is none: the page then asks ltdimages on GitHub.
+static void HandleMapArt(int fd,const std::string& path){
+    const std::string name=path.size()>8?path.substr(8):std::string();
+    bool ok=!name.empty()&&name.size()<=64&&name.find("..")==std::string::npos&&name.size()>4&&name.compare(name.size()-4,4,".png")==0;
+    for(char c:name)if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'||c=='.'))ok=false;
+    if(!ok){Send404(fd);return;}
+    const std::string key=name.substr(0,name.size()-4);
+    std::string asset;
+    if(key.compare(0,6,"Floor_")==0||key.compare(0,4,"Top_")==0)asset=key;   // a ground, or a park seen from above
+    else for(int i=0;i<MapData::ACTOR_INFO_COUNT;i++){
+        const auto& a=MapData::ACTOR_INFO[i];
+        if(!a.key||key!=a.key)continue;
+        int lo=0,hi=MAP_ACTOR_ART_COUNT-1;
+        while(lo<=hi){const int mid=(lo+hi)/2;if(MAP_ACTOR_ART[mid].hash==a.hash){asset=MAP_ACTOR_ART[mid].asset;break;}if(MAP_ACTOR_ART[mid].hash<a.hash)lo=mid+1;else hi=mid-1;}
+        break;
+    }
+    if(asset.empty()){Send404(fd);return;}
+    FILE* f=fopen(("romfs:/items/"+asset+".png").c_str(),"rb");
+    if(!f){Send404(fd);return;}
+    std::vector<uint8_t> data;
+    fseek(f,0,SEEK_END);const long sz=ftell(f);fseek(f,0,SEEK_SET);
+    if(sz>0&&sz<1024*1024){data.resize((size_t)sz);if(fread(data.data(),1,data.size(),f)!=data.size())data.clear();}
+    fclose(f);
+    if(data.empty()){Send404(fd);return;}
+    std::string h="HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: "+std::to_string(data.size())+
+                  "\r\nCache-Control: public, max-age=86400\r\nConnection: close\r\n\r\n";
+    SendStr(fd,h);SendAll(fd,(const char*)data.data(),data.size());
+}
+
+// POST /api/ugc/rawimport: multipart stem + one .zip, or the design's loose
+// files (.ugctex.zs, .canvas.zs, _Thumb.ugctex.zs). Into that slot when it is
+// for the same kind of item and size (TextureProcessor::ImportDesign).
+static std::string UgcKindPrefix(const std::string& stem){
+    if(stem.compare(0,3,"Ugc")!=0)return std::string();
+    size_t e=3;while(e<stem.size()&&!(stem[e]>='0'&&stem[e]<='9'))e++;
+    return stem.substr(3,e-3);
+}
+static void HandleUgcRawImport(int fd,const Request& req){
+    auto fields=ParseMultipart(req.body,req.contentType);
+    std::string stem;std::vector<std::pair<std::string,std::vector<uint8_t>>> files;
+    for(auto& f:fields){
+        if(f.name=="stem")stem=f.data;
+        else if(f.name=="file"&&!f.filename.empty()){
+            std::string lower=f.filename;for(auto& c:lower)c=(char)tolower((unsigned char)c);
+            std::vector<uint8_t> bytes(f.data.begin(),f.data.end());
+            if(lower.size()>4&&lower.compare(lower.size()-4,4,".zip")==0){
+                const std::string zerr=TextureProcessor::ReadZip(bytes,files);
+                if(!zerr.empty()){Send500(fd,zerr);return;}
+            }else files.push_back({f.filename,std::move(bytes)});
+        }
+    }
+    auto entries=UgcScanner::Scan(s_ugcPath);const UgcTextureEntry* found=nullptr;for(auto& e:entries)if(e.stem==stem){found=&e;break;}
+    if(!found){Send500(fd,"Entry not found");return;}
+    TextureProcessor::DesignFiles d;
+    if(!TextureProcessor::FindDesign(files,d)){Send500(fd,"No design in it (a .ugctex.zs file is needed)");return;}
+    const std::string ka=UgcKindPrefix(d.stem),kb=UgcKindPrefix(found->stem);
+    if(!ka.empty()&&!kb.empty()&&ka!=kb){Send500(fd,"This design is for "+ka+", not "+kb);return;}
+    const std::string err=TextureProcessor::ImportDesign(d,found->directory()+"/"+found->stem,found->ugctexPath,
+                                                         found->hasThumb()?found->thumbPath:std::string(),found->hasCanvas());
+    if(!err.empty()){Send500(fd,err);return;}
+    SrvLog("Design imported into "+stem+" ("+d.stem+")");
+    mutexLock(&s_mutex);s_pendingCommit=true;s_pendingUgcRescan=true;mutexUnlock(&s_mutex);
+    Send200(fd,"application/json","{\"ok\":true}");
+}
+
+// GET /api/imgsearch?q=&page=: Openverse's results (openly licensed pictures),
+// fetched by the console so the page needs nothing else.
+static void HandleImgSearch(int fd,const std::string& query){
+    const std::string q=GetQueryParam(query,"q");
+    if(q.empty()||q.size()>100){Send500(fd,"Type something to look for");return;}
+    int page=atoi(GetQueryParam(query,"page").c_str());if(page<1)page=1;if(page>50)page=50;
+    // Wikimedia Commons, then Openverse; answered in Openverse's shape (the
+    // page reads page_count and results[]).
+    std::vector<ImageSearch::Hit> hits;bool more=false;
+    const std::string e=ImageSearch::Search(q,page,hits,more);
+    SrvLog("WebUI: picture search \""+q+"\": "+ImageSearch::LastNote());
+    if(e=="find.offline"){Send500(fd,Lang::T("find.offline")+" ("+ImageSearch::LastNote()+")");return;}
+    std::string j="{\"note\":\""+JsonEscape(ImageSearch::LastNote())+"\",\"page_count\":"+std::to_string(more?page+1:page)+",\"result_count\":"+std::to_string(hits.size())+",\"results\":[";
+    for(size_t i=0;i<hits.size();i++){
+        const auto& h=hits[i];
+        if(i)j+=",";
+        j+="{\"title\":\""+JsonEscape(h.title)+"\",\"creator\":\""+JsonEscape(h.creator)+"\",\"license\":\""+JsonEscape(h.license)+
+           "\",\"license_version\":\"\",\"url\":\""+JsonEscape(h.url)+"\",\"thumbnail\":\""+JsonEscape(h.thumb)+"\"}";
+    }
+    j+="]}";
+    Send200(fd,"application/json",j);
+}
+// GET /api/fetchimg?url=https://...: a picture from the web, through the
+// console (https only, a named host, a PNG/JPEG/WebP/GIF of at most 16 MB).
+static void HandleFetchImg(int fd,const std::string& query){
+    const std::string url=GetQueryParam(query,"url");
+    if(url.compare(0,8,"https://")!=0||url.size()>1000){Send500(fd,"Only https pictures");return;}
+    const size_t hs=8,he=url.find_first_of("/:?#",hs);
+    const std::string host=url.substr(hs,he==std::string::npos?std::string::npos:he-hs);
+    bool ip=!host.empty();for(char c:host)if(!((c>='0'&&c<='9')||c=='.'))ip=false;
+    if(host.empty()||ip||host=="localhost"||host.find('[')!=std::string::npos){Send500(fd,"Not a public address");return;}
+    std::vector<uint8_t> body;std::string err;
+    const long st=ShareClient::Fetch(url,body,err);
+    if(st!=200||body.size()<12||body.size()>16u*1024*1024){Send500(fd,st?"The picture could not be fetched ("+std::to_string(st)+")":"Network error: "+err);return;}
+    const char* ct=nullptr;
+    if(body[0]==0x89&&body[1]=='P')ct="image/png";
+    else if(body[0]==0xFF&&body[1]==0xD8)ct="image/jpeg";
+    else if(!memcmp(body.data(),"RIFF",4)&&!memcmp(body.data()+8,"WEBP",4))ct="image/webp";
+    else if(!memcmp(body.data(),"GIF8",4))ct="image/gif";
+    if(!ct){Send500(fd,"That is not a picture");return;}
+    Send200Bin(fd,ct,body);
+}
+
+// POST /api/mii/portrait[?paint=N&front=1]: body = one Mii's CharInfoEx; its
+// real picture as a PNG (from the Mii parts pack), with face paint N of the
+// save (over the face's parts with front=1); 404 when there is no pack.
+static void HandleMiiPortrait(int fd,const Request& req){
+    if(req.body.size()<16||req.body.size()>1024){Send500(fd,"Send one CharInfoEx");return;}
+    const MiiArt::FacePaint* paint=nullptr;
+    const std::string ps=GetQueryParam(req.query,"paint");
+    if(!ps.empty()){
+        const int pi=atoi(ps.c_str());
+        if(pi>=0&&pi<1000){char path[64];snprintf(path,sizeof path,"%s/UgcFacePaint%03d.canvas.zs",SAVE_UGC_DIR,pi);paint=MiiArt::LoadFacePaint(path);}
+    }
+    std::vector<uint8_t> rgba;int n=0;
+    if(!MiiArt::PortraitRgba((const uint8_t*)req.body.data(),req.body.size(),rgba,n,paint,paint&&GetQueryParam(req.query,"front")=="1")){Send404(fd);return;}
+    RgbaImage img(n,n);img.pixels=std::move(rgba);
+    auto png=EncodePngMem(img);if(png.empty()){Send500(fd,"PNG encode failed");return;}
+    Send200Bin(fd,"image/png",png);
+}
+
 static void HandleExport(int fd,const std::string& query){
     std::string stem=GetQueryParam(query,"stem");if(stem.empty()){Send404(fd);return;}
     SrvLog("WebUI: export "+stem);
@@ -165,19 +529,121 @@ static void HandleExport(int fd,const std::string& query){
     Send200Bin(fd,"image/png",png,"attachment; filename=\""+stem+".png\"");
 }
 
+// The picture options as the WebUI sends them (form fields or query).
+template <typename Get>
+static void ReadPictureOptions(Get get,TextureProcessor::ImportOptions& opts){
+    const std::string enc=get("encoder"),bc1=get("bc1Mode"),fit=get("fitMode"),matte=get("matte"),shape=get("shape");
+    if(enc=="pca") opts.encoder=TextureProcessor::Bc1Encoder::PCA;
+    else if(enc=="rgbcx") opts.encoder=TextureProcessor::Bc1Encoder::Rgbcx;
+    if(bc1=="fourColor") opts.bc1Mode=TextureProcessor::Bc1Mode::FourColor;
+    else if(bc1=="threeColor") opts.bc1Mode=TextureProcessor::Bc1Mode::ThreeColor;
+    if(fit=="contain") opts.fitMode=TextureProcessor::FitMode::Contain;
+    else if(fit=="fill") opts.fitMode=TextureProcessor::FitMode::Fill;
+    else opts.fitMode=TextureProcessor::FitMode::Cover;
+    if(shape=="book")    opts.canvasShape=TextureProcessor::CanvasShape::Book;
+    else if(shape=="tv") opts.canvasShape=TextureProcessor::CanvasShape::Tv;
+    else                 opts.canvasShape=TextureProcessor::CanvasShape::Square;
+    if(matte.size()==7 && matte[0]=='#'){
+        auto h=[&](int o){int v=0;for(int i=0;i<2;i++){char c=matte[o+i];v<<=4;if(c>='0'&&c<='9')v|=c-'0';else if(c>='a'&&c<='f')v|=c-'a'+10;else if(c>='A'&&c<='F')v|=c-'A'+10;}return (uint8_t)v;};
+        opts.matte={h(1),h(3),h(5),255};
+    }
+    const std::string rot=get("rotate");
+    opts.rotate=rot.empty()?0:((atoi(rot.c_str())%4)+4)%4;
+    opts.flipH=get("flipH")=="1";
+}
+
+// ── The WebUI's import sheet ─────────────────────────────────────────────────
+// The picture is sent once (/api/importsource): the main thread reads it into
+// s_impSrc and the file stays for the import. Each settings change asks for
+// /api/importpreview, made here with TextureProcessor::PreviewTexture (the
+// steps the import takes, at the slot's size), so the sheet shows exactly
+// what the import will write. /api/import with fromSource=1 imports it.
+static Mutex       s_srcMutex;
+static RgbaImage   s_impSrc;
+static std::string s_impSrcPath;
+namespace HttpServer { void SetImportSource(RgbaImage&& img){mutexLock(&s_srcMutex);s_impSrc=std::move(img);mutexUnlock(&s_srcMutex);} }
+
+// Queue a job for the main thread and wait for it (IMG_Load stays there).
+static std::string RunOnMainThread(const HttpServer::ImportJob& job,bool& timedOut){
+    {mutexLock(&s_importMutex);s_importJob=job;s_importState=ImportState::Queued;s_importResult="";mutexUnlock(&s_importMutex);}
+    timedOut=true;
+    for(int i=0;i<30000&&s_running;i++){
+        svcSleepThread(1000000ULL);
+        mutexLock(&s_importMutex);bool done=(s_importState==ImportState::Done);mutexUnlock(&s_importMutex);
+        if(done){timedOut=false;break;}
+    }
+    std::string err;
+    mutexLock(&s_importMutex);err=timedOut?std::string("timed out"):s_importResult;s_importState=ImportState::Idle;mutexUnlock(&s_importMutex);
+    return err;
+}
+
+static void HandleImportSource(int fd,const Request& req){
+    auto fields=ParseMultipart(req.body,req.contentType);
+    std::string stem,fileExt=".png";std::vector<uint8_t> fileData;
+    for(auto& f:fields){
+        if(f.name=="stem")stem=f.data;
+        else if(f.name=="file"){fileData.assign(f.data.begin(),f.data.end());if(!f.filename.empty()){size_t dot=f.filename.rfind('.');if(dot!=std::string::npos)fileExt=f.filename.substr(dot);}}
+    }
+    for(auto& c:fileExt)c=(char)tolower((unsigned char)c);
+    if(fileExt!=".png"&&fileExt!=".jpg"&&fileExt!=".jpeg"&&fileExt!=".webp")fileExt=".png";
+    if(stem.empty()||fileData.empty()){Send500(fd,"Missing stem or file");return;}
+    auto entries=UgcScanner::Scan(s_ugcPath);const UgcTextureEntry* found=nullptr;for(auto& e:entries)if(e.stem==stem){found=&e;break;}
+    if(!found){Send500(fd,"Entry not found");return;}
+    MkdirP("/switch/TomoToolNX");
+    if(!s_impSrcPath.empty())remove(s_impSrcPath.c_str());
+    s_impSrcPath="/switch/TomoToolNX/.import_src"+fileExt;
+    {FILE* f=fopen(s_impSrcPath.c_str(),"wb");if(!f){Send500(fd,"Cannot write temp file");return;}fwrite(fileData.data(),1,fileData.size(),f);fclose(f);}
+    HttpServer::ImportJob job;job.tmpPath=s_impSrcPath;job.decodeOnly=true;
+    bool timedOut=false;
+    const std::string err=RunOnMainThread(job,timedOut);
+    if(!err.empty()){Send500(fd,err);return;}
+    const auto lay=TextureProcessor::LayoutOfFile(found->ugctexPath);
+    int w=0,h=0;{mutexLock(&s_srcMutex);w=s_impSrc.width;h=s_impSrc.height;mutexUnlock(&s_srcMutex);}
+    Send200(fd,"application/json","{\"ok\":true,\"w\":"+std::to_string(w)+",\"h\":"+std::to_string(h)+",\"lw\":"+std::to_string(lay.Width)+
+             ",\"lh\":"+std::to_string(lay.Height)+",\"fmt\":\""+(lay.Format==TextureProcessor::TextureFormat::Bc3?"BC3":"BC1")+"\"}");
+}
+
+static void HandleImportPreview(int fd,const std::string& query){
+    const std::string stem=GetQueryParam(query,"stem");
+    auto entries=UgcScanner::Scan(s_ugcPath);const UgcTextureEntry* found=nullptr;for(auto& e:entries)if(e.stem==stem){found=&e;break;}
+    if(!found){Send404(fd);return;}
+    TextureProcessor::ImportOptions opts;
+    ReadPictureOptions([&](const char* k){return GetQueryParam(query,k);},opts);
+    const auto lay=TextureProcessor::LayoutOfFile(found->ugctexPath);
+    RgbaImage out;
+    mutexLock(&s_srcMutex);
+    if(s_impSrc.width>0)out=TextureProcessor::PreviewTexture(s_impSrc,lay.Width,lay.Height,lay.Format,opts);
+    mutexUnlock(&s_srcMutex);
+    if(out.width<=0){Send500(fd,"No picture");return;}
+    auto png=EncodePngMem(out);if(png.empty()){Send500(fd,"PNG encode failed");return;}
+    Send200Bin(fd,"image/png",png);
+}
+
 // HandleImport: does NOT call IMG_Load. Queues job for main thread.
 static void HandleImport(int fd,const Request& req){
     auto fields=ParseMultipart(req.body,req.contentType);
     std::string stem;std::vector<uint8_t> fileData;std::string fileExt=".png";
-    std::string encoderStr,bc1ModeStr,fitModeStr,matteStr,shapeStr;
+    std::string encoderStr,bc1ModeStr,fitModeStr,matteStr,shapeStr,rotateStr,flipStr;bool fromSource=false;
     for(auto& f:fields){
         if(f.name=="stem")stem=f.data;
+        else if(f.name=="rotate")rotateStr=f.data;
+        else if(f.name=="flipH")flipStr=f.data;
+        else if(f.name=="fromSource")fromSource=f.data=="1";
         else if(f.name=="encoder")encoderStr=f.data;
         else if(f.name=="bc1Mode")bc1ModeStr=f.data;
         else if(f.name=="fitMode")fitModeStr=f.data;
         else if(f.name=="matte")matteStr=f.data;
         else if(f.name=="shape")shapeStr=f.data;
         else if(f.name=="file"){fileData.assign(f.data.begin(),f.data.end());if(!f.filename.empty()){size_t dot=f.filename.rfind('.');if(dot!=std::string::npos)fileExt=f.filename.substr(dot);}}
+    }
+    if(fromSource&&fileData.empty()){
+        // The picture the import sheet sent (/api/importsource).
+        FILE* f=s_impSrcPath.empty()?nullptr:fopen(s_impSrcPath.c_str(),"rb");
+        if(!f){Send500(fd,"Send the picture again");return;}
+        fseek(f,0,SEEK_END);long n=ftell(f);fseek(f,0,SEEK_SET);
+        if(n>0){fileData.resize((size_t)n);if(fread(fileData.data(),1,(size_t)n,f)!=(size_t)n)fileData.clear();}
+        fclose(f);
+        size_t dot=s_impSrcPath.rfind('.');if(dot!=std::string::npos)fileExt=s_impSrcPath.substr(dot);
     }
     if(stem.empty()||fileData.empty()){SrvLog("Import: missing stem or file",true);Send500(fd,"Missing stem or file");return;}
     SrvLog("Import: received '"+stem+"' ("+std::to_string(fileData.size())+" bytes, ext="+fileExt+")");
@@ -195,6 +661,9 @@ static void HandleImport(int fd,const Request& req){
     opts.pngPath=tmpPath;opts.destStem=found->directory()+"/"+found->stem;
     opts.writeCanvas=found->hasCanvas();opts.writeThumb=found->hasThumb();opts.thumbPath=found->thumbPath;opts.noSrgb=false;opts.originalUgctexPath=found->ugctexPath;opts.originalCanvasPath=found->canvasPath;
     if(encoderStr=="pca") opts.encoder=TextureProcessor::Bc1Encoder::PCA;
+    else if(encoderStr=="rgbcx") opts.encoder=TextureProcessor::Bc1Encoder::Rgbcx;
+    opts.rotate=rotateStr.empty()?0:((atoi(rotateStr.c_str())%4)+4)%4;
+    opts.flipH=flipStr=="1";
     if(bc1ModeStr=="fourColor") opts.bc1Mode=TextureProcessor::Bc1Mode::FourColor;
     else if(bc1ModeStr=="threeColor") opts.bc1Mode=TextureProcessor::Bc1Mode::ThreeColor;
     if(fitModeStr=="contain") opts.fitMode=TextureProcessor::FitMode::Contain;
@@ -217,7 +686,7 @@ static void HandleImport(int fd,const Request& req){
     {mutexLock(&s_importMutex);s_importJob={opts,tmpPath};s_importState=ImportState::Queued;s_importResult="";mutexUnlock(&s_importMutex);}
 
     bool timedOut=true;
-    for(int i=0;i<30000;i++){
+    for(int i=0;i<30000&&s_running;i++){
         svcSleepThread(1000000ULL);
         mutexLock(&s_importMutex);bool done=(s_importState==ImportState::Done);mutexUnlock(&s_importMutex);
         if(done){timedOut=false;break;}
@@ -229,6 +698,10 @@ static void HandleImport(int fd,const Request& req){
     if(!err.empty()){SrvLog("Import: FAILED - "+err,true);Send500(fd,err);return;}
 
     SrvLog("Import: SUCCESS "+stem+(found->hasThumb()?" (+thumb)":""));
+    if(fromSource){
+        mutexLock(&s_srcMutex);s_impSrc=RgbaImage();mutexUnlock(&s_srcMutex);
+        if(!s_impSrcPath.empty()){remove(s_impSrcPath.c_str());s_impSrcPath.clear();}
+    }
     mutexLock(&s_mutex);s_pendingCommit=true;mutexUnlock(&s_mutex);
     Send200(fd,"application/json","{\"ok\":true}");
 }
@@ -246,7 +719,7 @@ static void HandleBgRemove(int fd,const Request& req){
     {mutexLock(&s_bgMutex);s_bgJob={found->ugctexPath,opts};s_bgState=ImportState::Queued;s_bgResult="";mutexUnlock(&s_bgMutex);}
     SrvLog("BgRemove: job queued for main thread");
     bool timedOut=true;
-    for(int i=0;i<120000;i++){
+    for(int i=0;i<120000&&s_running;i++){
         svcSleepThread(1000000ULL);
         mutexLock(&s_bgMutex);bool done=(s_bgState==ImportState::Done);mutexUnlock(&s_bgMutex);
         if(done){timedOut=false;break;}
@@ -323,13 +796,7 @@ static void HandleMiiList(int fd){
     std::string json="{\"miis\":[";
     for(size_t i=0;i<miis.size();i++){
         if(i)json+=",";
-        // Escape name for JSON
-        std::string name;
-        for(char c:miis[i].name){
-            if(c=='"')name+="\\\"";
-            else if(c=='\\')name+="\\\\";
-            else name+=c;
-        }
+        std::string name=JsonEscape(miis[i].name);
         json+="{\"slot\":"+std::to_string(miis[i].slot)+
               ",\"name\":\""+name+"\""+
               ",\"hasFacepaint\":"+(miis[i].hasFacepaint?"true":"false")+"}";
@@ -392,6 +859,7 @@ static void HandleMiiImport(int fd,const Request& req){
     }
     if(slotStr.empty()||fileData.empty()){Send500(fd,"Missing slot or file");return;}
     int slot=atoi(slotStr.c_str());
+    if(!SyncConsoleEdits(fd))return;
     SrvLog("Mii import: slot "+std::to_string(slot)+" ("+std::to_string(fileData.size())+" bytes"
            +((!canvasData.empty()&&!ugctexData.empty())?", + facepaint":"")+")");
 
@@ -429,7 +897,8 @@ static void HandleMiiImport(int fd,const Request& req){
     if(!err.empty()){SrvLog("Mii import failed: "+err,true);Send500(fd,err);return;}
 
     SrvLog("Mii import slot "+std::to_string(slot)+" OK");
-    mutexLock(&s_mutex);s_pendingCommit=true;s_pendingMiiRefresh=true;mutexUnlock(&s_mutex);
+    // ImportMii rewrites Mii.sav and (for the face paint state) Player.sav.
+    mutexLock(&s_mutex);s_pendingCommit=true;s_pendingMiiRefresh=true;s_pendingMiiSavReload=true;s_pendingPlayerSavReload=true;mutexUnlock(&s_mutex);
     Send200(fd,"application/json","{\"ok\":true}");
 }
 
@@ -463,6 +932,7 @@ static void HandleUgcItemExport(int fd,const std::string& query){
 // tab has the same affordance. Returns the slot the blank Mii landed in.
 static void HandleMiiBlank(int fd,const std::string& query){
     std::string slotStr=GetQueryParam(query,"slot");
+    if(!SyncConsoleEdits(fd))return;
     int slot;
     if(slotStr.empty()){slot=MiiManager::FirstEmptyMiiSlot();
         if(slot<=0){Send500(fd,"No empty Mii slot available");return;}
@@ -485,6 +955,7 @@ static void HandleUgcBlank(int fd,const std::string& query){
     int kind=atoi(kindStr.c_str());
     if(kind<0||kind>6){Send500(fd,"kind out of range");return;}
     std::string slotStr=GetQueryParam(query,"slot");
+    if(!SyncConsoleEdits(fd))return;
     int slot;
     if(slotStr.empty()){slot=MiiManager::FirstEmptyUgcSlot(kind);
         if(slot<=0){Send500(fd,"No empty UGC slot for this kind");return;}
@@ -496,7 +967,7 @@ static void HandleUgcBlank(int fd,const std::string& query){
     if(!err.empty()){SrvLog("Create blank ugc failed: "+err,true);Send500(fd,err);return;}
     static const char* kPfx[]={"Food","Cloth","Goods","Interior","Exterior","MapObject","MapFloor"};
     char buf[64];snprintf(buf,sizeof buf,"Ugc%s%03d",kPfx[kind],slot-1);
-    mutexLock(&s_mutex);s_pendingCommit=true;mutexUnlock(&s_mutex);
+    mutexLock(&s_mutex);s_pendingCommit=true;s_pendingPlayerSavReload=true;s_pendingUgcRescan=true;mutexUnlock(&s_mutex);
     Send200(fd,"application/json",std::string("{\"ok\":true,\"slot\":")+std::to_string(slot)+",\"stem\":\""+buf+"\"}");
 }
 
@@ -533,10 +1004,11 @@ static void HandleUgcDelete(int fd,const std::string& query){
     }
     if(kind<0||kind>6){Send500(fd,"kind out of range");return;}
     if(slot<1){Send500(fd,"slot must be >= 1");return;}
+    if(!SyncConsoleEdits(fd))return;
     SrvLog("WebUI: delete ugc kind="+std::to_string(kind)+" slot="+std::to_string(slot));
     std::string err=MiiManager::DeleteUgc(kind,slot);
     if(!err.empty()){SrvLog("Delete ugc failed: "+err,true);Send500(fd,err);return;}
-    mutexLock(&s_mutex);s_pendingCommit=true;mutexUnlock(&s_mutex);
+    mutexLock(&s_mutex);s_pendingCommit=true;s_pendingPlayerSavReload=true;s_pendingUgcRescan=true;mutexUnlock(&s_mutex);
     Send200(fd,"application/json","{\"ok\":true}");
 }
 
@@ -558,16 +1030,16 @@ static void HandleUgcItemImport(int fd,const Request& req){
     }
     if(kind<0){Send500(fd,"Cannot parse UGC stem: "+stemStr);return;}
     bool isAdding=(isAddingStr=="true"||isAddingStr=="1");
+    if(!SyncConsoleEdits(fd))return;
     SrvLog("UGC item import: "+stemStr+" kind="+std::to_string(kind)+" slot="+std::to_string(slot0+1)+(isAdding?" (adding)":""));
     MkdirP("/switch/TomoToolNX");
     std::string tmpPath="/switch/TomoToolNX/.ugc_import_tmp.ltdx";
-    {FILE* f=fopen(tmpPath.c_str(),"wb");if(!f){Send500(fd,"Cannot write temp file");return;}
-    fwrite(fileData.data(),1,fileData.size(),f);fclose(f);}
+    if(!WriteWholeFile(tmpPath.c_str(),fileData.data(),fileData.size())){remove(tmpPath.c_str());Send500(fd,"Cannot write temp file");return;}
     std::string err=MiiManager::ImportUgc(kind,slot0+1,tmpPath,isAdding);
     remove(tmpPath.c_str());
     if(!err.empty()){SrvLog("UGC item import failed: "+err,true);Send500(fd,err);return;}
     SrvLog("UGC item import "+stemStr+" OK");
-    mutexLock(&s_mutex);s_pendingCommit=true;mutexUnlock(&s_mutex);
+    mutexLock(&s_mutex);s_pendingCommit=true;s_pendingPlayerSavReload=true;s_pendingUgcRescan=true;mutexUnlock(&s_mutex);
     Send200(fd,"application/json","{\"ok\":true}");
 }
 
@@ -677,24 +1149,50 @@ static void HandleSaveDownload(int fd, const std::string& query) {
     SrvLog("Save download: "+which+" ("+std::to_string(sz)+" bytes)");
 }
 
-// POST /api/save/upload?file=player|mii|map  — receive modified .sav and commit
+// POST /api/save/upload?file=player|mii|map  — receive a modified .sav
+//
+// This overwrites the real save, so nothing is written until the upload has
+// been checked from end to end:
+//   - the body arrived complete (ReadRequest refuses a short one);
+//   - it parses as a .sav with every entry inside the file;
+//   - it is the file it claims to be. Each of the three saves has its own set
+//     of entries, so one that is always present tells them apart. Before this,
+//     sending Player.sav to the Mii slot simply replaced Mii.sav with it.
+// If the write itself fails, the previous contents are put back.
 static void HandleSaveUpload(int fd, const Request& req) {
     std::string which = GetQueryParam(req.query, "file");
     const char* path = nullptr;
-    if      (which=="player") path=SAVE_PLAYER_SAV;
-    else if (which=="mii")    path=SAVE_MII_SAV;
-    else if (which=="map")    path=SAVE_MAP_SAV;
-    else { Send500(fd,"Invalid file"); return; }
+    const char* label = nullptr;
+    uint32_t signature = 0;
+    if      (which=="player") { path=SAVE_PLAYER_SAV; label="Player.sav"; signature=0x23135BC5u; } // UGC.FacePaint.State
+    else if (which=="mii")    { path=SAVE_MII_SAV;    label="Mii.sav";    signature=0x2499BFDAu; } // Mii.Name.Name
+    else if (which=="map")    { path=SAVE_MAP_SAV;    label="Map.sav";    signature=0x0B5276E9u; } // House.MapId
+    else { SendJsonError(fd,"400 Bad Request","Invalid file"); return; }
 
-    if (req.body.size() < 0x20) { Send500(fd,"File too small"); return; }
-    if ((uint8_t)req.body[0]!=0x04||(uint8_t)req.body[1]!=0x03||
-        (uint8_t)req.body[2]!=0x02||(uint8_t)req.body[3]!=0x01) {
-        Send500(fd,"Bad magic: not a .sav file"); return;
+    SaveEditor::SavFile parsed; std::string perr;
+    if (!SaveEditor::Parse((const uint8_t*)req.body.data(), req.body.size(), parsed, perr)) {
+        SrvLog(std::string("Save upload rejected (")+label+"): "+perr, true);
+        SendJsonError(fd,"400 Bad Request",std::string("That is not a valid ")+label+" ("+perr+"). Nothing was changed.");
+        return;
+    }
+    if (!SaveEditor::HasEntry(parsed, signature)) {
+        SrvLog(std::string("Save upload rejected: not a ")+label, true);
+        SendJsonError(fd,"400 Bad Request",std::string("That file is a valid save, but it is not ")+label+". Nothing was changed.");
+        return;
     }
 
-    FILE* f = fopen(path, "wb");
-    if (!f) { Send500(fd,"Cannot write save"); return; }
-    fwrite(req.body.data(),1,req.body.size(),f); fclose(f);
+    if (!SyncConsoleEdits(fd)) return;
+
+    std::vector<uint8_t> before;
+    bool hadBefore = ReadWholeFile(path, before);
+    if (!WriteWholeFile(path, req.body.data(), req.body.size())) {
+        bool restored = hadBefore && WriteWholeFile(path, before.data(), before.size());
+        SrvLog(std::string("Save upload: write failed for ")+label+(restored?" (previous file restored)":" (could NOT restore)"), true);
+        Send500(fd, restored
+            ? std::string("Could not write ")+label+". The previous file was put back."
+            : std::string("Could not write ")+label+". Choose Discard when leaving the editor on the console to undo this.");
+        return;
+    }
 
     mutexLock(&s_mutex);
     s_pendingCommit = true;
@@ -706,9 +1204,42 @@ static void HandleSaveUpload(int fd, const Request& req) {
     Send200(fd,"application/json","{\"ok\":true}");
 }
 
+// POST /api/mii/facepaint/release?id=N
+// Called by the WebUI after it deleted a Mii and applied Mii.sav: frees that
+// Mii's face paint slot (state in Player.sav + the two texture files). The slot
+// is only freed if no Mii in the Mii.sav now on the console still wears it.
+static void HandleFacepaintRelease(int fd, const std::string& query) {
+    std::string idStr = GetQueryParam(query, "id");
+    if (idStr.empty()) { SendJsonError(fd,"400 Bad Request","Missing id"); return; }
+    int id = atoi(idStr.c_str());
+    if (id < 0 || id > 69) { SendJsonError(fd,"400 Bad Request","id must be 0..69"); return; }
+    if (!SyncConsoleEdits(fd)) return;
+    std::string err = MiiManager::ReleaseFacepaintIfUnreferenced(id);
+    if (!err.empty()) { SrvLog("Face paint release failed: "+err, true); Send500(fd, err); return; }
+    mutexLock(&s_mutex); s_pendingCommit = true; s_pendingPlayerSavReload = true; s_pendingUgcRescan = true; mutexUnlock(&s_mutex);
+    Send200(fd,"application/json","{\"ok\":true}");
+}
+
+// The Mii parts pack, for the WebUI: "ready", "making", "failed" or "none".
+static std::string MiiPackState() {
+    switch (MiiPack::GetState()) {
+        case MiiPack::State::Running: return "making";
+        case MiiPack::State::Failed:  return "failed";
+        default: return MiiPack::Present() ? "ready" : "none";
+    }
+}
+
+// Can the game's music be read here (for the WebUI to play it too): "ready",
+// or why not (GameData::Why(): "emu", "notinstalled", "nofile", an error code).
+static std::string MusicState() {
+    struct stat st;
+    return stat("romfs:/music/index.txt", &st) == 0 ? "ready" : "nofile";
+}
+
 static void HandleConfig(int fd) {
     mutexLock(&s_mutex);
     bool acked = s_saveWarnAcked;
+    std::string theme = s_uiTheme;
     mutexUnlock(&s_mutex);
     // locale: the homebrew is the single source of truth for the UI language.
     // The WebUI fetches this on init so changing the language in the on-Switch
@@ -716,7 +1247,11 @@ static void HandleConfig(int fd) {
     std::string locale = Lang::Current();
     Send200(fd, "application/json",
             std::string("{\"saveWarnAcked\":") + (acked ? "true" : "false")
-            + ",\"locale\":\"" + locale + "\"}");
+            + ",\"locale\":\"" + JsonEscape(locale) + "\""
+            + ",\"theme\":\"" + JsonEscape(theme) + "\""
+            + ",\"miiPack\":\"" + MiiPackState() + "\""
+            + ",\"music\":\"" + JsonEscape(MusicState()) + "\""
+            + ",\"version\":\"" APP_VERSION "\"}");
 }
 
 // ── TomodachiShare proxy ─────────────────────────────────────────────────────
@@ -859,18 +1394,18 @@ static void HandleShareImport(int fd, const std::string& query) {
     if (status != 200) { Send500(fd, "Upstream returned HTTP " + std::to_string(status)); return; }
     if (body.empty())   { Send500(fd, "Empty download"); return; }
 
+    if (!SyncConsoleEdits(fd)) return;
     MkdirP("/switch/TomoToolNX");
     std::string tmpPath = "/switch/TomoToolNX/.share_import_tmp.ltd";
-    {
-        FILE* f = fopen(tmpPath.c_str(), "wb");
-        if (!f) { Send500(fd, "Cannot write temp file"); return; }
-        fwrite(body.data(), 1, body.size(), f); fclose(f);
+    if (!WriteWholeFile(tmpPath.c_str(), body.data(), body.size())) {
+        remove(tmpPath.c_str());
+        Send500(fd, "Cannot write temp file"); return;
     }
     std::string importErr = MiiManager::ImportMii(slot, tmpPath);
     remove(tmpPath.c_str());
     if (!importErr.empty()) { SrvLog("Share import failed: " + importErr, true); Send500(fd, importErr); return; }
     SrvLog("Share import: mii " + id + " → slot " + std::to_string(slot));
-    mutexLock(&s_mutex); s_pendingCommit = true; s_pendingMiiRefresh = true; mutexUnlock(&s_mutex);
+    mutexLock(&s_mutex); s_pendingCommit = true; s_pendingMiiRefresh = true; s_pendingMiiSavReload = true; s_pendingPlayerSavReload = true; mutexUnlock(&s_mutex);
     Send200(fd, "application/json", "{\"ok\":true}");
 }
 
@@ -948,10 +1483,19 @@ static void HandleGenTemplates(int fd) {
     Send200(fd, "application/json", j);
 }
 
+static void GenMarkReload(bool mii, bool player, bool map) {
+    mutexLock(&s_mutex);
+    if (mii)    { s_pendingMiiSavReload = true; s_pendingMiiRefresh = true; }
+    if (player)   s_pendingPlayerSavReload = true;
+    if (map)      s_pendingMapSavReload = true;
+    mutexUnlock(&s_mutex);
+}
+
 static void HandleGenMap(int fd, const std::string& query) {
     std::string mode = GetQueryParam(query, "mode");
     std::string id   = GetQueryParam(query, "id");
     if (mode.empty()) mode = "random";
+    if (!SyncConsoleEdits(fd)) return;
 
     SaveEditor::SavFile mp; std::string err;
     if (!SaveEditor::Load("tomodata:/Map.sav", mp, err)) { Send500(fd, "load Map.sav: " + err); return; }
@@ -978,12 +1522,14 @@ static void HandleGenMap(int fd, const std::string& query) {
     err = SaveEditor::Save("tomodata:/Map.sav", mp);
     if (!err.empty()) { Send500(fd, "save Map.sav: " + err); return; }
     SaveMount::Commit();
+    GenMarkReload(false, false, true);
 
     std::string j = "{\"ok\":true,\"actors_snapped\":" + std::to_string(moved) + "}";
     Send200(fd, "application/json", j);
 }
 
 static void HandleGenHouses(int fd, const std::string& /*query*/) {
+    if (!SyncConsoleEdits(fd)) return;
     SaveEditor::SavFile mp, mi; std::string err;
     if (!SaveEditor::Load("tomodata:/Map.sav", mp, err))  { Send500(fd, "load Map.sav: " + err); return; }
     if (!SaveEditor::Load("tomodata:/Mii.sav", mi, err))  { Send500(fd, "load Mii.sav: " + err); return; }
@@ -992,6 +1538,7 @@ static void HandleGenHouses(int fd, const std::string& /*query*/) {
     err = SaveEditor::Save("tomodata:/Mii.sav", mi);
     if (!err.empty()) { Send500(fd, "save Mii.sav: " + err); return; }
     SaveMount::Commit();
+    GenMarkReload(true, false, false);
 
     std::string j = "{\"ok\":true,\"placed\":" + std::to_string(placed) + "}";
     Send200(fd, "application/json", j);
@@ -1000,6 +1547,8 @@ static void HandleGenHouses(int fd, const std::string& /*query*/) {
 static void HandleGenRels(int fd, const std::string& query) {
     std::string mode = GetQueryParam(query, "mode");
     if (mode.empty()) mode = "dense";
+    if (mode != "none") mode = "dense";   // echoed back in the JSON below
+    if (!SyncConsoleEdits(fd)) return;
 
     SaveEditor::SavFile mi; std::string err;
     if (!SaveEditor::Load("tomodata:/Mii.sav", mi, err))  { Send500(fd, "load Mii.sav: " + err); return; }
@@ -1013,12 +1562,14 @@ static void HandleGenRels(int fd, const std::string& query) {
     err = SaveEditor::Save("tomodata:/Mii.sav", mi);
     if (!err.empty()) { Send500(fd, "save Mii.sav: " + err); return; }
     SaveMount::Commit();
+    GenMarkReload(true, false, false);
 
     std::string j = "{\"ok\":true,\"written\":" + std::to_string(n) + ",\"mode\":\"" + mode + "\"}";
     Send200(fd, "application/json", j);
 }
 
 static void HandleGenWishes(int fd) {
+    if (!SyncConsoleEdits(fd)) return;
     SaveEditor::SavFile pl; std::string err;
     if (!SaveEditor::Load("tomodata:/Player.sav", pl, err)) { Send500(fd, "load Player.sav: " + err); return; }
 
@@ -1026,6 +1577,7 @@ static void HandleGenWishes(int fd) {
     err = SaveEditor::Save("tomodata:/Player.sav", pl);
     if (!err.empty()) { Send500(fd, "save Player.sav: " + err); return; }
     SaveMount::Commit();
+    GenMarkReload(false, true, false);
 
     std::string j = "{\"ok\":true,\"unlocked\":" + std::to_string(n) + "}";
     Send200(fd, "application/json", j);
@@ -1039,6 +1591,8 @@ static void HandleGenLevels(int fd, const std::string& query) {
     // Clamp to a reasonable Tomodachi range. Game caps mii level around 999.
     if (minLv < 0)   minLv = 0;
     if (maxLv > 999) maxLv = 999;
+    if (maxLv < minLv) maxLv = minLv;
+    if (!SyncConsoleEdits(fd)) return;
 
     SaveEditor::SavFile mi; std::string err;
     if (!SaveEditor::Load("tomodata:/Mii.sav", mi, err))  { Send500(fd, "load Mii.sav: " + err); return; }
@@ -1047,6 +1601,7 @@ static void HandleGenLevels(int fd, const std::string& query) {
     err = SaveEditor::Save("tomodata:/Mii.sav", mi);
     if (!err.empty()) { Send500(fd, "save Mii.sav: " + err); return; }
     SaveMount::Commit();
+    GenMarkReload(true, false, false);
 
     std::string j = "{\"ok\":true,\"miis\":" + std::to_string(n)
                   + ",\"min\":" + std::to_string(minLv)
@@ -1056,13 +1611,46 @@ static void HandleGenLevels(int fd, const std::string& query) {
 
 static void HandleConnection(int fd){
     mutexLock(&s_mutex); s_lastConnectTick = armGetSystemTick(); mutexUnlock(&s_mutex);
-    Request req;if(!ReadRequest(fd,req)){close(fd);return;}
+    Request req;
+    switch(ReadRequest(fd,req)){
+        case ReadResult::Ok: break;
+        case ReadResult::TooLarge:
+            SrvLog("Request refused: body too large",true);
+            SendJsonError(fd,"413 Payload Too Large","That file is too large.");
+            close(fd);return;
+        case ReadResult::Incomplete:
+            SrvLog("Upload cut off after "+std::to_string(req.body.size())+" of "+std::to_string(req.contentLength)+" bytes: ignored",true);
+            SendJsonError(fd,"400 Bad Request","The upload was cut off before it finished. Nothing was changed. Check the connection and try again.");
+            close(fd);return;
+        default: close(fd);return;
+    }
+    // Everything that changes something is a POST, and every POST must carry
+    // the X-TomoToolNX header the WebUI adds to its own requests. A page on
+    // another site cannot send a custom header to this server (the browser asks
+    // permission first and is not given it), so a link or a hidden form on some
+    // web page can no longer delete or overwrite things on a console that
+    // happens to have the editor open.
+    if(req.method=="POST"&&!req.fromWebUi){
+        SrvLog("POST "+req.path+" refused: not from the WebUI page",true);
+        SendJsonError(fd,"403 Forbidden","This page is out of date. Reload it and try again.");
+        close(fd);return;
+    }
     if(req.method=="GET"&&req.path=="/"){SrvLog("WebUI: page loaded");Send200Gzip(fd,"text/html; charset=utf-8",webui_gz_bin,webui_gz_bin_size);}
     else if(req.method=="GET"&&req.path=="/api/config")HandleConfig(fd);
     else if(req.method=="GET"&&req.path=="/api/list")HandleList(fd);
     else if(req.method=="GET"&&req.path=="/api/preview")HandlePreview(fd,req.query);
+    else if(req.method=="GET"&&req.path=="/api/thumb")HandleThumb(fd,req.query);
+    else if(req.method=="GET"&&req.path.rfind("/gfx/",0)==0)HandleGfx(fd,req.path);
+    else if(req.method=="GET"&&req.path.rfind("/mapart/",0)==0)HandleMapArt(fd,req.path);
+    else if(req.method=="GET"&&req.path.rfind("/music/",0)==0)HandleMusic(fd,req.path);
+    else if(req.method=="GET"&&req.path=="/api/imgsearch")HandleImgSearch(fd,req.query);
+    else if(req.method=="POST"&&req.path=="/api/mii/portrait")HandleMiiPortrait(fd,req);
+    else if(req.method=="GET"&&req.path=="/api/fetchimg")HandleFetchImg(fd,req.query);
+    else if(req.method=="POST"&&req.path=="/api/ugc/rawimport")HandleUgcRawImport(fd,req);
     else if(req.method=="GET"&&req.path=="/api/export")HandleExport(fd,req.query);
     else if(req.method=="POST"&&req.path=="/api/import")HandleImport(fd,req);
+    else if(req.method=="POST"&&req.path=="/api/importsource")HandleImportSource(fd,req);
+    else if(req.method=="GET"&&req.path=="/api/importpreview")HandleImportPreview(fd,req.query);
     else if(req.method=="POST"&&req.path=="/api/removebg")HandleBgRemove(fd,req);
     else if(req.method=="GET"  &&req.path=="/api/habits")           HandleHabitsList(fd);
     else if(req.method=="GET"  &&req.path=="/api/wishes/list")      HandleWishesList(fd);
@@ -1077,6 +1665,7 @@ static void HandleConnection(int fd){
     else if(req.method=="POST" &&req.path=="/api/ugc/delete")       HandleUgcDelete(fd,req.query);
     else if(req.method=="GET"  &&req.path=="/api/save/download")   HandleSaveDownload(fd,req.query);
     else if(req.method=="POST" &&req.path=="/api/save/upload")     HandleSaveUpload(fd,req);
+    else if(req.method=="POST" &&req.path=="/api/mii/facepaint/release") HandleFacepaintRelease(fd,req.query);
     else if(req.method=="GET"  &&req.path=="/api/share/list")      HandleShareList(fd,req.query);
     else if(req.method=="GET"  &&req.path=="/api/share/info")      HandleShareInfo(fd,req.query);
     else if(req.method=="GET"  &&req.path=="/api/share/image")     HandleShareImage(fd,req.query);
@@ -1117,13 +1706,24 @@ static void ServerThreadFunc(void*){
 namespace HttpServer {
 void Start(int port,const std::string& ugcPath){
     if(s_running) return;
-    s_port=port;s_ugcPath=ugcPath;s_running=true;s_pendingCommit=false;s_pendingPlayerSavReload=false;s_pendingMiiSavReload=false;s_pendingMapSavReload=false;
-    mutexInit(&s_mutex);mutexInit(&s_logMutex);mutexInit(&s_importMutex);mutexInit(&s_bgMutex);
-    s_logWrite=0;s_logRead=0;s_importState=ImportState::Idle;s_bgState=ImportState::Idle;
+    // The server thread clears s_running itself if it cannot bind the port, so
+    // a previous thread may have ended without Stop() ever joining it.
+    if(s_threadStarted){threadWaitForExit(&s_thread);threadClose(&s_thread);s_threadStarted=false;}
+    s_port=port;s_ugcPath=ugcPath;s_running=true;s_pendingCommit=false;s_pendingMiiRefresh=false;s_pendingPlayerSavReload=false;s_pendingMiiSavReload=false;s_pendingMapSavReload=false;s_pendingUgcRescan=false;
+    mutexInit(&s_mutex);mutexInit(&s_logMutex);mutexInit(&s_importMutex);mutexInit(&s_bgMutex);mutexInit(&s_srcMutex);
+    s_logWrite=0;s_logRead=0;s_importState=ImportState::Idle;s_bgState=ImportState::Idle;s_flushState=0;s_flushError.clear();
     MkdirP("/switch/TomoToolNX");
-    threadCreate(&s_thread,ServerThreadFunc,nullptr,nullptr,128*1024,0x2C,-2);threadStart(&s_thread);
+    RotateDebugLog();
+    // 256 KB of stack: handlers build JSON and parse a whole .sav on this thread.
+    if(R_FAILED(threadCreate(&s_thread,ServerThreadFunc,nullptr,nullptr,256*1024,0x2C,-2))){s_running=false;return;}
+    s_threadStarted=true;
+    if(R_FAILED(threadStart(&s_thread))){threadClose(&s_thread);s_threadStarted=false;s_running=false;}
 }
-void Stop(){if(!s_running)return;s_running=false;threadWaitForExit(&s_thread);threadClose(&s_thread);}
+void Stop(){
+    s_running=false;
+    if(!s_threadStarted)return;
+    threadWaitForExit(&s_thread);threadClose(&s_thread);s_threadStarted=false;
+}
 bool IsRunning(){return s_running;}
 bool HasPendingCommit(){mutexLock(&s_mutex);bool v=s_pendingCommit;mutexUnlock(&s_mutex);return v;}
 void ClearPendingCommit(){mutexLock(&s_mutex);s_pendingCommit=false;mutexUnlock(&s_mutex);}
@@ -1144,4 +1744,9 @@ void FinishBgRemove(const std::string& result){mutexLock(&s_bgMutex);s_bgResult=
 void DrainLog(std::vector<LogEntry>& out){mutexLock(&s_logMutex);while(s_logRead<s_logWrite)out.push_back(s_logRing[s_logRead++%LOG_RING_SIZE]);mutexUnlock(&s_logMutex);}
 uint64_t LastConnectTick(){mutexLock(&s_mutex);u64 t=s_lastConnectTick;mutexUnlock(&s_mutex);return t;}
 void SetSaveWarnAcked(bool v){mutexLock(&s_mutex);s_saveWarnAcked=v;mutexUnlock(&s_mutex);}
+void SetUiTheme(const std::string& code){mutexLock(&s_mutex);s_uiTheme=code;mutexUnlock(&s_mutex);}
+bool HasPendingUgcRescan(){mutexLock(&s_mutex);bool v=s_pendingUgcRescan;mutexUnlock(&s_mutex);return v;}
+void ClearPendingUgcRescan(){mutexLock(&s_mutex);s_pendingUgcRescan=false;mutexUnlock(&s_mutex);}
+bool HasFlushRequest(){mutexLock(&s_mutex);bool v=(s_flushState==1);mutexUnlock(&s_mutex);return v;}
+void FinishFlush(const std::string& err){mutexLock(&s_mutex);if(s_flushState==1){s_flushError=err;s_flushState=2;}mutexUnlock(&s_mutex);}
 } // namespace HttpServer

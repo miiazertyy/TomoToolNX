@@ -1,0 +1,974 @@
+# TomoToolNX Mii parts pack v3 (made by tools/mii/build_pack.py from your game)
+size 128
+version 3
+depth -0.600 0.500
+tex Eye -1 Eye062 0 -
+tex Eye 0 Eye000 -1 -
+tex Eye 1 Eye001 0 -
+tex Eye 2 Eye002 0 -
+tex Eye 3 Eye003 0 -
+tex Eye 4 Eye004 -1 -
+tex Eye 5 Eye005 0 -
+tex Eye 6 Eye006 0 -
+tex Eye 7 Eye007 0 -
+tex Eye 8 Eye008 -1 -
+tex Eye 9 Eye009 0 -
+tex Eye 10 Eye010 0 -
+tex Eye 11 Eye011 0 -
+tex Eye 12 Eye012 0 -
+tex Eye 13 Eye013 -1 -
+tex Eye 14 Eye014 -1 -
+tex Eye 15 Eye015 0 -
+tex Eye 16 Eye016 0 -
+tex Eye 17 Eye017 0 -
+tex Eye 18 Eye018 -1 -
+tex Eye 19 Eye019 -1 -
+tex Eye 20 Eye020 0 -
+tex Eye 21 Eye021 -1 -
+tex Eye 22 Eye022 0 -
+tex Eye 23 Eye023 -1 -
+tex Eye 24 Eye024 -1 -
+tex Eye 25 Eye025 0 -
+tex Eye 26 Eye026 -1 -
+tex Eye 27 Eye027 0 -
+tex Eye 28 Eye028 0 -
+tex Eye 29 Eye029 -1 -
+tex Eye 30 Eye030 0 -
+tex Eye 31 Eye031 0 -
+tex Eye 32 Eye032 0 -
+tex Eye 33 Eye033 -1 -
+tex Eye 34 Eye034 -1 -
+tex Eye 35 Eye035 -1 -
+tex Eye 36 Eye036 0 -
+tex Eye 37 Eye037 0 -
+tex Eye 38 Eye038 -1 -
+tex Eye 39 Eye039 -1 -
+tex Eye 40 Eye040 -1 -
+tex Eye 41 Eye041 0 -
+tex Eye 42 Eye042 0 -
+tex Eye 43 Eye043 -1 -
+tex Eye 44 Eye044 -1 -
+tex Eye 45 Eye045 -1 -
+tex Eye 46 Eye046 -1 -
+tex Eye 47 Eye047 -1 -
+tex Eye 48 Eye048 -1 -
+tex Eye 49 Eye049 -1 -
+tex Eye 50 Eye050 -1 -
+tex Eye 51 Eye051 -1 -
+tex Eye 52 Eye052 0 -
+tex Eye 53 Eye053 0 -
+tex Eye 54 Eye054 0 -
+tex Eye 55 Eye055 0 -
+tex Eye 56 Eye056 -1 -
+tex Eye 57 Eye057 0 -
+tex Eye 58 Eye058 0 -
+tex Eye 59 Eye059 -1 -
+tex Eye 61 Eye060 0 -
+tex Eye 65 Eye064 0 -
+tex Eye 68 Eye067 0 -
+tex Eye 69 Eye068 0 -
+tex Eye 70 Eye069 0 -
+tex Eye 71 Eye070 0 -
+tex Eye 72 Eye071 0 -
+tex Eye 73 Eye072 0 -
+tex Eye 74 Eye073 0 -
+tex Eye 75 Eye074 0 -
+tex Eye 76 Eye075 0 -
+tex Eye 77 Eye076 0 -
+tex Eye 78 Eye077 0 -
+tex Eye 79 Eye078 0 -
+tex Eye 80 Eye079 0 -
+tex Eyebrow 0 Eyebrow00 0 -
+tex Eyebrow 1 Eyebrow01 0 -
+tex Eyebrow 2 Eyebrow02 -1 -
+tex Eyebrow 3 Eyebrow03 1 -
+tex Eyebrow 4 Eyebrow04 0 -
+tex Eyebrow 5 Eyebrow05 1 -
+tex Eyebrow 6 Eyebrow06 0 -
+tex Eyebrow 7 Eyebrow07 1 -
+tex Eyebrow 8 Eyebrow08 -2 -
+tex Eyebrow 9 Eyebrow09 1 -
+tex Eyebrow 10 Eyebrow10 0 -
+tex Eyebrow 11 Eyebrow11 2 -
+tex Eyebrow 12 Eyebrow12 -1 -
+tex Eyebrow 13 Eyebrow13 -1 -
+tex Eyebrow 14 Eyebrow14 0 -
+tex Eyebrow 15 Eyebrow15 0 -
+tex Eyebrow 16 Eyebrow16 1 -
+tex Eyebrow 17 Eyebrow17 1 -
+tex Eyebrow 18 Eyebrow18 0 -
+tex Eyebrow 19 Eyebrow19 0 -
+tex Eyebrow 20 Eyebrow20 -1 -
+tex Eyebrow 21 Eyebrow21 0 -
+tex Eyebrow 22 Eyebrow22 1 -
+tex Eyebrow 24 Eyebrow23 0 -
+tex Eyebrow 25 Eyebrow24 0 -
+tex Eyebrow 26 Eyebrow25 0 -
+tex Eyebrow 27 Eyebrow26 0 -
+tex Eyebrow 28 Eyebrow27 0 -
+tex Eyebrow 29 Eyebrow28 0 -
+tex Eyebrow 30 Eyebrow29 0 -
+tex Eyebrow 31 Eyebrow30 0 -
+tex Eyebrow 32 Eyebrow31 0 -
+tex Eyebrow 33 Eyebrow32 0 -
+tex Eyebrow 34 Eyebrow33 0 -
+tex Eyebrow 35 Eyebrow34 0 -
+tex Eyebrow 36 Eyebrow35 0 -
+tex Eyebrow 37 Eyebrow36 0 -
+tex Eyebrow 38 Eyebrow37 0 -
+tex Eyebrow 39 Eyebrow38 0 -
+tex Eyebrow 40 Eyebrow39 0 -
+tex Eyebrow 41 Eyebrow40 0 -
+tex Eyebrow 42 Eyebrow41 0 -
+tex Mouth -1 Mouth038 0 -
+tex Mouth 0 Mouth000 0 Mouth000_NoLip
+tex Mouth 1 Mouth001 0 Mouth001_NoLip
+tex Mouth 2 Mouth002 0 -
+tex Mouth 3 Mouth003 0 -
+tex Mouth 4 Mouth004 0 Mouth004_NoLip
+tex Mouth 5 Mouth005 0 Mouth005_NoLip
+tex Mouth 6 Mouth006 0 -
+tex Mouth 7 Mouth007 0 Mouth007_NoLip
+tex Mouth 8 Mouth008 0 -
+tex Mouth 9 Mouth009 0 -
+tex Mouth 10 Mouth010 0 -
+tex Mouth 11 Mouth011 0 Mouth011_NoLip
+tex Mouth 12 Mouth012 0 -
+tex Mouth 13 Mouth013 0 -
+tex Mouth 14 Mouth014 0 -
+tex Mouth 15 Mouth015 0 -
+tex Mouth 16 Mouth016 0 -
+tex Mouth 17 Mouth017 0 -
+tex Mouth 18 Mouth018 0 -
+tex Mouth 19 Mouth019 0 -
+tex Mouth 20 Mouth020 0 -
+tex Mouth 21 Mouth021 0 -
+tex Mouth 22 Mouth022 0 -
+tex Mouth 23 Mouth023 0 -
+tex Mouth 24 Mouth024 0 -
+tex Mouth 25 Mouth025 0 -
+tex Mouth 26 Mouth026 0 -
+tex Mouth 27 Mouth027 0 Mouth027_NoLip
+tex Mouth 28 Mouth028 0 -
+tex Mouth 29 Mouth029 0 Mouth029_NoLip
+tex Mouth 30 Mouth030 0 -
+tex Mouth 31 Mouth031 0 -
+tex Mouth 32 Mouth032 0 -
+tex Mouth 33 Mouth033 0 -
+tex Mouth 34 Mouth034 0 -
+tex Mouth 35 Mouth035 0 -
+tex Mouth 40 Mouth039 0 -
+tex Mouth 41 Mouth040 0 -
+tex Mouth 42 Mouth041 0 -
+tex Mouth 43 Mouth042 0 -
+tex Mouth 44 Mouth043 0 -
+tex Mouth 45 Mouth044 0 -
+tex Mouth 46 Mouth045 0 -
+tex Mouth 47 Mouth046 0 -
+tex Mouth 48 Mouth047 0 -
+tex Mouth 49 Mouth048 0 -
+tex Mouth 50 Mouth049 0 -
+tex Mouth 51 Mouth050 0 -
+tex Mouth 52 Mouth051 0 -
+tex Mouth 53 Mouth052 0 -
+tex Mouth 54 Mouth053 0 -
+tex Mouth 55 Mouth054 0 -
+tex Mustache 1 Mustache00 0 -
+tex Mustache 2 Mustache01 0 -
+tex Mustache 3 Mustache02 0 -
+tex Mustache 4 Mustache03 0 -
+tex Mustache 5 Mustache04 0 -
+tex Mustache 6 Mustache05 0 -
+tex Mustache 7 Mustache06 0 -
+tex Mustache 8 Mustache07 0 -
+tex Mustache 9 Mustache08 0 -
+tex Mustache 10 Mustache09 0 -
+tex Mustache 11 Mustache10 0 -
+tex Mustache 12 Mustache11 0 -
+tex Mustache 13 Mustache12 0 -
+tex Mustache 14 Mustache13 0 -
+tex Mustache 15 Mustache14 0 -
+tex Mole 1 Mole01 0 -
+tex BeardShort 1 BeardShort00 0 -
+tex BeardShort 2 BeardShort01 0 -
+tex BeardShort 3 BeardShort02 0 -
+tex BeardShort 4 BeardShort03 0 -
+tex BeardShort 5 BeardShort04 0 -
+tex BeardShort 6 BeardShort05 0 -
+tex BeardShort 7 BeardShort06 0 -
+tex BeardShort 8 BeardShort07 0 -
+tex BeardShort 9 BeardShort08 0 -
+tex BeardShort 10 BeardShort09 0 -
+tex BeardShort 11 BeardShort10 0 -
+tex BeardShort 12 BeardShort11 0 -
+tex BeardShort 13 BeardShort12 0 -
+tex BeardShort 14 BeardShort13 0 -
+tex MakeUpper 1 MakeUpper00 0 -
+tex MakeUpper 2 MakeUpper01 0 -
+tex MakeUpper 3 MakeUpper02 0 -
+tex MakeLower 1 MakeLower00 0 -
+tex MakeLower 2 MakeLower01 0 -
+tex MakeLower 3 MakeLower02 0 -
+tex MakeLower 6 MakeLower03 0 -
+tex MakeLower 7 MakeLower04 0 -
+tex MakeLower 8 MakeLower05 0 -
+tex MakeLower 9 MakeLower06 0 -
+tex WrinkleUpper 1 WrinkleUpper00 0 -
+tex WrinkleUpper 2 WrinkleUpper01 0 -
+tex WrinkleUpper 3 WrinkleUpper02 0 -
+tex WrinkleUpper 4 WrinkleUpper03 0 -
+tex WrinkleUpper 5 WrinkleUpper04 0 -
+tex WrinkleUpper 6 WrinkleUpper05 0 -
+tex WrinkleUpper 7 WrinkleUpper06 0 -
+tex WrinkleUpper 8 WrinkleUpper07 0 -
+tex WrinkleLower 1 WrinkleLower00 0 -
+tex WrinkleLower 2 WrinkleLower01 0 -
+tex WrinkleLower 3 WrinkleLower02 0 -
+tex WrinkleLower 4 WrinkleLower03 0 -
+tex WrinkleLower 5 WrinkleLower04 0 -
+tex WrinkleLower 6 WrinkleLower05 0 -
+tex WrinkleLower 7 WrinkleLower06 0 -
+tex WrinkleLower 8 WrinkleLower07 0 -
+tex WrinkleLower 9 WrinkleLower08 0 -
+tex WrinkleLower 10 WrinkleLower09 0 -
+tex WrinkleLower 11 WrinkleLower10 0 -
+tex WrinkleLower 12 WrinkleLower11 0 -
+tex WrinkleLower 13 WrinkleLower12 0 -
+tex WrinkleLower 14 WrinkleLower13 0 -
+tex Highlight 1 Highlight00 0 -
+tex Highlight 2 Highlight01 0 -
+tex Highlight 3 Highlight02 0 -
+tex Highlight 4 Highlight03 0 -
+tex Highlight 5 Highlight04 0 -
+tex Highlight 6 Highlight05 0 -
+tex Highlight 7 Highlight06 0 -
+tex Highlight 8 Highlight07 0 -
+tex Highlight 9 Highlight08 0 -
+tex EyelashUpper 1 EyelashUpper00 0 -
+tex EyelashUpper 2 EyelashUpper01 0 -
+tex EyelashUpper 3 EyelashUpper02 0 -
+tex EyelashUpper 4 EyelashUpper03 0 -
+tex EyelashUpper 5 EyelashUpper04 0 -
+tex EyelashLower 1 EyelashLower00 0 -
+tex EyelidUpper 1 EyelidUpper00 0 -
+tex EyelidUpper 2 EyelidUpper01 0 -
+tex EyelidLower 1 EyelidLower00 0 -
+tex EyelidLower 2 EyelidLower01 0 -
+eyeacc -1 axis=0.3600,0.0000 EyelidUpper=12,10,8,3,0 EyelidLower=8,21,5,4,31 EyelashUpper=19,13,8,3,28 EyelashLower=19,19,8,3,20 Highlight=16,16,5,3,0
+eyeacc 0 axis=0.4030,-0.0250 EyelidUpper=13,8,8,3,0 EyelidLower=12,29,5,4,0 EyelashUpper=19,12,14,6,29 EyelashLower=19,23,9,6,16 Highlight=16,16,6,3,0
+eyeacc 1 axis=0.2100,0.0000 EyelidUpper=7,9,2,5,0 EyelidLower=7,23,0,4,0 EyelashUpper=8,13,8,3,30 EyelashLower=7,22,5,3,16 Highlight=16,16,3,3,0
+eyeacc 2 axis=0.3860,-0.0370 EyelidUpper=12,10,8,3,0 EyelidLower=12,25,3,4,0 EyelashUpper=19,13,8,3,29 EyelashLower=12,25,6,3,16 Highlight=16,16,4,3,0
+eyeacc 3 axis=0.3560,0.0000 EyelidUpper=11,6,8,3,0 EyelidLower=11,30,3,5,0 EyelashUpper=19,13,8,3,26 EyelashLower=15,25,6,3,18 Highlight=16,16,3,3,0
+eyeacc 4 axis=0.3780,-0.0850 EyelidUpper=12,9,7,4,0 EyelidLower=10,28,3,4,31 EyelashUpper=18,12,14,3,28 EyelashLower=17,24,9,3,20 Highlight=16,16,6,3,0
+eyeacc 5 axis=0.2360,-0.1170 EyelidUpper=8,10,7,2,2 EyelidLower=7,26,1,4,0 EyelashUpper=14,9,8,3,2 EyelashLower=7,25,6,3,16 Highlight=16,16,2,3,0
+eyeacc 6 axis=0.3600,0.0300 EyelidUpper=12,9,10,2,1 EyelidLower=12,28,4,4,0 EyelashUpper=20,9,8,3,31 EyelashLower=18,22,6,3,18 Highlight=16,16,3,3,0
+eyeacc 7 axis=0.4150,0.0050 EyelidUpper=13,6,8,3,0 EyelidLower=13,30,4,4,0 EyelashUpper=19,7,9,3,29 EyelashLower=18,25,7,3,18 Highlight=16,16,4,3,0
+eyeacc 8 axis=0.2480,-0.0060 EyelidUpper=14,9,8,3,30 EyelidLower=10,27,4,4,0 EyelashUpper=17,13,8,3,27 EyelashLower=10,26,7,3,16 Highlight=16,16,6,3,0
+eyeacc 9 axis=0.4000,-0.0880 EyelidUpper=12,9,8,3,0 EyelidLower=12,27,4,4,0 EyelashUpper=20,12,8,3,28 EyelashLower=12,26,6,3,16 Highlight=16,16,4,3,0
+eyeacc 10 axis=0.3830,-0.0400 EyelidUpper=12,6,8,3,0 EyelidLower=12,29,3,4,0 EyelashUpper=20,12,12,3,26 EyelashLower=12,29,8,3,16 Highlight=16,16,8,3,0
+eyeacc 11 axis=0.2270,-0.0830 EyelidUpper=8,9,8,3,0 EyelidLower=8,26,3,4,0 EyelashUpper=14,12,8,3,28 EyelashLower=8,25,7,3,16 Highlight=16,16,3,3,0
+eyeacc 12 axis=0.3800,-0.0880 EyelidUpper=14,10,8,3,0 EyelidLower=12,27,3,4,0 EyelashUpper=23,16,8,3,26 EyelashLower=12,26,7,3,16 Highlight=16,16,4,3,0
+eyeacc 13 axis=0.2300,0.0000 EyelidUpper=8,14,6,3,0 EyelidLower=7,22,3,4,0 EyelashUpper=10,14,7,3,30 EyelashLower=9,18,6,3,17 Highlight=16,16,2,3,0
+eyeacc 14 axis=0.3000,0.0000 EyelidUpper=10,14,7,3,0 EyelidLower=9,22,4,4,0 EyelashUpper=12,16,8,3,31 EyelashLower=12,15,6,3,16 Highlight=16,16,0,3,0
+eyeacc 15 axis=0.3800,0.0000 EyelidUpper=12,9,8,3,0 EyelidLower=12,27,4,4,0 EyelashUpper=20,12,9,3,28 EyelashLower=17,22,7,3,18 Highlight=16,16,3,3,0
+eyeacc 16 axis=0.2040,-0.0460 EyelidUpper=11,10,10,1,31 EyelidLower=7,24,4,4,0 EyelashUpper=14,14,8,3,30 EyelashLower=7,23,7,3,16 Highlight=16,16,2,3,0
+eyeacc 17 axis=0.3900,0.0500 EyelidUpper=12,9,8,3,0 EyelidLower=13,27,3,4,0 EyelashUpper=22,13,8,3,27 EyelashLower=17,23,6,3,17 Highlight=16,16,3,3,0
+eyeacc 18 axis=0.2100,0.0000 EyelidUpper=8,12,3,6,31 EyelidLower=7,23,1,5,0 EyelashUpper=12,14,8,3,25 EyelashLower=7,22,6,3,16 Highlight=16,16,3,3,0
+eyeacc 19 axis=0.3400,0.0500 EyelidUpper=14,7,7,3,31 EyelidLower=9,30,3,4,31 EyelashUpper=19,19,11,6,22 EyelashLower=13,25,10,6,17 Highlight=16,16,6,3,0
+eyeacc 20 axis=0.3385,-0.0600 EyelidUpper=11,10,8,3,1 EyelidLower=12,25,4,4,1 EyelashUpper=18,15,11,5,26 EyelashLower=12,24,7,5,17 Highlight=16,16,4,3,0
+eyeacc 21 axis=0.2700,0.0100 EyelidUpper=10,14,6,4,31 EyelidLower=8,21,5,4,31 EyelashUpper=10,14,6,3,31 EyelashLower=10,16,5,3,15 Highlight=16,16,1,3,0
+eyeacc 22 axis=0.3590,-0.0450 EyelidUpper=13,10,11,1,1 EyelidLower=10,26,4,4,0 EyelashUpper=22,11,8,3,2 EyelashLower=19,19,6,3,18 Highlight=16,16,1,3,0
+eyeacc 23 axis=0.3000,0.0500 EyelidUpper=12,12,8,3,31 EyelidLower=8,22,4,4,31 EyelashUpper=15,16,9,5,28 EyelashLower=9,15,7,2,16 Highlight=16,16,1,3,0
+eyeacc 24 axis=0.4200,-0.0070 EyelidUpper=12,12,8,3,1 EyelidLower=13,25,4,4,0 EyelashUpper=20,15,12,5,28 EyelashLower=19,20,7,5,17 Highlight=16,16,3,3,0
+eyeacc 25 axis=0.3230,-0.0120 EyelidUpper=12,10,8,3,31 EyelidLower=10,24,2,4,0 EyelashUpper=16,12,8,3,28 EyelashLower=10,24,6,2,16 Highlight=16,16,4,3,0
+eyeacc 26 axis=0.2800,0.0000 EyelidUpper=9,14,6,2,0 EyelidLower=9,21,4,4,0 EyelashUpper=12,16,7,3,0 EyelashLower=12,16,5,3,16 Highlight=16,16,1,3,0
+eyeacc 27 axis=0.3350,-0.0080 EyelidUpper=11,10,8,3,1 EyelidLower=12,26,3,4,0 EyelashUpper=19,10,9,3,30 EyelashLower=19,19,6,3,19 Highlight=16,16,5,3,0
+eyeacc 28 axis=0.3700,-0.0140 EyelidUpper=12,7,8,3,0 EyelidLower=12,26,2,5,0 EyelashUpper=20,12,10,4,27 EyelashLower=12,25,7,4,16 Highlight=16,16,5,3,0
+eyeacc 29 axis=0.3550,0.0800 EyelidUpper=14,7,8,3,31 EyelidLower=11,25,4,4,31 EyelashUpper=20,18,11,5,22 EyelashLower=11,24,6,5,15 Highlight=16,16,6,3,0
+eyeacc 30 axis=0.3550,0.0100 EyelidUpper=12,10,8,3,1 EyelidLower=10,28,4,4,0 EyelashUpper=19,12,13,6,29 EyelashLower=19,19,9,6,19 Highlight=16,16,4,3,0
+eyeacc 31 axis=0.3500,0.0250 EyelidUpper=14,10,10,2,31 EyelidLower=11,24,4,4,31 EyelashUpper=19,12,8,3,30 EyelashLower=11,24,7,3,15 Highlight=16,16,1,3,0
+eyeacc 32 axis=0.3625,-0.0200 EyelidUpper=12,10,8,3,0 EyelidLower=11,25,4,4,0 EyelashUpper=18,13,8,3,28 EyelashLower=11,24,7,3,16 Highlight=16,16,5,3,0
+eyeacc 33 axis=0.2940,0.0450 EyelidUpper=13,8,8,3,31 EyelidLower=10,28,2,5,0 EyelashUpper=18,13,9,3,26 EyelashLower=10,27,7,3,16 Highlight=16,16,5,3,0
+eyeacc 34 axis=0.2700,0.0000 EyelidUpper=8,14,6,3,0 EyelidLower=8,23,4,4,0 EyelashUpper=13,15,7,3,28 EyelashLower=10,18,6,3,16 Highlight=16,16,3,3,0
+eyeacc 35 axis=0.3500,0.0000 EyelidUpper=12,9,8,3,0 EyelidLower=12,28,5,4,0 EyelashUpper=21,16,10,3,25 EyelashLower=16,22,8,3,16 Highlight=16,16,6,3,0
+eyeacc 36 axis=0.3930,0.0000 EyelidUpper=12,11,10,2,1 EyelidLower=14,24,5,4,1 EyelashUpper=23,12,8,3,30 EyelashLower=22,16,6,3,18 Highlight=16,16,2,3,0
+eyeacc 37 axis=0.3770,0.0110 EyelidUpper=12,10,8,3,1 EyelidLower=14,24,2,5,1 EyelashUpper=20,9,8,3,31 EyelashLower=14,23,7,3,17 Highlight=16,16,4,3,0
+eyeacc 38 axis=0.3880,-0.0100 EyelidUpper=12,9,8,3,0 EyelidLower=12,28,5,4,0 EyelashUpper=19,11,8,3,29 EyelashLower=13,22,6,3,16 Highlight=16,16,5,3,0
+eyeacc 39 axis=0.3400,0.0110 EyelidUpper=14,8,8,3,31 EyelidLower=10,28,3,4,31 EyelashUpper=20,13,8,3,27 EyelashLower=16,24,6,3,17 Highlight=16,16,4,3,0
+eyeacc 40 axis=0.3700,-0.0700 EyelidUpper=12,10,8,3,0 EyelidLower=11,25,5,3,0 EyelashUpper=19,17,9,6,26 EyelashLower=11,25,6,4,16 Highlight=16,16,3,3,0
+eyeacc 41 axis=0.3500,-0.0300 EyelidUpper=9,11,8,3,1 EyelidLower=11,24,3,4,0 EyelashUpper=16,11,8,3,0 EyelashLower=11,23,7,3,16 Highlight=16,16,2,3,0
+eyeacc 42 axis=0.3820,0.0100 EyelidUpper=12,8,8,3,0 EyelidLower=12,28,4,4,0 EyelashUpper=20,13,10,6,27 EyelashLower=18,22,7,4,18 Highlight=16,16,5,3,0
+eyeacc 43 axis=0.3800,0.0400 EyelidUpper=12,10,8,3,0 EyelidLower=12,28,3,4,0 EyelashUpper=19,12,8,4,0 EyelashLower=17,22,7,3,18 Highlight=16,16,2,3,0
+eyeacc 44 axis=0.3750,0.0500 EyelidUpper=12,9,8,3,0 EyelidLower=10,28,3,4,31 EyelashUpper=20,12,8,3,28 EyelashLower=18,23,6,3,18 Highlight=16,16,2,3,0
+eyeacc 45 axis=0.3535,0.0440 EyelidUpper=12,5,8,3,0 EyelidLower=9,28,3,4,31 EyelashUpper=18,9,12,3,28 EyelashLower=16,22,10,3,19 Highlight=16,16,4,3,0
+eyeacc 46 axis=0.3450,-0.0100 EyelidUpper=11,6,7,4,0 EyelidLower=9,30,2,5,31 EyelashUpper=18,12,12,3,26 EyelashLower=15,25,6,3,18 Highlight=16,16,3,3,0
+eyeacc 47 axis=0.1700,0.0000 EyelidUpper=5,10,3,4,3 EyelidLower=6,25,3,4,29 EyelashUpper=11,16,8,3,0 EyelashLower=11,15,7,3,16 Highlight=16,16,1,3,0
+eyeacc 48 axis=0.3870,-0.0500 EyelidUpper=13,11,8,3,0 EyelidLower=12,24,4,4,0 EyelashUpper=20,15,8,3,28 EyelashLower=12,23,7,3,16 Highlight=16,16,2,3,0
+eyeacc 49 axis=0.3750,-0.0700 EyelidUpper=11,12,8,3,0 EyelidLower=13,26,2,4,0 EyelashUpper=22,17,8,3,28 EyelashLower=13,26,6,3,16 Highlight=16,16,3,3,0
+eyeacc 50 axis=0.4300,0.0190 EyelidUpper=14,11,10,2,0 EyelidLower=14,24,5,4,0 EyelashUpper=20,13,8,3,30 EyelashLower=19,19,7,3,17 Highlight=16,16,2,3,0
+eyeacc 51 axis=0.3750,-0.0600 EyelidUpper=12,8,8,3,0 EyelidLower=9,29,3,4,31 EyelashUpper=20,12,8,3,27 EyelashLower=18,23,6,3,19 Highlight=16,16,3,3,0
+eyeacc 52 axis=0.3840,0.0500 EyelidUpper=12,10,10,2,0 EyelidLower=12,26,4,4,0 EyelashUpper=18,11,8,3,30 EyelashLower=17,21,6,3,16 Highlight=16,16,1,3,0
+eyeacc 53 axis=0.3650,-0.0200 EyelidUpper=17,15,8,3,31 EyelidLower=12,25,3,4,0 EyelashUpper=17,12,8,3,30 EyelashLower=12,24,7,3,16 Highlight=16,16,4,3,0
+eyeacc 54 axis=0.3800,-0.0600 EyelidUpper=12,10,8,3,0 EyelidLower=12,26,4,4,0 EyelashUpper=20,16,10,6,28 EyelashLower=12,25,7,4,16 Highlight=16,16,4,3,0
+eyeacc 55 axis=0.4050,-0.0120 EyelidUpper=15,10,7,3,31 EyelidLower=13,28,4,4,0 EyelashUpper=19,12,8,3,30 EyelashLower=17,23,7,3,17 Highlight=16,16,2,3,0
+eyeacc 56 axis=0.3960,0.0340 EyelidUpper=12,8,7,3,0 EyelidLower=10,26,4,4,0 EyelashUpper=21,13,8,3,27 EyelashLower=17,21,6,3,16 Highlight=16,16,4,3,0
+eyeacc 57 axis=0.3300,-0.0950 EyelidUpper=10,12,5,3,0 EyelidLower=11,27,3,5,0 EyelashUpper=15,14,10,3,30 EyelashLower=11,26,7,3,16 Highlight=16,16,4,3,0
+eyeacc 58 axis=0.3750,-0.0100 EyelidUpper=13,10,8,3,0 EyelidLower=11,25,3,4,0 EyelashUpper=21,14,10,4,28 EyelashLower=11,24,8,4,16 Highlight=16,16,4,3,0
+eyeacc 59 axis=0.3560,-0.0350 EyelidUpper=12,10,8,3,0 EyelidLower=10,26,3,4,0 EyelashUpper=20,15,10,4,27 EyelashLower=10,25,7,4,16 Highlight=16,16,4,3,0
+eyeacc 60 axis=0.4000,0.0000 EyelidUpper=12,10,8,3,0 EyelidLower=8,21,5,4,0 EyelashUpper=19,13,8,3,28 EyelashLower=19,19,8,3,20 Highlight=16,16,5,3,0
+eyeacc 61 axis=0.3750,-0.0800 EyelidUpper=12,10,8,3,0 EyelidLower=11,22,5,4,0 EyelashUpper=18,14,10,3,29 EyelashLower=11,21,8,3,16 Highlight=16,9,0,3,0
+eyeacc 65 axis=0.4020,-0.0240 EyelidUpper=12,5,8,3,0 EyelidLower=13,32,5,4,0 EyelashUpper=21,10,11,3,27 EyelashLower=22,20,8,3,22 Highlight=16,16,5,3,0
+eyeacc 68 axis=0.3170,-0.0740 EyelidUpper=10,10,6,3,0 EyelidLower=10,23,3,4,0 EyelashUpper=10,14,8,3,0 EyelashLower=10,22,7,3,16 Highlight=16,16,0,3,0
+eyeacc 69 axis=0.3920,-0.1180 EyelidUpper=12,10,8,3,0 EyelidLower=13,23,4,4,0 EyelashUpper=13,19,8,3,16 EyelashLower=20,16,7,3,20 Highlight=16,16,0,3,0
+eyeacc 70 axis=0.3680,-0.0290 EyelidUpper=12,16,3,3,0 EyelidLower=12,21,0,4,0 EyelashUpper=12,12,8,3,0 EyelashLower=12,20,5,3,16 Highlight=16,16,0,3,0
+eyeacc 71 axis=0.3080,0.0660 EyelidUpper=13,5,5,3,31 EyelidLower=10,27,4,4,0 EyelashUpper=17,13,10,3,25 EyelashLower=10,27,6,3,16 Highlight=16,16,2,3,0
+eyeacc 72 axis=0.3240,0.0220 EyelidUpper=18,10,6,2,30 EyelidLower=12,25,4,4,0 EyelashUpper=19,16,8,3,29 EyelashLower=19,19,6,3,16 Highlight=16,16,0,3,0
+eyeacc 73 axis=0.2500,0.0110 EyelidUpper=11,6,7,4,0 EyelidLower=9,30,2,5,31 EyelashUpper=18,12,12,3,26 EyelashLower=15,25,6,3,18 Highlight=16,16,0,3,0
+eyeacc 74 axis=0.4020,-0.0300 EyelidUpper=13,8,8,2,0 EyelidLower=12,26,5,3,0 EyelashUpper=13,12,8,3,0 EyelashLower=21,20,5,3,19 Highlight=16,16,1,3,0
+eyeacc 75 axis=0.4240,0.0060 EyelidUpper=13,9,8,3,0 EyelidLower=10,26,3,4,31 EyelashUpper=20,11,10,3,29 EyelashLower=19,21,5,3,18 Highlight=16,16,3,3,0
+eyeacc 76 axis=0.4240,0.0060 EyelidUpper=12,8,8,3,1 EyelidLower=12,27,4,3,0 EyelashUpper=20,11,11,3,29 EyelashLower=20,19,6,3,20 Highlight=16,16,0,3,0
+eyeacc 77 axis=0.3680,-0.0340 EyelidUpper=11,10,8,3,1 EyelidLower=9,27,2,3,31 EyelashUpper=22,12,8,3,29 EyelashLower=18,22,5,3,20 Highlight=16,16,3,3,0
+eyeacc 78 axis=0.4120,0.0000 EyelidUpper=12,7,8,1,0 EyelidLower=13,27,4,4,0 EyelashUpper=20,11,8,3,31 EyelashLower=21,22,5,3,20 Highlight=16,15,2,3,0
+eyeacc 79 axis=0.3490,-0.0100 EyelidUpper=13,9,7,3,31 EyelidLower=11,25,5,4,31 EyelashUpper=19,15,8,3,28 EyelashLower=15,20,5,3,16 Highlight=16,15,2,3,0
+eyeacc 80 axis=0.3600,0.0000 EyelidUpper=10,13,7,1,1 EyelidLower=11,24,4,3,31 EyelashUpper=20,15,8,3,31 EyelashLower=20,15,7,3,16 Highlight=16,16,0,3,0
+head 0 head_00.png headuv_00.png fl=headfl_00.png z=head_00_z.png set_nose=64.00,81.23 set_hair=64.00,110.08 set_beard=64.00,110.08 set_ear=92.73,81.36
+head 1 head_01.png headuv_01.png fl=headfl_01.png z=head_01_z.png set_nose=64.00,81.23 set_hair=64.00,110.08 set_beard=64.00,109.44 set_ear=92.73,81.36
+head 2 head_02.png headuv_02.png fl=headfl_02.png z=head_02_z.png set_nose=64.00,77.47 set_hair=64.00,106.32 set_beard=64.00,110.71 set_ear=92.73,77.60
+head 3 head_03.png headuv_03.png fl=headfl_03.png z=head_03_z.png set_nose=64.00,81.23 set_hair=64.00,110.08 set_beard=64.00,113.98 set_ear=92.73,81.36
+head 4 head_04.png headuv_04.png fl=headfl_04.png z=head_04_z.png set_nose=64.00,81.23 set_hair=64.00,110.08 set_beard=64.00,110.08 set_ear=92.73,81.36
+head 5 head_05.png headuv_05.png fl=headfl_05.png z=head_05_z.png set_nose=64.00,81.23 set_hair=64.00,110.08 set_beard=64.00,110.71 set_ear=92.73,81.36
+head 6 head_06.png headuv_06.png fl=headfl_06.png z=head_06_z.png set_nose=64.00,77.47 set_hair=64.00,106.32 set_beard=64.00,113.40 set_ear=92.73,77.60
+head 7 head_07.png headuv_07.png fl=headfl_07.png z=head_07_z.png set_nose=64.00,77.47 set_hair=64.00,106.32 set_beard=64.00,111.33 set_ear=92.73,77.60
+head 8 head_08.png headuv_08.png fl=headfl_08.png z=head_08_z.png set_nose=64.00,79.35 set_hair=64.00,108.20 set_beard=64.00,109.88 set_ear=92.73,79.49
+head 9 head_09.png headuv_09.png fl=headfl_09.png z=head_09_z.png set_nose=64.00,83.74 set_hair=64.00,112.59 set_beard=64.00,110.08 set_ear=92.73,83.88
+head 10 head_10.png headuv_10.png fl=headfl_10.png z=head_10_z.png set_nose=64.00,79.35 set_hair=64.00,108.20 set_beard=64.00,109.82 set_ear=92.73,79.49
+head 11 head_11.png headuv_11.png fl=headfl_11.png z=head_11_z.png set_nose=64.00,77.47 set_hair=64.00,106.32 set_beard=64.00,115.72 set_ear=92.73,77.60
+head 18 head_18.png headuv_18.png fl=headfl_18.png z=head_18_z.png set_nose=64.00,83.74 set_hair=64.00,112.59 set_beard=64.00,110.08 set_ear=92.73,83.88
+head 19 head_19.png headuv_19.png fl=headfl_19.png z=head_19_z.png set_nose=64.00,82.48 set_hair=64.00,111.33 set_beard=64.00,110.08 set_ear=92.73,82.62
+head 20 head_20.png headuv_20.png fl=headfl_20.png z=head_20_z.png set_nose=64.00,83.74 set_hair=64.00,112.59 set_beard=64.00,110.96 set_ear=92.73,83.88
+head 21 head_21.png headuv_21.png fl=headfl_21.png z=head_21_z.png set_nose=64.00,83.74 set_hair=64.00,112.59 set_beard=64.00,114.22 set_ear=92.73,83.88
+hair 0 hair_000.png hair_000_z.png 0
+hair 1 hair_001.png hair_001_z.png 0
+hair 2 hair_002.png hair_002_z.png 0
+hair 3 hair_003.png hair_003_z.png 0
+hair 4 hair_004.png hair_004_z.png 0
+hair 5 hair_005.png hair_005_z.png 0
+hair 6 hair_006.png hair_006_z.png 0
+hair 7 hair_007.png hair_007_z.png 0
+hair 8 hair_008.png hair_008_z.png 0
+hair 9 hair_009.png hair_009_z.png 0
+hair 10 hair_010.png hair_010_z.png 0
+hair 11 hair_011.png hair_011_z.png 0
+hair 12 hair_012.png hair_012_z.png 0
+hair 13 hair_013.png hair_013_z.png 0
+hair 14 hair_014.png hair_014_z.png 0
+hair 15 hair_015.png hair_015_z.png 0
+hair 16 hair_016.png hair_016_z.png 0
+hair 17 hair_017.png hair_017_z.png 0
+hair 18 hair_018.png hair_018_z.png 0
+hair 19 hair_019.png hair_019_z.png 0
+hair 20 hair_020.png hair_020_z.png 0
+hair 21 hair_021.png hair_021_z.png 0
+hair 22 hair_022.png hair_022_z.png 0
+hair 23 hair_023.png hair_023_z.png 0
+hair 24 hair_024.png hair_024_z.png 0
+hair 25 hair_025.png hair_025_z.png 0
+hair 26 hair_026.png hair_026_z.png 0
+hair 27 hair_027.png hair_027_z.png 0
+hair 28 hair_028.png hair_028_z.png 0
+hair 29 hair_029.png hair_029_z.png 0
+hair 30 - - 0
+hair 31 hair_031.png hair_031_z.png 0
+hair 32 hair_032.png hair_032_z.png 0
+hair 33 hair_033.png hair_033_z.png 0
+hair 35 hair_035.png hair_035_z.png 0
+hair 36 hair_036.png hair_036_z.png 0
+hair 37 hair_037.png hair_037_z.png 0
+hair 38 hair_038.png hair_038_z.png 0
+hair 39 hair_039.png hair_039_z.png 0
+hair 40 hair_040.png hair_040_z.png 0
+hair 41 hair_041.png hair_041_z.png 0
+hair 42 hair_042.png hair_042_z.png 0
+hair 43 hair_043.png hair_043_z.png 0
+hair 44 hair_044.png hair_044_z.png 0
+hair 45 hair_045.png hair_045_z.png 0
+hair 46 hair_046.png hair_046_z.png 0
+hair 47 hair_047.png hair_047_z.png 0
+hair 48 hair_048.png hair_048_z.png 0
+hair 49 hair_049.png hair_049_z.png 0
+hair 50 hair_050.png hair_050_z.png 0
+hair 51 hair_051.png hair_051_z.png 0
+hair 52 hair_052.png hair_052_z.png 0
+hair 53 hair_053.png hair_053_z.png 0
+hair 54 hair_054.png hair_054_z.png 0
+hair 55 hair_055.png hair_055_z.png 0
+hair 56 hair_056.png hair_056_z.png 0
+hair 58 hair_058.png hair_058_z.png 0
+hair 59 hair_059.png hair_059_z.png 0
+hair 60 hair_060.png hair_060_z.png 0
+hair 61 hair_061.png hair_061_z.png 0
+hair 62 hair_062.png hair_062_z.png 0
+hair 63 hair_063.png hair_063_z.png 0
+hair 64 hair_064.png hair_064_z.png 0
+hair 65 hair_065.png hair_065_z.png 0
+hair 66 hair_066.png hair_066_z.png 0
+hair 67 hair_067.png hair_067_z.png 0
+hair 68 hair_068.png hair_068_z.png 0
+hair 69 hair_069.png hair_069_z.png 0
+hair 70 hair_070.png hair_070_z.png 0
+hair 71 hair_071.png hair_071_z.png 0
+hair 72 hair_072.png hair_072_z.png 0
+hair 73 hair_073.png hair_073_z.png 0
+hair 74 hair_074.png hair_074_z.png 0
+hair 75 hair_075.png hair_075_z.png 0
+hair 76 hair_076.png hair_076_z.png 0
+hair 77 hair_077.png hair_077_z.png 0
+hair 78 hair_078.png hair_078_z.png 0
+hair 79 hair_079.png hair_079_z.png 0
+hair 80 hair_080.png hair_080_z.png 0
+hair 81 hair_081.png hair_081_z.png 0
+hair 82 hair_082.png hair_082_z.png 0
+hair 83 hair_083.png hair_083_z.png 0
+hair 84 hair_084.png hair_084_z.png 0
+hair 85 hair_085.png hair_085_z.png 0
+hair 86 hair_086.png hair_086_z.png 0
+hair 87 hair_087.png hair_087_z.png 0
+hair 88 hair_088.png hair_088_z.png 0
+hair 89 hair_089.png hair_089_z.png 0
+hair 90 hair_090.png hair_090_z.png 0
+hair 91 hair_091.png hair_091_z.png 0
+hair 92 hair_092.png hair_092_z.png 0
+hair 93 hair_093.png hair_093_z.png 0
+hair 94 hair_094.png hair_094_z.png 0
+hair 95 hair_095.png hair_095_z.png 0
+hair 96 hair_096.png hair_096_z.png 0
+hair 97 hair_097.png hair_097_z.png 0
+hair 98 hair_098.png hair_098_z.png 0
+hair 99 hair_099.png hair_099_z.png 0
+hair 100 hair_100.png hair_100_z.png 0
+hair 101 hair_101.png hair_101_z.png 0
+hair 102 hair_102.png hair_102_z.png 0
+hair 103 hair_103.png hair_103_z.png 0
+hair 104 hair_104.png hair_104_z.png 0
+hair 105 hair_105.png hair_105_z.png 0
+hair 106 hair_106.png hair_106_z.png 0
+hair 107 hair_107.png hair_107_z.png 0
+hair 108 hair_108.png hair_108_z.png 0
+hair 109 hair_109.png hair_109_z.png 0
+hair 110 hair_110.png hair_110_z.png 0
+hair 111 hair_111.png hair_111_z.png 0
+hair 112 hair_112.png hair_112_z.png 0
+hair 113 hair_113.png hair_113_z.png 0
+hair 114 hair_114.png hair_114_z.png 0
+hair 115 hair_115.png hair_115_z.png 0
+hair 116 hair_116.png hair_116_z.png 0
+hair 117 hair_117.png hair_117_z.png 0
+hair 118 hair_118.png hair_118_z.png 0
+hair 119 hair_119.png hair_119_z.png 0
+hair 120 hair_120.png hair_120_z.png 0
+hair 121 hair_121.png hair_121_z.png 0
+hair 122 hair_122.png hair_122_z.png 0
+hair 123 hair_123.png hair_123_z.png 0
+hair 124 hair_124.png hair_124_z.png 0
+hair 125 hair_125.png hair_125_z.png 0
+hair 126 hair_126.png hair_126_z.png 0
+hair 127 hair_127.png hair_127_z.png 0
+hair 128 hair_128.png hair_128_z.png 0
+hair 129 hair_129.png hair_129_z.png 0
+hair 130 hair_130.png hair_130_z.png 0
+hair 131 hair_131.png hair_131_z.png 0
+hair 132 hair_132.png hair_132_z.png 1
+hair 133 hair_133.png hair_133_z.png 1
+hair 134 hair_134.png hair_134_z.png 1
+hair 135 hair_135.png hair_135_z.png 1
+hair 136 hair_136.png hair_136_z.png 2
+hair 137 hair_137.png hair_137_z.png 1
+hair 138 hair_138.png hair_138_z.png 1
+hair 139 hair_139.png hair_139_z.png 2
+hair 140 hair_140.png hair_140_z.png 1
+hair 141 hair_141.png hair_141_z.png 1
+hair 142 hair_142.png hair_142_z.png 1
+hair 143 hair_143.png hair_143_z.png 1
+hair 144 hair_144.png hair_144_z.png 0
+hair 145 hair_145.png hair_145_z.png 0
+hair 146 hair_146.png hair_146_z.png 0
+hair 147 hair_147.png hair_147_z.png 0
+hair 148 hair_148.png hair_148_z.png 0
+hair 149 hair_149.png hair_149_z.png 0
+hair 150 hair_150.png hair_150_z.png 0
+hair 151 hair_151.png hair_151_z.png 0
+hair 152 hair_152.png hair_152_z.png 0
+hair 153 hair_153.png hair_153_z.png 0
+hair 154 hair_154.png hair_154_z.png 0
+hair 155 hair_155.png hair_155_z.png 0
+hair 156 hair_156.png hair_156_z.png 0
+hair 157 hair_157.png hair_157_z.png 0
+hair 158 hair_158.png hair_158_z.png 0
+hair 159 hair_159.png hair_159_z.png 0
+hair 160 hair_160.png hair_160_z.png 0
+hair 161 hair_161.png hair_161_z.png 0
+hair 162 hair_162.png hair_162_z.png 0
+hair 163 hair_163.png hair_163_z.png 0
+hair 164 hair_164.png hair_164_z.png 0
+hair 165 hair_165.png hair_165_z.png 0
+hair 166 hair_166.png hair_166_z.png 0
+hair 167 hair_167.png hair_167_z.png 0
+hair 168 hair_168.png hair_168_z.png 0
+hair 169 hair_169.png hair_169_z.png 0
+hair 170 hair_170.png hair_170_z.png 0
+hair 180 hair_180.png hair_180_z.png 0
+hair 206 hair_206.png hair_206_z.png 2
+hair 207 hair_207.png hair_207_z.png 0
+hair 208 hair_208.png hair_208_z.png 0
+hair 209 hair_209.png hair_209_z.png 0
+hair 210 hair_210.png hair_210_z.png 0
+hair 211 hair_211.png hair_211_z.png 0
+hair 212 hair_212.png hair_212_z.png 0
+hair 213 hair_213.png hair_213_z.png 0
+hair 214 hair_214.png hair_214_z.png 0
+hair 215 hair_215.png hair_215_z.png 0
+hair 216 hair_216.png hair_216_z.png 0
+hair 217 hair_217.png hair_217_z.png 0
+hair 218 hair_218.png hair_218_z.png 0
+hair 219 hair_219.png hair_219_z.png 0
+hair 220 hair_220.png hair_220_z.png 0
+hair 221 hair_221.png hair_221_z.png 0
+hair 222 hair_222.png hair_222_z.png 0
+hair 223 hair_223.png hair_223_z.png 0
+hair 224 hair_224.png hair_224_z.png 0
+hair 225 hair_225.png hair_225_z.png 0
+hair 226 hair_226.png hair_226_z.png 0
+hair 227 hair_227.png hair_227_z.png 0
+hair 228 hair_228.png hair_228_z.png 0
+hair 229 hair_229.png hair_229_z.png 0
+hair 230 hair_230.png hair_230_z.png 0
+hair 231 hair_231.png hair_231_z.png 0
+hair 232 hair_232.png hair_232_z.png 0
+hair 233 hair_233.png hair_233_z.png 0
+hair 234 hair_234.png hair_234_z.png 0
+hair 235 hair_235.png hair_235_z.png 0
+hair 236 hair_236.png hair_236_z.png 0
+hair 237 hair_237.png hair_237_z.png 0
+hair 238 hair_238.png hair_238_z.png 0
+hair 239 hair_239.png hair_239_z.png 0
+hair 240 hair_240.png hair_240_z.png 0
+hair 241 hair_241.png hair_241_z.png 0
+hair 242 hair_242.png hair_242_z.png 0
+hair 243 hair_243.png hair_243_z.png 0
+hair 244 hair_244.png hair_244_z.png 0
+hair 245 hair_245.png hair_245_z.png 1
+hair 246 hair_246.png hair_246_z.png 1
+hair 247 hair_247.png hair_247_z.png 1
+hair 248 hair_248.png hair_248_z.png 0
+hair 249 hair_249.png hair_249_z.png 0
+hair 250 hair_250.png hair_250_z.png 0
+hair 251 hair_251.png hair_251_z.png 2
+hair 252 hair_252.png hair_252_z.png 1
+hair 253 hair_253.png hair_253_z.png 2
+hair 254 hair_254.png hair_254_z.png 0
+hair 255 hair_255.png hair_255_z.png 0
+hair 256 hair_256.png hair_256_z.png 0
+hair 257 hair_257.png hair_257_z.png 0
+hair 258 hair_258.png hair_258_z.png 0
+hair 259 hair_259.png hair_259_z.png 0
+hair 260 hair_260.png hair_260_z.png 0
+hair 261 hair_261.png hair_261_z.png 0
+hair 262 hair_262.png hair_262_z.png 0
+hair 263 hair_263.png hair_263_z.png 0
+hair 264 hair_264.png hair_264_z.png 0
+hair 265 hair_265.png hair_265_z.png 0
+hair 266 hair_266.png hair_266_z.png 0
+hair 267 hair_267.png hair_267_z.png 0
+hair 268 hair_268.png hair_268_z.png 0
+hair 269 hair_269.png hair_269_z.png 0
+hair 270 hair_270.png hair_270_z.png 0
+hair 271 hair_271.png hair_271_z.png 0
+hair 272 hair_272.png hair_272_z.png 0
+hair 273 hair_273.png hair_273_z.png 0
+hair 274 hair_274.png hair_274_z.png 0
+hair 275 hair_275.png hair_275_z.png 0
+hair 276 hair_276.png hair_276_z.png 0
+hair 277 hair_277.png hair_277_z.png 0
+hair 278 hair_278.png hair_278_z.png 0
+hair 279 hair_279.png hair_279_z.png 0
+hair 280 hair_280.png hair_280_z.png 0
+hair 281 hair_281.png hair_281_z.png 1
+hair 282 hair_282.png hair_282_z.png 2
+hair 283 hair_283.png hair_283_z.png 2
+hair 284 hair_284.png hair_284_z.png 1
+hair 285 hair_285.png hair_285_z.png 2
+hair 286 hair_286.png hair_286_z.png 1
+hair 287 hair_287.png hair_287_z.png 1
+hair 288 hair_288.png hair_288_z.png 1
+hair 289 hair_289.png hair_289_z.png 1
+hair 290 hair_290.png hair_290_z.png 1
+hair 291 hair_291.png hair_291_z.png 1
+hair 292 hair_292.png hair_292_z.png 1
+hair 293 hair_293.png hair_293_z.png 1
+hair 294 hair_294.png hair_294_z.png 1
+hair 295 hair_295.png hair_295_z.png 1
+hair 296 hair_296.png hair_296_z.png 1
+hair 297 hair_297.png hair_297_z.png 1
+hair 299 hair_299.png hair_299_z.png 1
+hair 300 hair_300.png hair_300_z.png 1
+hair 301 hair_301.png hair_301_z.png 2
+hair 302 hair_302.png hair_302_z.png 1
+hair 303 hair_303.png hair_303_z.png 1
+hair 304 hair_304.png hair_304_z.png 1
+hair 305 hair_305.png hair_305_z.png 1
+hair 306 hair_306.png hair_306_z.png 1
+hair 307 hair_307.png hair_307_z.png 1
+hair 308 hair_308.png hair_308_z.png 1
+hair 309 hair_309.png hair_309_z.png 1
+hair 310 hair_310.png hair_310_z.png 1
+hair 311 hair_311.png hair_311_z.png 2
+hair 312 hair_312.png hair_312_z.png 1
+hair 313 hair_313.png hair_313_z.png 0
+hair 314 hair_314.png hair_314_z.png 0
+hair 315 hair_315.png hair_315_z.png 0
+hair 316 hair_316.png hair_316_z.png 0
+hair 317 hair_317.png hair_317_z.png 0
+hair 318 hair_318.png hair_318_z.png 0
+hair 319 hair_319.png hair_319_z.png 0
+hair 320 hair_320.png hair_320_z.png 0
+hair 321 hair_321.png hair_321_z.png 0
+hair 322 hair_322.png hair_322_z.png 1
+hair 323 hair_323.png hair_323_z.png 1
+hair 324 hair_324.png hair_324_z.png 1
+hair 325 hair_325.png hair_325_z.png 1
+hair 326 hair_326.png hair_326_z.png 1
+hair 327 hair_327.png hair_327_z.png 0
+hair 328 hair_328.png hair_328_z.png 1
+hair 329 hair_329.png hair_329_z.png 0
+hair 330 hair_330.png hair_330_z.png 0
+hair 331 hair_331.png hair_331_z.png 0
+hair 333 hair_333.png hair_333_z.png 0
+hair 334 hair_334.png hair_334_z.png 0
+hair 335 hair_335.png hair_335_z.png 0
+hair 336 hair_336.png hair_336_z.png 1
+hair 337 hair_337.png hair_337_z.png 1
+hair 338 hair_338.png hair_338_z.png 0
+hair 339 hair_339.png hair_339_z.png 0
+hair 340 hair_340.png hair_340_z.png 0
+front 0 front_000.png front_000_z.png
+front 1 front_001.png front_001_z.png
+front 2 front_002.png front_002_z.png
+front 3 front_003.png front_003_z.png
+front 4 front_004.png front_004_z.png
+front 5 front_005.png front_005_z.png
+front 6 front_006.png front_006_z.png
+front 7 front_007.png front_007_z.png
+front 8 front_008.png front_008_z.png
+front 9 front_009.png front_009_z.png
+front 10 front_010.png front_010_z.png
+front 11 front_011.png front_011_z.png
+front 12 front_012.png front_012_z.png
+front 13 front_013.png front_013_z.png
+front 14 front_014.png front_014_z.png
+front 15 front_015.png front_015_z.png
+front 16 front_016.png front_016_z.png
+front 17 front_017.png front_017_z.png
+front 18 front_018.png front_018_z.png
+front 19 front_019.png front_019_z.png
+front 20 front_020.png front_020_z.png
+front 21 front_021.png front_021_z.png
+front 22 front_022.png front_022_z.png
+front 23 front_023.png front_023_z.png
+front 24 front_024.png front_024_z.png
+front 25 front_025.png front_025_z.png
+front 26 front_026.png front_026_z.png
+front 27 front_027.png front_027_z.png
+front 28 front_028.png front_028_z.png
+front 29 front_029.png front_029_z.png
+front 30 front_030.png front_030_z.png
+front 31 front_031.png front_031_z.png
+front 32 front_032.png front_032_z.png
+front 33 front_033.png front_033_z.png
+front 34 front_034.png front_034_z.png
+front 35 front_035.png front_035_z.png
+front 36 front_036.png front_036_z.png
+front 37 front_037.png front_037_z.png
+front 38 front_038.png front_038_z.png
+front 39 front_039.png front_039_z.png
+front 40 front_040.png front_040_z.png
+front 41 front_041.png front_041_z.png
+front 42 front_042.png front_042_z.png
+front 43 front_043.png front_043_z.png
+front 44 front_044.png front_044_z.png
+front 45 front_045.png front_045_z.png
+front 46 front_046.png front_046_z.png
+front 47 front_047.png front_047_z.png
+front 48 front_048.png front_048_z.png
+front 49 front_049.png front_049_z.png
+front 50 front_050.png front_050_z.png
+front 51 front_051.png front_051_z.png
+front 52 front_052.png front_052_z.png
+front 53 front_053.png front_053_z.png
+front 54 front_054.png front_054_z.png
+front 55 front_055.png front_055_z.png
+front 56 front_056.png front_056_z.png
+front 57 front_057.png front_057_z.png
+front 58 front_058.png front_058_z.png
+front 59 front_059.png front_059_z.png
+front 60 front_060.png front_060_z.png
+front 61 front_061.png front_061_z.png
+front 62 front_062.png front_062_z.png
+front 63 front_063.png front_063_z.png
+front 64 front_064.png front_064_z.png
+front 65 front_065.png front_065_z.png
+front 66 front_066.png front_066_z.png
+front 67 front_067.png front_067_z.png
+front 68 front_068.png front_068_z.png
+front 69 front_069.png front_069_z.png
+front 70 front_070.png front_070_z.png
+front 71 front_071.png front_071_z.png
+front 72 front_072.png front_072_z.png
+front 73 front_073.png front_073_z.png
+front 74 front_074.png front_074_z.png
+front 75 front_075.png front_075_z.png
+front 76 front_076.png front_076_z.png
+front 77 front_077.png front_077_z.png
+front 78 front_078.png front_078_z.png
+front 79 front_079.png front_079_z.png
+front 80 front_080.png front_080_z.png
+front 81 front_081.png front_081_z.png
+front 82 front_082.png front_082_z.png
+hairpart 1 0 part_01_00.png part_01_00_z.png
+hairpart 1 1 part_01_01.png part_01_01_z.png
+hairpart 1 2 part_01_02.png part_01_02_z.png
+hairpart 1 3 part_01_03.png part_01_03_z.png
+hairpart 1 4 part_01_04.png part_01_04_z.png
+hairpart 1 5 part_01_05.png part_01_05_z.png
+hairpart 1 6 part_01_06.png part_01_06_z.png
+hairpart 1 7 part_01_07.png part_01_07_z.png
+hairpart 2 0 part_02_00.png part_02_00_z.png
+hairpart 2 1 part_02_01.png part_02_01_z.png
+hairpart 2 2 part_02_02.png part_02_02_z.png
+hairpart 2 3 part_02_03.png part_02_03_z.png
+hairpart 3 0 part_03_00.png part_03_00_z.png
+hairpart 3 1 part_03_01.png part_03_01_z.png
+hairpart 3 2 part_03_02.png part_03_02_z.png
+hairpart 3 3 part_03_03.png part_03_03_z.png
+hairpart 4 0 part_04_00.png part_04_00_z.png
+hairpart 4 1 part_04_01.png part_04_01_z.png
+hairpart 4 2 part_04_02.png part_04_02_z.png
+hairpart 4 3 part_04_03.png part_04_03_z.png
+hairpart 4 4 part_04_04.png part_04_04_z.png
+hairpart 4 5 part_04_05.png part_04_05_z.png
+hairpart 4 6 part_04_06.png part_04_06_z.png
+hairpart 4 7 part_04_07.png part_04_07_z.png
+hairpart 4 8 part_04_08.png part_04_08_z.png
+hairpart 4 9 part_04_09.png part_04_09_z.png
+hairpart 4 10 part_04_10.png part_04_10_z.png
+hairpart 4 11 part_04_11.png part_04_11_z.png
+hairpart 5 0 part_05_00.png part_05_00_z.png
+hairpart 5 1 part_05_01.png part_05_01_z.png
+hairpart 5 2 part_05_02.png part_05_02_z.png
+hairpart 5 3 part_05_03.png part_05_03_z.png
+hairpart 5 4 part_05_04.png part_05_04_z.png
+hairpart 5 5 part_05_05.png part_05_05_z.png
+hairpart 5 6 part_05_06.png part_05_06_z.png
+hairpart 5 7 part_05_07.png part_05_07_z.png
+hairpart 5 8 part_05_08.png part_05_08_z.png
+hairpart 5 9 part_05_09.png part_05_09_z.png
+hairpart 5 10 part_05_10.png part_05_10_z.png
+hairpart 5 11 part_05_11.png part_05_11_z.png
+hairpart 6 0 part_06_00.png part_06_00_z.png
+hairpart 6 1 part_06_01.png part_06_01_z.png
+hairpart 6 2 part_06_02.png part_06_02_z.png
+hairpart 6 3 part_06_03.png part_06_03_z.png
+hairpart 6 4 part_06_04.png part_06_04_z.png
+hairpart 6 5 part_06_05.png part_06_05_z.png
+hairpart 6 6 part_06_06.png part_06_06_z.png
+hairpart 6 7 part_06_07.png part_06_07_z.png
+hairpart 6 8 part_06_08.png part_06_08_z.png
+hairpart 6 9 part_06_09.png part_06_09_z.png
+hairpart 6 10 part_06_10.png part_06_10_z.png
+hairpart 6 11 part_06_11.png part_06_11_z.png
+hairpart 7 0 part_07_00.png part_07_00_z.png
+hairpart 7 1 part_07_01.png part_07_01_z.png
+hairpart 7 2 part_07_02.png part_07_02_z.png
+hairpart 7 3 part_07_03.png part_07_03_z.png
+hairpart 8 4 part_08_04.png part_08_04_z.png
+hairpart 8 5 part_08_05.png part_08_05_z.png
+hairpart 8 6 part_08_06.png part_08_06_z.png
+hairpart 8 7 part_08_07.png part_08_07_z.png
+hairpart 9 0 part_09_00.png part_09_00_z.png
+hairpart 9 1 part_09_01.png part_09_01_z.png
+hairpart 9 2 part_09_02.png part_09_02_z.png
+hairpart 9 3 part_09_03.png part_09_03_z.png
+hairpart 10 0 part_10_00.png part_10_00_z.png
+hairpart 10 1 part_10_01.png part_10_01_z.png
+hairpart 10 2 part_10_02.png part_10_02_z.png
+hairpart 10 3 part_10_03.png part_10_03_z.png
+hairpart 11 0 part_11_00.png part_11_00_z.png
+hairpart 11 1 part_11_01.png part_11_01_z.png
+hairpart 11 2 part_11_02.png part_11_02_z.png
+hairpart 11 3 part_11_03.png part_11_03_z.png
+hairpart 12 0 part_12_00.png part_12_00_z.png
+hairpart 12 1 part_12_01.png part_12_01_z.png
+hairpart 12 2 part_12_02.png part_12_02_z.png
+hairpart 12 3 part_12_03.png part_12_03_z.png
+hairpart 13 0 part_13_00.png part_13_00_z.png
+hairpart 13 1 part_13_01.png part_13_01_z.png
+hairpart 13 2 part_13_02.png part_13_02_z.png
+hairpart 13 3 part_13_03.png part_13_03_z.png
+hairpart 14 0 part_14_00.png part_14_00_z.png
+hairpart 14 1 part_14_01.png part_14_01_z.png
+hairpart 14 2 part_14_02.png part_14_02_z.png
+hairpart 14 3 part_14_03.png part_14_03_z.png
+hairpart 14 4 part_14_04.png part_14_04_z.png
+hairpart 14 5 part_14_05.png part_14_05_z.png
+hairpart 14 6 part_14_06.png part_14_06_z.png
+hairpart 14 7 part_14_07.png part_14_07_z.png
+hairpart 15 0 part_15_00.png part_15_00_z.png
+hairpart 15 1 part_15_01.png part_15_01_z.png
+hairpart 15 2 part_15_02.png part_15_02_z.png
+hairpart 15 3 part_15_03.png part_15_03_z.png
+hairpart 15 4 part_15_04.png part_15_04_z.png
+hairpart 15 5 part_15_05.png part_15_05_z.png
+hairpart 15 6 part_15_06.png part_15_06_z.png
+hairpart 15 7 part_15_07.png part_15_07_z.png
+hairpart 15 8 part_15_08.png part_15_08_z.png
+hairpart 15 9 part_15_09.png part_15_09_z.png
+hairpart 15 10 part_15_10.png part_15_10_z.png
+hairpart 15 11 part_15_11.png part_15_11_z.png
+hairpart 16 0 part_16_00.png part_16_00_z.png
+hairpart 16 1 part_16_01.png part_16_01_z.png
+hairpart 16 2 part_16_02.png part_16_02_z.png
+hairpart 16 3 part_16_03.png part_16_03_z.png
+hairpart 16 4 part_16_04.png part_16_04_z.png
+hairpart 16 5 part_16_05.png part_16_05_z.png
+hairpart 16 6 part_16_06.png part_16_06_z.png
+hairpart 16 7 part_16_07.png part_16_07_z.png
+hairpart 16 8 part_16_08.png part_16_08_z.png
+hairpart 16 9 part_16_09.png part_16_09_z.png
+hairpart 16 10 part_16_10.png part_16_10_z.png
+hairpart 16 11 part_16_11.png part_16_11_z.png
+hairpart 17 0 part_17_00.png part_17_00_z.png
+hairpart 17 1 part_17_01.png part_17_01_z.png
+hairpart 17 2 part_17_02.png part_17_02_z.png
+hairpart 17 3 part_17_03.png part_17_03_z.png
+hairpart 17 4 part_17_04.png part_17_04_z.png
+hairpart 17 5 part_17_05.png part_17_05_z.png
+hairpart 17 6 part_17_06.png part_17_06_z.png
+hairpart 17 7 part_17_07.png part_17_07_z.png
+hairpart 18 0 part_18_00.png part_18_00_z.png
+hairpart 18 1 part_18_01.png part_18_01_z.png
+hairpart 18 2 part_18_02.png part_18_02_z.png
+hairpart 18 3 part_18_03.png part_18_03_z.png
+hairpart 18 8 part_18_08.png part_18_08_z.png
+hairpart 18 9 part_18_09.png part_18_09_z.png
+hairpart 18 10 part_18_10.png part_18_10_z.png
+hairpart 18 11 part_18_11.png part_18_11_z.png
+hairpart 19 4 part_19_04.png part_19_04_z.png
+hairpart 19 5 part_19_05.png part_19_05_z.png
+hairpart 19 6 part_19_06.png part_19_06_z.png
+hairpart 19 7 part_19_07.png part_19_07_z.png
+hairpart 20 4 part_20_04.png part_20_04_z.png
+hairpart 20 5 part_20_05.png part_20_05_z.png
+hairpart 20 6 part_20_06.png part_20_06_z.png
+hairpart 20 7 part_20_07.png part_20_07_z.png
+hairpart 21 0 part_21_00.png part_21_00_z.png
+hairpart 21 1 part_21_01.png part_21_01_z.png
+hairpart 21 2 part_21_02.png part_21_02_z.png
+hairpart 21 3 part_21_03.png part_21_03_z.png
+hairpart 21 4 part_21_04.png part_21_04_z.png
+hairpart 21 5 part_21_05.png part_21_05_z.png
+hairpart 21 6 part_21_06.png part_21_06_z.png
+hairpart 21 7 part_21_07.png part_21_07_z.png
+hairpart 22 0 part_22_00.png part_22_00_z.png
+hairpart 22 1 part_22_01.png part_22_01_z.png
+hairpart 22 2 part_22_02.png part_22_02_z.png
+hairpart 22 3 part_22_03.png part_22_03_z.png
+hairpart 22 4 part_22_04.png part_22_04_z.png
+hairpart 22 5 part_22_05.png part_22_05_z.png
+hairpart 22 6 part_22_06.png part_22_06_z.png
+hairpart 22 7 part_22_07.png part_22_07_z.png
+hairpart 23 0 part_23_00.png part_23_00_z.png
+hairpart 23 1 part_23_01.png part_23_01_z.png
+hairpart 23 2 part_23_02.png part_23_02_z.png
+hairpart 23 3 part_23_03.png part_23_03_z.png
+hairpart 23 4 part_23_04.png part_23_04_z.png
+hairpart 23 5 part_23_05.png part_23_05_z.png
+hairpart 23 6 part_23_06.png part_23_06_z.png
+hairpart 23 7 part_23_07.png part_23_07_z.png
+hairpart 23 8 part_23_08.png part_23_08_z.png
+hairpart 23 9 part_23_09.png part_23_09_z.png
+hairpart 23 10 part_23_10.png part_23_10_z.png
+hairpart 23 11 part_23_11.png part_23_11_z.png
+hairpart 24 0 part_24_00.png part_24_00_z.png
+hairpart 24 1 part_24_01.png part_24_01_z.png
+hairpart 24 2 part_24_02.png part_24_02_z.png
+hairpart 24 3 part_24_03.png part_24_03_z.png
+hairpart 25 0 part_25_00.png part_25_00_z.png
+hairpart 25 1 part_25_01.png part_25_01_z.png
+hairpart 25 2 part_25_02.png part_25_02_z.png
+hairpart 25 3 part_25_03.png part_25_03_z.png
+ear 1 ear_1.png ear_1_z.png
+ear 2 ear_2.png ear_2_z.png
+ear 3 ear_3.png ear_3_z.png
+ear 4 ear_4.png ear_4_z.png
+nose 0 nose_00.png
+nose 1 nose_01.png
+nose 2 nose_02.png
+nose 3 nose_03.png
+nose 4 nose_04.png
+nose 5 nose_05.png
+nose 6 nose_06.png
+nose 7 nose_07.png
+nose 8 nose_08.png
+nose 9 nose_09.png
+nose 10 nose_10.png
+nose 11 nose_11.png
+nose 12 nose_12.png
+nose 13 nose_13.png
+nose 14 nose_14.png
+nose 15 nose_15.png
+nose 16 nose_16.png
+nose 17 nose_17.png
+nose 20 nose_20.png
+nose 21 nose_21.png
+nose 22 nose_22.png
+nose 23 nose_23.png
+nose 24 nose_24.png
+nose 25 nose_25.png
+nose 26 nose_26.png
+nose 27 nose_27.png
+nose 28 nose_28.png
+nose 29 nose_29.png
+nose 30 nose_30.png
+nose 31 nose_31.png
+nose 32 nose_32.png
+beard 1 beard_01.png beard_01_z.png
+beard 2 beard_02.png beard_02_z.png
+beard 3 beard_03.png beard_03_z.png
+beard 4 beard_04.png beard_04_z.png
+beard 5 beard_05.png beard_05_z.png
+beard 6 beard_06.png beard_06_z.png
+beard 7 beard_07.png beard_07_z.png
+beard 8 beard_08.png beard_08_z.png
+beard 9 beard_09.png beard_09_z.png
+beard 10 beard_10.png beard_10_z.png
+beard 11 beard_11.png beard_11_z.png
+beard 12 beard_12.png beard_12_z.png
+beard 13 beard_13.png beard_13_z.png
+glass 1 glass_01.png lens_01.png
+glass 2 glass_02.png lens_02.png
+glass 3 glass_03.png lens_03.png
+glass 4 glass_04.png lens_04.png
+glass 5 glass_05.png lens_05.png
+glass 6 glass_06.png lens_06.png
+glass 7 glass_07.png lens_07.png
+glass 8 glass_08.png lens_08.png
+glass 9 glass_09.png lens_09.png
+glass 10 glass_10.png lens_10.png
+glass 11 glass_11.png lens_11.png
+glass 12 glass_12.png lens_12.png
+glass 13 glass_13.png lens_13.png
+glass 14 glass_14.png lens_14.png
+glass 15 glass_15.png lens_15.png
+glass 16 glass_16.png lens_16.png
+glass 17 glass_17.png lens_17.png
+glass 18 glass_18.png lens_18.png
+glass 19 glass_19.png lens_19.png

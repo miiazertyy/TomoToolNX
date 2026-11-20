@@ -24,6 +24,47 @@ enum class Id {
     Redo,       // curved arrow, right (mirror of Undo)
     Download,   // arrow into tray (PNG export)
     Funnel,     // category filter
+    // 2.0
+    Home,       // the Home tab
+    Image,      // textures
+    Users,      // Miis
+    User,       // player
+    Map,        // island map
+    Globe,      // "in your browser"
+    Wifi,       // network / address
+    Usb,        // MTP over USB
+    Phone,      // edit from a phone
+    Check,      // done / saved / on
+    Close,      // dismiss / off
+    Plus,       // new
+    Alert,      // warning triangle
+    Info,       // "i" in a circle
+    Trash,      // delete
+    Upload,     // arrow out of tray (import / send)
+    ChevronLeft,
+    ChevronRight,
+    ChevronDown,
+    Palette,    // theme
+    Clock,      // backups / history
+    Folder,     // file browser
+    Sparkle,    // island generator
+    // 2.0, round 2
+    Speaker,    // sounds
+    Exit,       // leave the island
+    Sliders,    // settings categories, adjust
+    Grid,       // a grid of things
+    Heart,      // relations
+    Chat,       // words
+    Smile,      // personality
+    // round 3
+    RotateLeft, // a turning arrow, counter-clockwise
+    RotateRight,// the same, clockwise
+    FlipH,      // mirror left to right
+    FlipV,      // mirror top to bottom
+    List,       // rows: a menu seen as a list
+    PanelClose, // a window with its side panel, ‹: fold the sidebar
+    PanelOpen,  // the same, ›: open it again
+    Count       // not an icon: "none"
 };
 
 // Bind the renderer that textures will be created on. Call once after

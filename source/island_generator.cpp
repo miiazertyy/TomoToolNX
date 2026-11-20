@@ -170,8 +170,9 @@ static inline uint32_t xorshift32(uint32_t& state) {
 // Locate an entry by hash, mutable. SaveEditor::Entry is public so we mutate
 // the payload bytes directly when SaveEditor's index-bounded setters won't
 // grow arrays.
+// Every caller writes the entry it asks for: the undo history keeps it first.
 static SaveEditor::Entry* FindEntryMut(SaveEditor::SavFile& s, uint32_t hash) {
-    for (auto& e : s.entries) if (e.hash == hash) return &e;
+    for (auto& e : s.entries) if (e.hash == hash) { SaveEditor::Touched(s, e); return &e; }
     return nullptr;
 }
 
@@ -229,12 +230,12 @@ static void RewriteBoolArray(SaveEditor::SavFile& s, uint32_t hash,
 
 static SaveEditor::Entry* FindFloorEntry(SaveEditor::SavFile& s) {
     for (auto& e : s.entries) {
-        if (e.hash == H::FloorHash()) return &e;
+        if (e.hash == H::FloorHash()) { SaveEditor::Touched(s, e); return &e; }
     }
     return nullptr;
 }
 
-static const SaveEditor::Entry* FindFloorEntry(const SaveEditor::SavFile& s) {
+[[maybe_unused]] static const SaveEditor::Entry* FindFloorEntry(const SaveEditor::SavFile& s) {
     for (auto& e : s.entries) {
         if (e.hash == H::FloorHash()) return &e;
     }
@@ -1801,7 +1802,7 @@ int RandomizeMiiOutfits(SaveEditor::SavFile& mii, uint32_t seed) {
     const uint32_t hHeadwear  = SaveEditor::Hash("Mii.MiiMisc.ClothInfo.Headwear.KeyHash");
     const uint32_t hAccessory = SaveEditor::Hash("Mii.MiiMisc.ClothInfo.Accessory.KeyHash");
     const uint32_t hAll       = SaveEditor::Hash("Mii.MiiMisc.ClothInfo.All.KeyHash");
-    const uint32_t hGender    = SaveEditor::Hash("Mii.MiiBody.AppearanceParam.Gender");
+    const uint32_t hGender    = SaveEditor::Hash("Mii.MiiMisc.FaceInfo.Gender");   // was a key that does not exist
     const uint32_t hName      = H::MiiName();
 
     const uint32_t FEMALE_ENUM_HASH = SaveEditor::Hash("Female");

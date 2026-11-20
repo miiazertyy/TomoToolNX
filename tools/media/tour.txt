@@ -1,0 +1,162 @@
+# README clips for TomoToolNX 2.0 (ui_tour.h): copy next to the .nro with
+# debug_ui=1 in config.ini. Made for the test island (the first user, ten or
+# so textures); each clip starts just before its page opens.
+wait 4
+
+# The start screen arriving.
+record opening
+wait 3.6
+stop
+
+# Open the first user's island and skip the backup question.
+press A
+wait 7
+press RIGHT
+wait 0.8
+press A
+wait 9
+
+# Down the sidebar: Home, Miis, Textures, Player, Map.
+record places
+wait 1.2
+press R
+wait 1.3
+press R
+wait 1.3
+press R
+wait 1.3
+press R
+wait 1.8
+stop
+
+# The map: the island over the whole tab, explored, closer, an object
+# picked up and put back where it was.
+record map
+wait 1.4
+press A
+wait 0.7
+hold RIGHT 0.8
+hold DOWN 0.5
+wait 0.4
+press ZR
+wait 1.0
+press Y
+wait 1.0
+press A
+wait 0.5
+hold LEFT 0.35
+wait 0.4
+press B
+wait 0.6
+press ZL
+wait 0.9
+press B
+wait 1.0
+stop
+
+# A Mii's pages, then every Mii at once.
+press L
+wait 1
+press L
+wait 1
+press L
+wait 2
+record miis
+press ZR
+wait 1.1
+press ZR
+wait 1.1
+press ZR
+wait 1.1
+press Y
+wait 1.6
+press RIGHT
+wait 0.4
+press RIGHT
+wait 0.4
+press DOWN
+wait 0.6
+press A
+wait 1.4
+stop
+press ZL
+wait 0.3
+press ZL
+wait 0.3
+press ZL
+wait 1
+
+# Textures: the grid, every texture at once, one opened.
+record textures
+press R
+wait 1.6
+press RIGHT
+wait 0.5
+press RIGHT
+wait 0.6
+press Y
+wait 1.6
+press RIGHT
+wait 0.4
+press DOWN
+wait 0.6
+press A
+wait 1.8
+press B
+wait 1.2
+stop
+
+# Backups.
+press R
+wait 1
+press R
+wait 1.5
+record backups
+press R
+wait 2.2
+press DOWN
+wait 0.9
+press DOWN
+wait 0.9
+press A
+wait 1.4
+press B
+wait 0.8
+stop
+
+# Phone & PC: the QR code, then big.
+record phone
+press R
+wait 1.8
+press DOWN
+wait 0.5
+press DOWN
+wait 0.9
+press A
+wait 1.8
+press B
+wait 0.8
+stop
+
+# Settings: themes and wallpapers.
+record themes
+press R
+wait 1.6
+press DOWN
+wait 0.7
+press RIGHT
+wait 1.1
+press RIGHT
+wait 1.1
+press RIGHT
+wait 1.1
+press RIGHT
+wait 1.1
+press DOWN
+wait 0.6
+press RIGHT
+wait 1.1
+press RIGHT
+wait 1.2
+stop
+quit

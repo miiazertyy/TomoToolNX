@@ -1,7 +1,11 @@
 // backup.cpp – no std::filesystem (-fno-exceptions incompatible)
 #include "backup.h"
+#include "mii_manager.h"
+#include "save_editor.h"
 #include <string>
 #include <vector>
+#include <map>
+#include <set>
 #include <algorithm>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -277,6 +281,10 @@ namespace BackupService {
 
 void StartFullBackup(const std::string& saveMountRoot,
                      const std::string& uidTag) {
+    // A previous backup's thread is joined first: starting a second backup in
+    // one session (Home has a button for it) used to overwrite the handle of
+    // the first one without ever closing it.
+    Cleanup();
     mutexInit(&s_mutex);
     s_progress     = 0.0f;
     s_done         = false;
@@ -284,8 +292,17 @@ void StartFullBackup(const std::string& saveMountRoot,
     s_saveRoot     = saveMountRoot;
     s_backupParent = BackupRootFor(uidTag);
     s_backupDest   = MakeTimestampedBackupPath(uidTag);
-    threadCreate(&s_thread, BackupThreadFunc, nullptr, nullptr, 256*1024, 0x2C, -2);
-    threadStart(&s_thread);
+    if (R_FAILED(threadCreate(&s_thread, BackupThreadFunc, nullptr, nullptr, 256*1024, 0x2C, -2))) {
+        s_error = "could not start the backup thread";
+        s_done  = true;
+        return;
+    }
+    if (R_FAILED(threadStart(&s_thread))) {
+        threadClose(&s_thread);
+        s_error = "could not start the backup thread";
+        s_done  = true;
+        return;
+    }
     s_threadActive = true;
 }
 
@@ -396,6 +413,125 @@ std::string RestoreBackup(const std::string& backupPath, const std::string& save
     // lets CopyFile drain the journal mid-file so large savs don't
     // short-write into Tomodachi's 1 MiB journal cap.
     return RestoreCopyTree(backupPath, saveMountRoot, "tomodata");
+}
+
+} // namespace BackupService
+
+// ── What a backup holds ─────────────────────────────────────────────────────
+// One reader thread, started when there is something to read and ending when
+// the queue runs dry. Everything it shares with the UI sits behind sInfoMutex.
+static Mutex                                            sInfoMutex;        // zero = unlocked
+static std::map<std::string, BackupService::BackupInfo> sInfo;
+static std::vector<std::string>                         sInfoQueue;
+static std::set<std::string>                            sInfoPending;      // queued or being read
+static bool                                             sInfoRunning = false;
+static bool                                             sInfoStop = false;
+static Thread                                           sInfoThread;
+static bool                                             sInfoThreadOpen = false;  // UI thread only
+
+static void InfoWalk(const std::string& dir, BackupService::BackupInfo& info, int depth) {
+    if (depth > 6) return;
+    DIR* d = opendir(dir.c_str());
+    if (!d) return;
+    struct dirent* de;
+    while ((de = readdir(d)) != nullptr) {
+        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
+        const std::string child = dir + "/" + de->d_name;
+        struct stat st;
+        if (stat(child.c_str(), &st) != 0) continue;
+        if (S_ISDIR(st.st_mode)) InfoWalk(child, info, depth + 1);
+        else { info.bytes += (uint64_t)st.st_size; info.files++; }
+    }
+    closedir(d);
+}
+
+// Reads only: sizes, the texture files, and the two saves parsed in memory.
+static BackupService::BackupInfo InfoRead(const std::string& path) {
+    BackupService::BackupInfo info;
+    InfoWalk(path, info, 0);
+    info.textures = (int)UgcScanner::Scan(path + "/Ugc").size();
+    info.miis = MiiManager::CountMiisIn(path + "/Mii.sav");
+    SaveEditor::SavFile sav;
+    std::string err;
+    if (SaveEditor::Load(path + "/Player.sav", sav, err)) {
+        info.island = SaveEditor::GetWStr32(sav, SaveEditor::Hash("Player.IslandName"));
+        info.player = SaveEditor::GetWStr32(sav, SaveEditor::Hash("Player.Name"));
+    }
+    return info;
+}
+
+static void InfoThreadFunc(void*) {
+    for (;;) {
+        mutexLock(&sInfoMutex);
+        if (sInfoStop || sInfoQueue.empty()) { sInfoRunning = false; mutexUnlock(&sInfoMutex); return; }
+        const std::string path = sInfoQueue.front();
+        sInfoQueue.erase(sInfoQueue.begin());
+        mutexUnlock(&sInfoMutex);
+        BackupService::BackupInfo info = InfoRead(path);
+        mutexLock(&sInfoMutex);
+        // Forgotten while it was being read (deleted): leave it out.
+        if (sInfoPending.erase(path)) sInfo[path] = std::move(info);
+        mutexUnlock(&sInfoMutex);
+    }
+}
+
+namespace BackupService {
+
+void RequestInfo(const std::vector<std::string>& paths) {
+    const bool writing = s_threadActive && !BackupDone();
+    mutexLock(&sInfoMutex);
+    for (const std::string& p : paths) {
+        if (writing && p == s_backupDest) continue;
+        if (sInfo.count(p) || sInfoPending.count(p)) continue;
+        sInfoPending.insert(p);
+        sInfoQueue.push_back(p);
+    }
+    const bool start = !sInfoQueue.empty() && !sInfoRunning && !sInfoStop;
+    if (start) sInfoRunning = true;
+    mutexUnlock(&sInfoMutex);
+    if (!start) return;
+    if (sInfoThreadOpen) { threadWaitForExit(&sInfoThread); threadClose(&sInfoThread); sInfoThreadOpen = false; }
+    // A notch below the UI thread: it reads while the UI waits for the screen.
+    if (R_SUCCEEDED(threadCreate(&sInfoThread, InfoThreadFunc, nullptr, nullptr, 256 * 1024, 0x2D, -2))) {
+        if (R_SUCCEEDED(threadStart(&sInfoThread))) { sInfoThreadOpen = true; return; }
+        threadClose(&sInfoThread);
+    }
+    // No thread: drop the queue so a later call can try again.
+    mutexLock(&sInfoMutex);
+    for (const std::string& p : sInfoQueue) sInfoPending.erase(p);
+    sInfoQueue.clear();
+    sInfoRunning = false;
+    mutexUnlock(&sInfoMutex);
+}
+
+bool GetInfo(const std::string& path, BackupInfo& out) {
+    mutexLock(&sInfoMutex);
+    const auto it = sInfo.find(path);
+    const bool ok = it != sInfo.end();
+    if (ok) out = it->second;
+    mutexUnlock(&sInfoMutex);
+    return ok;
+}
+
+void ForgetInfo(const std::string& path) {
+    mutexLock(&sInfoMutex);
+    sInfo.erase(path);
+    sInfoPending.erase(path);
+    sInfoQueue.erase(std::remove(sInfoQueue.begin(), sInfoQueue.end(), path), sInfoQueue.end());
+    mutexUnlock(&sInfoMutex);
+}
+
+void StopInfo() {
+    mutexLock(&sInfoMutex);
+    sInfoStop = true;
+    sInfoQueue.clear();
+    sInfoPending.clear();
+    mutexUnlock(&sInfoMutex);
+    if (sInfoThreadOpen) { threadWaitForExit(&sInfoThread); threadClose(&sInfoThread); sInfoThreadOpen = false; }
+    mutexLock(&sInfoMutex);
+    sInfoStop = false;
+    sInfoRunning = false;
+    mutexUnlock(&sInfoMutex);
 }
 
 // ── Save bundles ────────────────────────────────────────────────────────────

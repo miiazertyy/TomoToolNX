@@ -1,0 +1,113 @@
+name: Build
+
+# Builds TomoToolNX.nro on every push and pull request, and keeps it as a
+# downloadable artifact. Pushing a version tag (2.0.1 or v2.0.1) builds that
+# version and publishes it as a release with the NRO attached; the app's
+# updater finds it from there and installs it. The tag is the only place the
+# version is written: there is no number to bump in the code.
+
+on:
+  push:
+    branches: ['**']
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build NRO
+    runs-on: ubuntu-latest
+    # Official devkitPro image: devkitA64, libnx and every Switch portlib.
+    container:
+      image: devkitpro/devkita64:latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          # The Makefile compresses the seed saves with zstd, which the image
+          # does not ship. Its apt lists are stripped, so refresh them first.
+          if ! command -v zstd >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y --no-install-recommends zstd
+          fi
+          # Already part of the image; this is a no-op unless one goes missing.
+          dkp-pacman -S --needed --noconfirm \
+            switch-sdl2 switch-sdl2_image switch-sdl2_ttf switch-libwebp \
+            switch-freetype switch-harfbuzz switch-zstd \
+            switch-curl switch-mbedtls \
+            switch-libopus switch-opusfile switch-libogg
+
+      # The tag is the version: v2.0.1 and 2.0.1 both build 2.0.1, stamped into
+      # the app (About, the update check) and the NACP (what hbmenu shows).
+      # Any other build is honestly labelled a development build.
+      - name: Stamp the version
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          version="0.0.0-dev"
+          if [ "$REF_TYPE" = "tag" ]; then
+            version="${REF_NAME#v}"
+            version="${version#V}"
+          fi
+          case "$version" in
+            [0-9]*.[0-9]*) ;;
+            *) version="0.0.0-dev" ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building TomoToolNX $version"
+
+      - name: Build
+        run: make -j"$(nproc)" APP_VERSION="${{ steps.version.outputs.version }}"
+
+      - name: Upload NRO
+        uses: actions/upload-artifact@v4
+        with:
+          name: TomoToolNX-${{ steps.version.outputs.version }}
+          path: TomoToolNX.nro
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download NRO
+        uses: actions/download-artifact@v4
+        with:
+          name: TomoToolNX-${{ needs.build.outputs.version }}
+
+      # Published straight away: the app's updater only sees published
+      # releases, and GitHub adds the file's SHA-256, which the updater checks
+      # before installing. Pushing the same tag again replaces the file.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" TomoToolNX.nro --clobber
+          else
+            gh release create "$TAG" TomoToolNX.nro \
+              --title "v$VERSION" \
+              --generate-notes
+          fi
